@@ -63,5 +63,3 @@ export const shell = {
     draft: "Draft",
     englishOnly: "This page is in English.",
 };
-
-export type ShellCopy = typeof shell;

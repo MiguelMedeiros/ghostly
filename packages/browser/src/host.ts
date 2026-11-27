@@ -80,11 +80,12 @@ export interface BrowserHost {
   requestLocalAccess(originPattern: string, origin: string): Promise<boolean>;
   /**
    * Runs `task` (the share's `addService`, right after `requestLocalAccess` said yes) while no `forgetLocalAccess` or
-   * `releaseUnusedLocalAccess`, from this page or another, can give `originPattern` back. Resolves false without running
-   * it when the access went back between the two: ask again. Left out where nothing gives access back under a share
-   * (Desktop keeps one list per profile, in Rust).
+   * `releaseUnusedLocalAccess`, from this page or another, can give `originPattern` back or take `origin` off the
+   * allowed addresses; `origin` is allowed again there, next to its app. Resolves false without running it when the
+   * access went back between the two: ask again. Left out where nothing gives access back under a share (Desktop keeps
+   * one list per profile, in Rust).
    */
-  withLocalAccess?(originPattern: string, task: () => Promise<void>): Promise<boolean>;
+  withLocalAccess?(originPattern: string, origin: string, task: () => Promise<void>): Promise<boolean>;
   /**
    * May the peer reach `origin` for a contact now? The extension: only an address the person allowed in this browser
    * for this profile (not one that came with a restored or moved profile). Left out where nothing else is asked.
@@ -140,7 +141,7 @@ export interface BrowserHost {
    * carried neither files nor text (a webview that hides them from the page). Left out where the page
    * sees them in the paste event (a browser, WebKit on macOS).
    */
-  readClipboardFiles?(): Promise<ClipboardFile[]>;
+  readClipboardFiles?(): Promise<ClipboardFiles>;
   /**
    * Copies a secret (an invite, a device's link, a group's link, ecash) marked as sensitive: the Android app, whose
    * system shows every copy in a preview and whose keyboards keep a history of them, but neither for a sensitive one.
@@ -246,3 +247,9 @@ export interface ClipboardFile {
   read(offset: number, length: number): Promise<Uint8Array>;
   done?(): void;
 }
+
+/**
+ * What a paste or a drop the platform read brought, and the names of the files it left out: past the most one brings
+ * (`pastLimit`), and not files or not seen (`leftOut`: a folder, one gone meanwhile).
+ */
+export type ClipboardFiles = ClipboardFile[] & { pastLimit?: string[]; leftOut?: string[] };

@@ -61,7 +61,7 @@ export function EditBar({ snippet, onCancel }: { snippet: string; onCancel: () =
       className="composer-quote mb-2 flex items-stretch gap-1 overflow-hidden rounded-lg bg-surface-alt animate-fade-in">
       <span className="min-w-0 flex-1"><QuoteBody name={t("chat.edit.editing")} snippet={snippet} mine /></span>
       <button type="button" data-testid="composer-edit-cancel" onClick={onCancel} aria-label={t("chat.edit.cancel")} title={t("chat.edit.cancel")}
-        className="shrink-0 w-9 flex items-center justify-center text-text-muted hover:text-text-primary cursor-pointer bg-transparent border-0 text-lg leading-none">
+        className="shrink-0 w-9 max-md:w-[44px] flex items-center justify-center text-text-muted hover:text-text-primary cursor-pointer bg-transparent border-0 text-lg leading-none">
         &times;
       </button>
     </div>
@@ -76,7 +76,7 @@ export function ReplyBar({ name, snippet, mine, member, onCancel }: { name?: str
       className="composer-quote mb-2 flex items-stretch gap-1 overflow-hidden rounded-lg bg-surface-alt animate-fade-in">
       <span className="min-w-0 flex-1"><QuoteBody name={name} snippet={snippet} mine={mine} member={member} /></span>
       <button type="button" data-testid="composer-reply-cancel" onClick={onCancel} aria-label={t("chat.reply.cancel")} title={t("chat.reply.cancel")}
-        className="shrink-0 w-9 flex items-center justify-center text-text-muted hover:text-text-primary cursor-pointer bg-transparent border-0 text-lg leading-none">
+        className="shrink-0 w-9 max-md:w-[44px] flex items-center justify-center text-text-muted hover:text-text-primary cursor-pointer bg-transparent border-0 text-lg leading-none">
         &times;
       </button>
     </div>

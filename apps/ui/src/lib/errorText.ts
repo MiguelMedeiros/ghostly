@@ -276,6 +276,8 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app cannot take calls", "calls.contactCannot"),
   exact("Your contact needs an updated Ghostly for calls", "calls.contactOutdated"),
   exact("Calls are not available in this app", "calls.unavailableHere"),
+  // engine/node.ts `viewOf`: a blocked contact's chat (`setContactBlocked`).
+  exact("You blocked this contact. Unblock them to call", "calls.contactBlocked", "calls.contactBlockedNext"),
   // In a call: why a screen share failed (packages/react useWebRTC.ts `screenShareErrorMessage`), the call window's
   // alert, and why the share button is off (`screenShareUnavailable`; apps/ui/src/desktop/nativeCalls.ts on Linux).
   exact("Screen sharing is blocked. Allow screen recording for this app in your system's privacy settings.", "calls.share.blocked", "calls.share.blockedNext"),
@@ -317,6 +319,8 @@ const RULES: readonly Rule[] = [
   exact("No message to forward", "errors.chat.forwardNone", "errors.chat.forwardNoneNext"),
   // A chat made or joined that the storage had no room for (lib/storage.ts ensureSession).
   exact("There is no room left on this device for a new chat", "errors.chat.noRoom", "errors.chat.noRoomNext"),
+  // An invite whose own seed is another contact's chat here (lib/storage.ts ensureSession): no real invite reuses one.
+  exact("This invite's keys belong to another chat on this device", "join.invalid"),
   exact("Someone else joined with this invite first. Ask your contact for a new one.", "pairing.reason.taken"),
   exact("Chat has been burned", "chat.compat.burned"),
 
@@ -646,6 +650,8 @@ const RULES: readonly Rule[] = [
   exact("This is not a Ghostly backup", "errors.profile.notGhostlyBackup"),
   { match: /^This backup(?: is damaged: it was changed or cut short|'s database is malformed)$/, key: "errors.profile.damagedBackup", next: "errors.profile.damagedBackupNext" },
   exact("This backup is too large to restore", "errors.profile.backupTooLarge"),
+  exact("A record of this profile is too large for a backup", "errors.profile.backupRecordTooLarge"),
+  exact("This profile's data is too dense for a backup", "errors.profile.backupTooDense"),
   exact("This backup comes from a newer Ghostly; update to restore it", "errors.profile.newerBackup"),
   { match: /^Unsupported backup (?:encryption|format)$/, key: "errors.profile.unsupportedBackup" },
   exact("Use at least 12 characters for the backup passphrase", "errors.profile.shortPassphrase"),
@@ -658,6 +664,7 @@ const RULES: readonly Rule[] = [
   // the ⓘ. "Made by another key" stays in the line: it is why the proof is refused.
   { match: /^This signature was made by another key(?: \([0-9A-F]+\))?, not the public key given\.$/, key: "errors.proof.otherKey", next: "errors.proof.otherKeyPgpNext", detail: true },
   { match: /^That signature was made by \S+, not the key you entered \([^)]*\)$/, key: "errors.proof.otherKey", next: "errors.proof.otherKeySshNext", detail: true },
+  exact("The statement file was saved as UTF-16 or with a byte order mark: save it as UTF-8 and sign it again", "errors.proof.fileEncoding", "errors.proof.fileEncodingNext"),
   { match: /^No Ghostly TXT record at \S+(?: \(DNS changes can take a few minutes\))?$/, key: "errors.proof.noDnsRecord", next: "errors.proof.noDnsRecordNext", detail: true },
   { match: /^https:\/\/\S+ was not found$/, key: "errors.proof.fileNotFound", detail: true },
   { match: /^https:\/\/\S+ was not found: it was deleted, or not uploaded yet$/, key: "errors.proof.fileNotFound", next: "errors.proof.fileNotFoundNext", detail: true },
@@ -708,6 +715,8 @@ const RULES: readonly Rule[] = [
   exact("This Pubky key has no records on the Pkarr relays", "errors.proof.pubkyNoRecords"),
   exact("The homeserver of this Pubky key has no records on the Pkarr relays", "errors.proof.pubkyHomeserverNoRecords"),
   exact("This Pubky key names no homeserver", "errors.proof.pubkyNoHomeserver"),
+  // Add's field (core pubkyProofs.ts normalizePubkyKey).
+  exact("That is not a Pubky key: 52 characters, like the one Pubky Ring shows", "errors.proof.pubkyNotKey", "errors.proof.pubkyNotKeyNext"),
   { match: /^Signed by another (?:Nostr|SSH) key$/, key: "errors.proof.otherKey" },
   exact("Invalid Nostr signature", "errors.proof.badSignature"),
   exact("The evidence is for another identity", "errors.proof.otherIdentity"),
@@ -757,6 +766,8 @@ const RULES: readonly Rule[] = [
   exact("Use a domain name, not an IP address", "errors.proof.domainNotIp"),
   exact("That name only works on private networks", "errors.proof.domainPrivate"),
   exact("Enter a Bitcoin address", "errors.proof.btcEnterAddress"),
+  // The address decoder's own refusal (core bitcoinScript.ts), which the provider passes on.
+  { match: /^Not a Bitcoin address(?: \(bad checksum\?\))?$/, key: "errors.proof.btcNotAddress", next: "errors.proof.btcNotAddressNext" },
   { match: /^Ghostly can check proofs for single-key addresses only \(.+\), not multisig or script addresses$/, key: "errors.proof.btcSingleKey" },
   exact("Paste the signature your wallet made", "errors.proof.btcPaste"),
   exact("That is not a Bitcoin message signature: paste the whole signature, as the wallet shows it", "errors.proof.btcNotSignature", "errors.proof.btcNotSignatureNext"),

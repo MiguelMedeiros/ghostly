@@ -6,6 +6,7 @@ import { store, STORES, transact, wrap } from "../../shared/idb";
 import type { WalletMode } from "../../shared/mints";
 import { fedimintDatabase, loadFedimintSdk, type FederationInfo, type FedimintClient, type FedimintOperation, type FedimintSdk, type RedeemState, type SpendState } from "./fedimintSdk";
 import { ModeChanged, ModeGate, WrongNetworkError } from "./modeGate";
+import { AskBackoff } from "../askBackoff";
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
 
 /**
@@ -65,6 +66,15 @@ export const fedimintTiming = { pollMs: 10_000 };
 /** Notes nobody redeemed come back by themselves after this (the SDK's refund timer), whatever happens to the chat. */
 export const NOTES_REFUND_SECS = 7 * 24 * 60 * 60;
 const MAX_SATS = 10_000_000;
+/** A federation that could not be opened is tried again after this. */
+const RETRY_MS = 30_000;
+/**
+ * A federation that still cannot be opened (a restored one whose guardians do not answer its recovery join, the device
+ * offline) is tried twice as late after each failure, up to this (`AskBackoff`, as a USDT or Ark wallet's server). At
+ * the fixed 30 s it was joined again 120 times an hour for as long as the app ran. Opening it, and the app coming back
+ * (`wake`) or asked to start again (`ensureReady`), go back to 30 s.
+ */
+export const FEDIMINT_SLOW_MS = 5 * 60_000;
 export const fedimintMode = (network: BitcoinNetwork): WalletMode => network === "bitcoin" ? "mainnet" : "testnet";
 const key = (mode: WalletMode) => `fedimintWallet-${mode}`;
 const sats = (msats: number) => Math.floor(msats / 1000);
@@ -115,12 +125,16 @@ export class FedimintWallet {
   private saved?: StoredFedimint;
   private readonly clients = new Map<string, FedimintClient>();
   private readonly opening = new Map<string, Promise<FedimintClient>>();
+  /** Per database, a restored federation's recovery join until it settles, its failure's removal included (`joinAgain`). */
+  private readonly joins = new Map<string, Promise<void>>();
   private readonly problems = new Map<string, string>();
   private readonly balances = new Map<string, number>();
   private readonly unsubscribe = new Map<string, () => void>();
   private history: FedimintTx[] = [];
   private readonly watching = new Set<string>();
   private retry?: ReturnType<typeof setTimeout>;
+  /** Per federation id: when one that failed to open is tried again. */
+  private readonly retries = new AskBackoff(RETRY_MS, FEDIMINT_SLOW_MS);
   private stopped = false;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly gate = new ModeGate();
@@ -133,17 +147,37 @@ export class FedimintWallet {
   async start() { this.saved = await this.load(this.network); this.render(); }
   private async load(mode: WalletMode) { return wrap<StoredFedimint | undefined>((await store(STORES.settings, "readonly")).get(key(mode))); }
 
-  /** Opens every federation of this network. One that does not answer is tried again, the others work meanwhile. */
+  /**
+   * Opens every federation of this network now. One that does not answer is tried again, later after each failure
+   * (`retries`), the others work meanwhile.
+   */
   ensureReady(): Promise<void> {
+    this.retries.keepOnly(new Set());
+    return this.openDue();
+  }
+  /** The app is back (in front, online, the computer woke), or asked to read again: a federation waiting to be tried again is tried now. */
+  wake() {
+    if (this.stopped || this.retry === undefined) return;
+    void this.ensureReady();
+  }
+  private holdRetries() { clearTimeout(this.retry); this.retry = undefined; }
+
+  /** Opens the federations not open whose time came; the next try waits for the first of the others. */
+  private openDue(): Promise<void> {
     // At home on another device (WISP 06 § Wallets that stay home): never opened here.
     if (awayFrom(`fedimint:${this.network}`) !== undefined) return Promise.resolve();
-    clearTimeout(this.retry);
+    this.holdRetries();
     if (this.stopped) return Promise.resolve();
     // No good turn read under a minute old: nothing opens now, and it is tried again (WISP 06 § Wallets).
-    return requireTurn().then(() => Promise.all((this.saved?.federations ?? []).map((f) => this.open(f).catch(() => undefined))), () => undefined).then(() => {
+    return requireTurn().then(() => Promise.all((this.saved?.federations ?? []).filter((f) => this.retries.due(f.id, Date.now())).map((f) => this.open(f).catch(() => undefined))), () => undefined).then(() => {
       if (this.stopped) return;
       void this.refresh();
-      if (this.saved?.federations.some((f) => !this.clients.has(f.id))) this.retry = setTimeout(() => void this.ensureReady(), 30_000);
+      const now = Date.now(), waiting = (this.saved?.federations ?? []).filter((f) => !this.clients.has(f.id));
+      if (!waiting.length) return;
+      // One not tried (no turn read, the mode gate gave up on it) or due again: after 30 s, as always.
+      const wait = Math.min(...waiting.map((f) => this.retries.due(f.id, now) ? RETRY_MS : this.retries.at(f.id, now) - now));
+      this.holdRetries();
+      this.retry = setTimeout(() => { this.retry = undefined; void this.openDue(); }, wait);
     });
   }
 
@@ -156,15 +190,19 @@ export class FedimintWallet {
         try {
           const mnemonic = await unsealSeed(this.saved!.seed, this.saved!.deviceKey);
           const sdk = await this.sdk();
+          // A join the mode gate gave up on still runs, and removes its database if it fails: never under a later try's.
+          // The wait itself goes through the gate, so a mode switch or a cut ends it too.
+          await this.gate.within(this.joins.get(federation.database) ?? Promise.resolve());
           // Restored from a profile backup (the records came, the client's files did not): joined again, recovering.
           const client = await this.gate.within((await sdk.exists(federation.database))
             ? sdk.open({ database: federation.database, mnemonic })
-            : sdk.join({ database: federation.database, mnemonic, invite: federation.invite, recover: true }), (c) => c.close());
+            : this.joinAgain(sdk, federation, mnemonic), (c) => c.close());
           if (client.federationId !== federation.id) { await client.close(); throw new Error("This federation's database belongs to another federation"); }
           this.attach(federation.id, client);
           return client;
         } catch (error) {
-          if (!(error instanceof ModeChanged)) { this.problems.set(federation.id, error instanceof Error ? error.message : String(error)); this.render(); }
+          // A failure, once per try (callers share it): the next one waits longer. A try the mode gate gave up on says nothing.
+          if (!(error instanceof ModeChanged)) { this.retries.missed(federation.id, Date.now()); this.problems.set(federation.id, error instanceof Error ? error.message : String(error)); this.render(); }
           throw error;
         } finally { this.opening.delete(federation.id); }
       })();
@@ -173,22 +211,41 @@ export class FedimintWallet {
     return opening;
   }
 
+  /**
+   * A restored federation's recovery join on its saved database, which `exists` said is not there. One that fails (the
+   * guardians not answering, the device offline) leaves the database it made, which never joined: it goes, as `join`
+   * removes its own, so the next try joins again. Left, every later try opened it and failed, every 30 s and at each
+   * start, and the federation's ecash never came back.
+   */
+  private joinAgain(sdk: FedimintSdk, federation: StoredFederation, mnemonic: string): Promise<FedimintClient> {
+    const { database } = federation;
+    const joining = sdk.join({ database, mnemonic, invite: federation.invite, recover: true }).catch(async (error: unknown) => {
+      await sdk.remove(database).catch(() => {});
+      throw error;
+    });
+    const settled: Promise<void> = joining.then(() => {}, () => {}).finally(() => { if (this.joins.get(database) === settled) this.joins.delete(database); });
+    this.joins.set(database, settled);
+    return joining;
+  }
+
   private attach(id: string, client: FedimintClient) {
     this.clients.set(id, client);
+    this.retries.forget(id);
     this.problems.delete(id);
     this.unsubscribe.set(id, client.onBalance((msats) => { this.balances.set(id, msats); this.render(); }));
     void this.resumeReceives();
     this.render();
   }
 
-  async stop() { this.stopped = true; clearTimeout(this.retry); this.gate.close(); await this.serial(() => this.closeAll()); }
+  async stop() { this.stopped = true; this.holdRetries(); this.gate.close(); await this.serial(() => this.closeAll()); }
   /** Joined at least one federation: a card of its own on the wallet page. */
   get configured() { return !!this.saved?.federations.length; }
   /** A join waiting on its federation gives up now, saving nothing. */
   cutShort() { this.gate.interrupt(); }
   resume() { this.gate.resume(); }
   private async closeAll() {
-    clearTimeout(this.retry);
+    this.holdRetries();
+    this.retries.keepOnly(new Set());
     for (const stop of this.unsubscribe.values()) stop();
     this.unsubscribe.clear();
     const clients = [...this.clients.values()];
@@ -327,7 +384,7 @@ export class FedimintWallet {
    */
   remove(): Promise<void> {
     this.gate.interrupt();
-    clearTimeout(this.retry);
+    this.holdRetries();
     return this.serial(async () => {
       const federations = this.saved?.federations ?? [];
       await this.closeAll();
@@ -344,6 +401,8 @@ export class FedimintWallet {
         for (const k of receives) stores[STORES.settings].delete(k);
       });
       this.saved = undefined;
+      // A try that ended while the wallet closed may have set its retry: nothing is left to open.
+      this.holdRetries();
       this.history = [];
       const sdk = federations.length ? await this.sdk().catch(() => undefined) : undefined;
       for (const f of federations) await sdk?.remove(f.database).catch(() => {});

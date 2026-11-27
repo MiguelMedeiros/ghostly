@@ -95,6 +95,8 @@ export function useProfileSwitcher(available: boolean) {
       // Not behind a modal dialog or the lock screen: the menu would open under it, out of reach.
       if (!isShortcut(e) || modalOpen()) return;
       e.preventDefault();
+      // Held down, once (appCommands.ts): each repeat closed and opened it again.
+      if (e.repeat) return;
       setOpen((was) => { if (!was) returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; return !was; });
     };
     window.addEventListener(OPEN_EVENT, show);

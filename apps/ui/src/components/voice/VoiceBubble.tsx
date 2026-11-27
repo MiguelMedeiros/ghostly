@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
+import { useFileActions } from "../../hooks/useFileActions";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
@@ -30,6 +31,7 @@ import { PROGRESS_STEP_MS, Waveform } from "./Waveform";
 import "./voice.css";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
 import { downloadFile, downloadName } from "../../lib/fileDownload";
+import { FilesStillComing } from "../chat/FilesStillComing";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
 
@@ -68,7 +70,8 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
   const [problem, setProblem] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [saveUrl, setSaveUrl] = useState<string | null>(null);
-  const [retryError, setRetryError] = useState("");
+  // Download refused for the files still coming (`heldRoom`): which ones, from which chat, show under the offer (AudioBubble).
+  const { act, actionError, setActionError, heldRoom, acceptRef } = useFileActions(platform, file.id);
   /** A resend or a request asked for, until the transfer answers by moving on. */
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(false);
@@ -76,7 +79,8 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
   useEffect(() => setBusy(false), [transfer?.state, transfer?.stalled]);
 
   const rootRef = useRef<HTMLDivElement>(null);
-  useFocusKept(rootRef);
+  // A Cancel in the list of files still coming, or the ⓘ, gone with the refusal: the focus goes to Download.
+  useFocusKept(rootRef, () => acceptRef.current);
   const playRef = useRef<HTMLButtonElement>(null);
   const waveRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -435,7 +439,7 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
   const failed = transfer?.state === "failed";
   const canRetry = canRetryFile(file, transfer, platform);
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
-  const reason = retryError ? { text: retryError } : failedReason(transfer, t);
+  const reason = actionError ? { text: actionError } : failedReason(transfer, t);
   const hint = reason ? null : groupFileHint(file, transfer, t);
   // Answered as an audio file is (AudioBubble): one the engine asks about gets Download (and Decline, but a group's:
   // WISP 503), and one on its way Pause, Resume and Cancel (not a group's).
@@ -448,11 +452,11 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
   const canPause = controls && !group && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking" && !sentWhole(transfer);
   const canCancel = controls && !group && !offered && !sentWhole(transfer);
   const moving = transfer?.state === "transferring" && !transfer.stalled && !offered;
+  /** A resend or a request: the ring turns until the transfer moves, or the request comes back without moving it. */
   const run = (action: () => Promise<unknown>) => {
-    setRetryError("");
+    setActionError("");
     setBusy(true);
-    // The ring turns until the transfer moves, or the request comes back without moving it.
-    void action().catch((error: Error) => setRetryError(problemLine(error, t))).finally(() => setBusy(false));
+    void action().catch((error: Error) => setActionError(problemLine(error, t))).finally(() => setBusy(false));
   };
   /**
    * Save on one that will not play here: the same path as Download in the message's menu, the system's save dialog
@@ -564,25 +568,26 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
       </div>
       {offered && (
         <div className="mt-1.5 px-1" data-testid="voice-offer">
-          <div className="flex items-center gap-2">
-            <button type="button" data-testid="voice-download" onClick={() => run(() => platform!.fileAction!(file.id, "accept"))}
+          <div className="flex flex-wrap items-center gap-2">
+            <button ref={acceptRef} type="button" data-testid="voice-download" onClick={() => act("accept")}
               className={`text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer`}>
               {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
             </button>
-            {!group && <button type="button" data-testid="voice-decline" onClick={() => run(() => platform!.fileAction!(file.id, "decline"))} className={pill}>{t("chat.file.decline")}</button>}
+            {!group && <button type="button" data-testid="voice-decline" onClick={() => act("decline")} className={pill}>{t("chat.file.decline")}</button>}
           </div>
           {typeof transfer.room === "number" && (
             <p className={`chat-text-media-meta m-0 mt-1 ${noRoom ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="voice-room">
               {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : withName(t("chat.media.wantsToSend", { name: NAME, size: formatFileSize(transfer.room, t) }), peerName)}
             </p>
           )}
+          {!group && (heldRoom || noRoom) && <FilesStillComing except={file.id} open={heldRoom} accept={acceptRef} />}
         </div>
       )}
       {(canPause || pausedHere || canCancel) && (
-        <div className="flex gap-1.5 mt-1 px-1">
-          {canPause && <button type="button" className={pill} data-testid="voice-pause-transfer" onClick={() => run(() => platform!.fileAction!(file.id, "pause"))}>{t("chat.file.pause")}</button>}
-          {pausedHere && <button type="button" className={pill} data-testid="voice-resume-transfer" onClick={() => run(() => platform!.fileAction!(file.id, "resume"))}>{t("chat.file.resume")}</button>}
-          {canCancel && <button type="button" className={pill} data-testid="voice-cancel" onClick={() => run(() => platform!.fileAction!(file.id, "cancel"))}>{t("common.cancel")}</button>}
+        <div className="flex flex-wrap gap-1.5 mt-1 px-1">
+          {canPause && <button type="button" className={pill} data-testid="voice-pause-transfer" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
+          {pausedHere && <button type="button" className={pill} data-testid="voice-resume-transfer" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
+          {canCancel && <button type="button" className={pill} data-testid="voice-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>}
         </div>
       )}
       {problem && (

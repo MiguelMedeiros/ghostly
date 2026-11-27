@@ -106,7 +106,8 @@ export function createAtprotoIdentityProvider(options: AtprotoIdentityOptions = 
       label: "Account (DID)",
       placeholder: "did:plc:…",
       normalize(input: string) {
-        const did = input.trim();
+        // The account's AT URI (`at://did:…`, as publicUri writes it) names the same DID.
+        const did = input.trim().replace(/^at:\/\//i, "");
         if (!isAtprotoDid(did)) throw new Error("Not an AT Protocol account (did:plc or did:web)");
         return did;
       },

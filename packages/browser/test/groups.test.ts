@@ -814,10 +814,13 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       });
 
       it("that was far behind on the chain (70 changes while away) gets every commit between, and is told", async () => {
-        const { world, alice, bob, groupId, key, edge } = await trio();
+        const { world, alice, bob, carol, groupId, key, edge } = await trio();
         const bobKey = key(bob);
         edge("alice", bob, false); edge("carol", bob, false);
         world.chats.delete("chat-ab");
+        // Carol is away too: nobody takes each change as it is made, so the 70 cost the admin's crypto alone, with no
+        // member checking each one and no wait for it in between (that was over half of this test's time).
+        edge("alice", carol, false);
         for (let i = 0; i < 70; i++) { await alice.rotate(groupId); await world.settle(); }
         await alice.remove(groupId, bobKey); await world.settle();
         // Bob is back: the edge opens once, and he says where he is once.
@@ -832,10 +835,12 @@ describe("group engine: admission over a contact chat, edges from the roster", (
        * after the first two each wait for Bob's app. Several hundred checked no more and took seconds of real crypto.
        */
       it("that was far behind gets them a slice at a time, never more than its app holds waiting, and is told", async () => {
-        const { world, alice, bob, groupId, key, edge } = await trio();
+        const { world, alice, bob, carol, groupId, key, edge } = await trio();
         const aliceKey = key(alice), bobKey = key(bob);
         edge("alice", bob, false); edge("carol", bob, false);
         world.chats.delete("chat-ab");
+        // Carol away too, as above: the changes cost the admin's crypto alone.
+        edge("alice", carol, false);
         const behind = 5 * GROUP_LIMITS.catchUpSlice;
         for (let i = 0; i < behind; i++) { await alice.rotate(groupId); await world.settle(); }
         await alice.remove(groupId, bobKey); await world.settle();

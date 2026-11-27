@@ -171,14 +171,24 @@ test("on a short screen the invite comes first, above the scene, in view when th
   }).toBe(true);
 });
 
-/** Every sound the page starts (its length, and when), and when the scene first shows its live stage. */
+/**
+ * Every sound the page starts (its length, when, and when its buffer finished decoding), and when the scene first shows
+ * its live stage.
+ */
 async function recordSounds(page: Page) {
   await page.evaluate(() => {
-    const state = { heard: [] as { duration: number; at: number }[], liveAt: null as number | null };
+    const state = { heard: [] as { duration: number; at: number; decodedAt: number | null }[], liveAt: null as number | null };
     (window as unknown as { qaSounds: typeof state }).qaSounds = state;
+    const decodedAt = new WeakMap<AudioBuffer, number>();
+    const decode = BaseAudioContext.prototype.decodeAudioData;
+    BaseAudioContext.prototype.decodeAudioData = function (this: BaseAudioContext, ...args: Parameters<typeof decode>) {
+      const decoding = decode.apply(this, args);
+      void decoding.then((buffer) => { decodedAt.set(buffer, performance.now()); }, () => {});
+      return decoding;
+    };
     const start = AudioBufferSourceNode.prototype.start;
     AudioBufferSourceNode.prototype.start = function (this: AudioBufferSourceNode, ...args: Parameters<typeof start>) {
-      state.heard.push({ duration: this.buffer?.duration ?? 0, at: performance.now() });
+      state.heard.push({ duration: this.buffer?.duration ?? 0, at: performance.now(), decodedAt: (this.buffer && decodedAt.get(this.buffer)) ?? null });
       return start.apply(this, args);
     };
     new MutationObserver(() => {
@@ -186,7 +196,14 @@ async function recordSounds(page: Page) {
     }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-stage"] });
   });
 }
-const sounds = (page: Page) => page.evaluate(() => (window as unknown as { qaSounds: { heard: { duration: number; at: number }[]; liveAt: number | null } }).qaSounds);
+const sounds = (page: Page) => page.evaluate(() => (window as unknown as { qaSounds: { heard: { duration: number; at: number; decodedAt: number | null }[]; liveAt: number | null } }).qaSounds);
+
+/**
+ * How far apart the connected sound and the live scene may start and still be one moment: the moment lasts
+ * `CELEBRATE_MS` (1.8 s). It starts a few milliseconds after the scene, and up to about 100 ms after it on a host
+ * running the whole suite; a sound left to a later turn of its own, half a second on, is not with it.
+ */
+const TOGETHER_MS = 300;
 
 test("the connected moment is heard once on each side, together with the scene going live, and not while waiting", { tag: ["@feature:chat.paired.pairing-progress", "@feature:app.attention.sounds"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all(["sound-alice", "sound-bob"].map(name => peer(name, PAIRING)));
@@ -212,11 +229,14 @@ test("the connected moment is heard once on each side, together with the scene g
     // connected.mp3 (0.88 s), decoded and played: the synthesized fallback has no buffer.
     expect(connected.duration).toBeGreaterThan(0.8);
     expect(connected.duration).toBeLessThan(1);
-    // Asked for in the same change that starts the connected moment, its file fetched while the scene waited: it starts
-    // a few microtasks after the live scene, on this page's own clock (under 7 ms on two loaded cores). Fetched and
-    // decoded only then, it came 20 to 40 ms after, and over 100 ms on a loaded machine.
+    // Asked for in the same change that starts the connected moment, its file fetched and decoded while the scene
+    // waited: its buffer was ready before the scene went live, on this page's own clock. Fetched and decoded only when
+    // the moment came, it is ready after the live scene however fast the host, and the sound came 20 to 40 ms late
+    // (over 100 ms on a loaded host).
     expect(liveAt).not.toBeNull();
-    expect(Math.abs(connected.at - liveAt!)).toBeLessThan(100);
+    expect(connected.decodedAt, `connected.mp3 decoded by this page: ${JSON.stringify({ connected, liveAt })}`).not.toBeNull();
+    expect(connected.decodedAt!, "decoded before the scene went live").toBeLessThan(liveAt!);
+    expect(Math.abs(connected.at - liveAt!), "started with the live scene").toBeLessThan(TOGETHER_MS);
   }
 });
 

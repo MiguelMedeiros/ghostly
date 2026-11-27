@@ -6,7 +6,7 @@
  * own into `/ghostly-services-sw.js` (apps/web/svcBuild.ts). It keeps nothing: no cache, no storage, only a navigation
  * it could not place for the few seconds its own page takes to go on with it (`goOn`).
  */
-import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, fromView, isServiceHostname, parseServicesHost, workerRelayOnly, type ServiceRead, type ServiceReply, type ServiceRequestMessage } from "./protocol";
+import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, ORIGIN_AGENT_CLUSTER, answerStatus, fromView, isServiceHostname, parseServicesHost, workerRelayOnly, type ServiceRead, type ServiceReply, type ServiceRequestMessage } from "./protocol";
 import { WEBRTC_GUARD, guardViewerAnswer, type PageGuard } from "../../../../packages/core/src/viewerGuard";
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT } from "../../../../packages/core/src/clipboardGuard";
 import { viewerResponseHeaders, viewerServicePolicy } from "../../../../packages/core/src/http";
@@ -79,18 +79,42 @@ async function guarded(headers: unknown, body: AsyncIterable<Uint8Array>, destin
   }
   out.append("content-security-policy", viewerServicePolicy(relayOnly));
   out.append("content-security-policy", frameAncestors());
+  out.set("origin-agent-cluster", ORIGIN_AGENT_CLUSTER);
   return { headers: out, body: answer.body };
 }
 
+/**
+ * Every answer here asks for an agent cluster of this origin's own (`ORIGIN_AGENT_CLUSTER`), as the bridge's files do
+ * (nginx-services.conf): the contact's own header, `?0` above all, never takes its place.
+ */
+function isolated(headers: HeadersInit): Headers {
+  const out = new Headers(headers);
+  out.set("origin-agent-cluster", ORIGIN_AGENT_CLUSTER);
+  return out;
+}
+
+/**
+ * The policy of an answer of the worker's own, with nothing to run or load, and an origin of its own (an empty
+ * `sandbox`). On the app's origin, an app's page that frames it could reach anywhere through its window (its `fetch`,
+ * an image of its document) under no policy but the page's own: never past Ghostly's viewer policy, nor past Hide my
+ * IP from contacts. And the guards never run in it, while that page reads its window by index from the moment it
+ * commits: its `execCommand` would copy on a timer, as no page of the app's may (`OWN_ORIGIN_CSP` in
+ * packages/core/src/viewerGuard.ts).
+ */
+function ownPolicy(): string {
+  return `${frameAncestors()}; default-src 'none'; form-action 'none'; base-uri 'none'; sandbox`;
+}
+
 function plain(status: number, text: string): Response {
-  return new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "content-security-policy": frameAncestors() } });
+  return new Response(text, { status, headers: isolated({ "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": ownPolicy() }) });
 }
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /**
  * The app's words for a request it could not answer, as a page in the profile's language and direction (`lang`,
- * `dir`, from the app's page), in place of a plain-text one: no script, nothing loaded, its style its own.
+ * `dir`, from the app's page), in place of a plain-text one: no script, nothing loaded, its style its own, an origin of
+ * its own (`ownPolicy`).
  */
 export function said(status: number, text: string, lang?: string, dir?: string): Response {
   if (!lang && !dir) return plain(status, text);
@@ -99,7 +123,7 @@ export function said(status: number, text: string, lang?: string, dir?: string):
   const html = `<!doctype html><html${language}${direction}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(text)}</title>`
     + `<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;font:15px/1.5 system-ui,sans-serif;text-align:center}p{max-width:32em;margin:0}</style>`
     + `</head><body><p>${escape(text)}</p></body></html>`;
-  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `${frameAncestors()}; default-src 'none'; style-src 'unsafe-inline'` } });
+  return new Response(html, { status, headers: isolated({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `${frameAncestors()}; default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; sandbox` }) });
 }
 
 /**
@@ -108,7 +132,7 @@ export function said(status: number, text: string, lang?: string, dir?: string):
  */
 function failed(status: number, text: string, lang?: string, dir?: string): Response {
   const kept = answerStatus(status);
-  if (NULL_BODY.has(kept)) return new Response(null, { status: kept, headers: { "cache-control": "no-store", "content-security-policy": frameAncestors() } });
+  if (NULL_BODY.has(kept)) return new Response(null, { status: kept, headers: isolated({ "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": ownPolicy() }) });
   return said(kept, text, lang, dir);
 }
 
@@ -141,15 +165,22 @@ const MAX_KEPT = 4;
 
 /** The query key the "go on" page puts its token under, on its own address: the next navigation's referrer. */
 export const GO_KEY = "ghostly-go";
-/** The "go on" page's one script: its token into its own address, then the same navigation again, with a referrer. */
-export const GO_SCRIPT = `(()=>{const to=location.href,at=new URL(to);at.searchParams.set("${GO_KEY}",document.currentScript.dataset.go);history.replaceState(null,"",at);location.replace(to)})()`;
+/**
+ * The "go on" page's one script: its token into its own address, then the same navigation again, with a referrer. Only
+ * inside the view the bridge frames, at any depth of this origin's own frames: a frame this origin's pages sent off the
+ * bridge is framed by the app itself (whose location it cannot read), and there it would go on to whichever bridge of
+ * this origin is open, in another tab too.
+ */
+export const GO_SCRIPT = `(()=>{try{for(let w=parent;;w=w.parent){if(w===top)return;if(w.location.pathname==="${BRIDGE_PAGE}")break}}catch{return}const to=location.href,at=new URL(to);at.searchParams.set("${GO_KEY}",document.currentScript.dataset.go);history.replaceState(null,"",at);location.replace(to)})()`;
 let goHash: Promise<string> | undefined;
 
 /**
  * A frame's navigation nothing places (`startedHere`), answered with a page of this worker's own in place of the
  * contact's: one that renders only inside Ghostly (`frame-ancestors`), so in another site's frame nothing runs and
  * nothing reaches the contact. Inside Ghostly its script asks again, now with this origin's referrer and a token, and
- * the request kept here goes as it was made (a form's POST and its body too). Kept once, for a little while.
+ * the request kept here goes as it was made (a form's POST and its body too). Kept once, for a little while. It stays
+ * on this origin (the next navigation needs this origin's referrer, `takeKept`), where the app's page can read its
+ * window by index: the guards run in it first, as in each of the app's pages (`GUARDS`).
  */
 async function goOn(request: Request): Promise<Response> {
   const body = await readBody(request);
@@ -160,8 +191,8 @@ async function goOn(request: Request): Promise<Response> {
   kept.set(token, { url: request.url, method: request.method, headers: new Headers(request.headers), body, until: now + KEPT_MS });
   goHash ??= crypto.subtle.digest("SHA-256", new TextEncoder().encode(GO_SCRIPT))
     .then((digest) => `'sha256-${btoa(String.fromCharCode(...new Uint8Array(digest)))}'`);
-  const html = `<!doctype html><meta charset="utf-8"><script data-go="${token}">${GO_SCRIPT}</script>`;
-  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "same-origin", "content-security-policy": `${frameAncestors()}; default-src 'none'; script-src ${await goHash}` } });
+  const html = `<!doctype html><meta charset="utf-8">${GUARDS.map((guard) => `<script>${guard.script}</script>`).join("")}<script data-go="${token}">${GO_SCRIPT}</script>`;
+  return new Response(html, { status: 200, headers: isolated({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "same-origin", "content-security-policy": `${frameAncestors()}; default-src 'none'; script-src ${GUARDS.map((guard) => guard.hash).join(" ")} ${await goHash}; form-action 'none'; base-uri 'none'` }) });
 }
 
 /** The navigation a "go on" page asked for again (its token in the referrer, the same address): taken, once. */

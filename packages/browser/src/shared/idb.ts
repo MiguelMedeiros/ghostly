@@ -14,7 +14,7 @@ export function databaseName(): string {
   return dbName;
 }
 /** The schema this build reads and writes. A database stored at a higher one is a newer build's: it is never opened. */
-export const DB_VERSION = 16;
+export const DB_VERSION = 17;
 
 /**
  * Why the profile's database did not open. `newer`: a newer Ghostly stored it (IndexedDB never opens a database below
@@ -132,6 +132,11 @@ function storedVersion(name: string): Promise<number | undefined> {
 export const CARD_INDEX = "byCardKind";
 /** The messages store's index of the messages that carry a file, by chat (`linkId`, `file.id`): what `db.getFileMessages` reads. */
 export const FILE_INDEX = "byLinkFile";
+/**
+ * The messages store's index of the rows that hold the frame their group message came in (`StoredMessage.frame`), by
+ * group (`linkId`, `frame.t`): what `db.getFramedMessages` reads.
+ */
+export const FRAME_INDEX = "byLinkFrame";
 /** The wallet history's index by (mint, time): what `newestWalletTx` reads. */
 export const WALLET_TX_INDEX = "byMintTime";
 
@@ -293,6 +298,9 @@ export function openDb(): Promise<IDBDatabase> {
       // v16: the messages that carry a file, by chat or group, so a chat's files are read without its texts (`file list`).
       // A message without a file has no such key and is not in it.
       if (!messages.indexNames.contains(FILE_INDEX)) messages.createIndex(FILE_INDEX, ["linkId", "file.id"]);
+      // v17: the rows of a group that hold the frame their message came in, so a group's start takes the frames it hands
+      // on without reading its whole history. A row without a frame (a 1:1 chat's, or one that gave it up) is not in it.
+      if (!messages.indexNames.contains(FRAME_INDEX)) messages.createIndex(FRAME_INDEX, ["linkId", "frame.t"]);
     };
     request.onsuccess = () => {
       // Opened after it was said to be blocked: nobody uses this connection, and it must not block the next open.
@@ -327,11 +335,13 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
  * with their keys and revocations and when the contacts' were last looked up for one (and which, of a lookup under way), its own Nostr data, the public profiles it read, the built-in mini-apps it removed
  * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`), the digests of the mini-app bundles it may hold (`APP_BUNDLES_KEY`) and the mini-app revocations it verified (`APP_REVOCATIONS_KEY`), its x401 credentials and their keys (`engine/x401.ts`), its contact links
  * (`engine/contactLinks.ts`), the requests it sent through others' (`engine/contactAsks.ts`) and its saved messages
- * (`engine/saved.ts`). A list of what goes
+ * (`engine/saved.ts`), and the mark its goodbye left for the next start (`DEPARTED_KEY`). A list of what goes
  * rather than of what stays, on purpose: every other record of that store is a wallet's (seeds, configuration, pending
  * operations), and a wallet record a newer version adds must never be deleted by mistake.
  */
-export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "identityWithdrawnLookups", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "appRevocations", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
+export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "identityWithdrawnLookups", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "appRevocations", "x401Credentials", "contactLinks", "contactAsks", "savedMessages", "departedAtStop"] as const;
+/** The mark this app's goodbye leaves in the settings store for its next start (`GhostlyNode.lastRunDeparted`). */
+export const DEPARTED_KEY = "departedAtStop";
 
 /** A private group's small row in the settings store (`GroupLive`, `engine/groupRows.ts`): the profile's too. */
 export const groupLiveKey = (groupId: string): string => `groupLive:${groupId}`;
@@ -352,11 +362,18 @@ export const WALLET_SETTINGS_FIELDS = ["mints", "mintsInitialized", "walletSetup
  * emptied, the profile's records of the settings store are deleted and the `settings` record keeps only its wallet
  * fields. The wallets (proofs, payments, quotes, history, payment journal, wallet records) stay: ecash is money, and
  * nothing else holds a copy of it. The caller stops the peer first, or it may write back what was just deleted.
+ * `database`: another peer database of the profile than the one this page runs on (a fork a handoff kept), opened as
+ * stored and closed after; the caller checks it is there, since opening it by name would make it.
  */
-export async function clearProfileStores(): Promise<void> {
+export async function clearProfileStores(database?: string): Promise<void> {
   if (typeof indexedDB === "undefined") return;
-  const db = await openDb();
+  const db = database ? await wrap(indexedDB.open(database)) : await openDb();
+  try { await clearStoresOf(db); } finally { if (database) db.close(); }
+}
+
+async function clearStoresOf(db: IDBDatabase): Promise<void> {
   const names = [...PROFILE_STORES, STORES.settings].filter((name) => db.objectStoreNames.contains(name));
+  if (!names.length) return;
   const tx = db.transaction(names, "readwrite");
   for (const name of names) if (name !== STORES.settings) tx.objectStore(name).clear();
   if (names.includes(STORES.settings)) {
@@ -519,14 +536,21 @@ export const fileStore = {
    * greatest. A link's file ids share its prefix (`<link>-in-`, `group-<id>-out-`…), so the range holds little else, and
    * whatever else it holds is not theirs. A read per file was 16,000 requests at every start with 200 files per chat
    * and 300 per group (50 chats, 20 groups).
+   *
+   * Only the ids come off the `byLink` index; the records are read from the store itself, over the same range. WebKit
+   * (the macOS app) hands back a record read through an index with its Blob missing its stored bytes, and for a File
+   * dropped or pasted in it then reaches for the path the File came from: the network process refuses that and ends
+   * the page, at every start.
    */
   async listForLink(linkId: string): Promise<StoredFile[]> {
     const tx = (await openDb()).transaction([STORES.files, STORES.fileState], "readonly");
-    const files = await wrap<StoredFile[]>(tx.objectStore(STORES.files).index("byLink").getAll(linkId));
-    if (!files.length) return files;
+    const store = tx.objectStore(STORES.files);
     // Strings sort by UTF-16 code unit, as IndexedDB orders its keys.
-    const ids = files.map(file => file.id).sort();
-    const states = new Map((await wrap<FileState[]>(tx.objectStore(STORES.fileState).getAll(IDBKeyRange.bound(ids[0], ids[ids.length - 1])))).map(state => [state.id, state]));
+    const ids = (await wrap(store.index("byLink").getAllKeys(linkId)) as string[]).sort();
+    if (!ids.length) return [];
+    const range = IDBKeyRange.bound(ids[0], ids[ids.length - 1]);
+    const files = (await wrap<StoredFile[]>(store.getAll(range))).filter(file => file.linkId === linkId);
+    const states = new Map((await wrap<FileState[]>(tx.objectStore(STORES.fileState).getAll(range))).map(state => [state.id, state]));
     return files.map(file => withState(file, states.get(file.id)));
   },
   /** The id of every group a stored file is of (`linkId` `group:<id>`), read off the index: no record is loaded. */

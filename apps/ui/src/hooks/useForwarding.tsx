@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { useI18n } from "../contexts/I18nContext";
 import { ForwardDialog } from "../components/chat/ForwardDialog";
 import { modalOpen } from "./useAppCommands";
+import { composingKey } from "./useComposition";
 import { focusInPlace } from "../lib/focus";
 import { FORWARD_MAX_MESSAGES, canForward } from "../lib/forward";
 import { touchOnly } from "../lib/touchOnly";
@@ -50,8 +51,9 @@ export function useForwarding(from: string | undefined, messages: readonly ChatM
   useEffect(() => {
     if (!selected || forwarding) return;
     // An Escape a menu or a field answered is not the choice's; the one that ends it is spent. One in a modal dialog over
-    // the chat is the dialog's: a <dialog> closes on the key's default action, which cancelling it here would stop.
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && !modalOpen()) { e.preventDefault(); setSelected(null); } };
+    // the chat is the dialog's: a <dialog> closes on the key's default action, which cancelling it here would stop. One
+    // that only dropped an input method's candidate in a field (the chat's search) is the input method's.
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !composingKey(e, null) && !e.defaultPrevented && !modalOpen()) { e.preventDefault(); setSelected(null); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selected, forwarding]);
@@ -101,12 +103,12 @@ export function useForwarding(from: string | undefined, messages: readonly ChatM
     <div ref={barRef} data-testid="select-bar" role="toolbar" aria-label={t("chat.forward.selected", { count: String(count) })}
       className="flex items-center gap-3 px-4 py-2 min-h-[62px] bg-panel-header border-t border-border">
       <button type="button" data-testid="select-cancel" onClick={() => setSelected(null)} title={t("common.cancel")} aria-label={t("common.cancel")}
-        className="p-2 rounded-full text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">
+        className="tap-target p-2 rounded-full text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
       </button>
       <span data-testid="select-count" className="flex-1 text-sm text-text-primary" aria-live="polite">{t("chat.forward.selected", { count: String(count) })}</span>
       <button type="button" data-testid="select-forward" onClick={() => setForwarding(chosen())} disabled={!count}
-        className="inline-flex items-center gap-2 min-h-10 rounded-lg bg-accent px-4 text-sm font-medium text-on-accent hover:bg-accent-hover disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">
+        className="inline-flex items-center gap-2 min-h-10 max-md:min-h-11 rounded-lg bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] px-4 text-sm font-medium text-on-accent hover:bg-accent-hover disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="m15 14 5-5-5-5" /><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13" /></svg>
         {t("chat.forward.forward")}
       </button>

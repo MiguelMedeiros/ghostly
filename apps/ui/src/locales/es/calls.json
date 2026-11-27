@@ -6,6 +6,8 @@
   "cameraUnavailable": "No hay cámara, así que el vídeo está apagado",
   "connected": "Conectado",
   "connecting": "Conectando...",
+  "contactBlocked": "Bloqueaste a este contacto",
+  "contactBlockedNext": "Desbloquéalo para llamar",
   "contactCannot": "La app de tu contacto no puede recibir llamadas",
   "contactOutdated": "Tu contacto necesita actualizar Ghostly para las llamadas",
   "decline": "Rechazar",
@@ -54,6 +56,8 @@
     "removedInfo": "El nodo del grupo no te deja volver a esta llamada sin el permiso del admin. Sigues en el grupo.",
     "retry": "Reintentar",
     "screenOf": "Pantalla de {{name}}",
+    "showScreen": "Ver en grande la pantalla de {{name}}",
+    "showYourScreen": "Ver en grande tu pantalla",
     "unreachable": "No se pudo llegar a la llamada del grupo"
   },
   "incomingAudio": "Llamada de voz entrante...",
@@ -101,7 +105,9 @@
   "shareScreen": "Compartir pantalla",
   "sharing": {
     "both": "Tú y {{name}} están compartiendo sus pantallas",
+    "noSound": "Compartida sin sonido",
     "peer": "{{name}} está compartiendo su pantalla",
+    "withSound": "Compartiendo su sonido",
     "you": "Estás compartiendo tu pantalla"
   },
   "stopSharing": "Dejar de compartir",

@@ -29,6 +29,12 @@
     "save": "Enregistrer l'audio",
     "tooLarge": "Trop volumineux pour être lu ici. Téléchargez-le pour l'écouter."
   },
+  "block": {
+    "blocked": "Vous avez bloqué ce contact",
+    "body": "Cette personne ne peut plus vous appeler ni rien vous envoyer, et rien ne l’en avertit. La conversation reste. Débloquez-la depuis ce menu ou dans Réglages → Confidentialité et sécurité.",
+    "confirm": "Bloquer",
+    "title": "Bloquer {{name}} ?"
+  },
   "compat": {
     "burned": "La discussion a été détruite",
     "continued": "Vous avez invité votre contact dans une nouvelle discussion.",
@@ -45,6 +51,8 @@
   "deleteForEveryone": "Supprimer pour tous",
   "deleteForEveryoneGroupHint": "Supprimé aussi sur les appareils des membres. Les anciennes applis affichent « Message supprimé » ; les copies gardées restent.",
   "deleteForEveryoneHint": "Supprimé aussi sur les appareils de votre contact. Les anciennes applis affichent « Message supprimé » ; les copies gardées restent.",
+  "deleteForEveryoneHintDhtContact": "Supprimé ici maintenant. Les appareils de votre contact le suppriment seulement si la discussion retrouve une liaison directe dans la semaine : la discussion de votre contact est en DHT seule, jusqu'à ce qu'il l'autorise à nouveau. Les anciennes applis affichent « Message supprimé » ; les copies gardées restent.",
+  "deleteForEveryoneHintDhtYou": "Supprimé ici maintenant. Les appareils de votre contact le suppriment seulement si la discussion retrouve une liaison directe dans la semaine : cette discussion est en DHT seule, changez-le depuis l'icône de connexion. Les anciennes applis affichent « Message supprimé » ; les copies gardées restent.",
   "deleteMessage": "Supprimer le message",
   "deleteMessageHint": "Supprimé uniquement ici. Votre contact garde sa copie.",
   "deleteSendingFileHint": "Supprimé uniquement ici. L'envoi s'arrête ; votre contact ne recevra pas le fichier.",
@@ -61,15 +69,19 @@
       "sent": "Envoyé. Pas encore d'accusé.",
       "sentGroup": "Envoyé au groupe. Les groupes n'ont pas d'accusé.",
       "waiting": "Part tout seul quand votre contact est en ligne.",
+      "waitingBehind": "Part tout seul après les messages précédents.",
       "waitingLiveContact": "Les fichiers ont besoin d'une liaison directe. La discussion de votre contact est en DHT seule : il part quand il l'autorise à nouveau.",
-      "waitingLiveYou": "Les fichiers ont besoin d'une liaison directe. Cette discussion est en DHT seule : changez-le depuis l'icône de connexion."
+      "waitingLiveYou": "Les fichiers ont besoin d'une liaison directe. Cette discussion est en DHT seule : changez-le depuis l'icône de connexion.",
+      "waitingPaced": "Votre contact reçoit un nombre limité de messages à la fois. Part tout seul dès qu'il peut en recevoir plus."
     },
     "offline": "Vous êtes hors ligne",
     "retry": "Non envoyé. Renvoyer",
     "sending": "Envoi en cours",
     "sent": "Envoyé",
     "waiting": "En attente que votre contact soit en ligne",
-    "waitingLive": "En attente d'une liaison directe"
+    "waitingBehind": "En attente des messages précédents",
+    "waitingLive": "En attente d'une liaison directe",
+    "waitingPaced": "En attente que votre contact puisse recevoir plus de messages"
   },
   "disabledPlaceholder": "Message…",
   "edit": {
@@ -273,6 +285,7 @@
     "wantsToSend": "{{name}} veut l'envoyer · il reste {{size}}"
   },
   "menu": {
+    "block": "Bloquer le contact",
     "continueNew": "Continuer dans une nouvelle discussion",
     "hold": "Retenir les messages…",
     "more": "Plus…",
@@ -282,6 +295,7 @@
     "pin": "Épingler la discussion",
     "refresh": "Actualiser",
     "techInfo": "Infos techniques",
+    "unblock": "Débloquer le contact",
     "unpin": "Désépingler la discussion"
   },
   "message": {
@@ -413,6 +427,7 @@
   "search": {
     "close": "Fermer la recherche",
     "count": "{{current}} sur {{total}}",
+    "found": "{{position}} : {{name}}, {{text}}",
     "info": "Cherche dans les messages et les noms de fichiers gardés sur cet appareil. Rien n'en sort.",
     "newer": "Résultat plus récent (Maj+Entrée)",
     "none": "Aucun résultat",

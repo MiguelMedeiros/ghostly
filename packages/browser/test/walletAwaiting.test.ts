@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ONCHAIN_PROVIDER, type PaymentTarget } from "@ghostly/core";
 import { mintAwaiting, walletAwaiting, type AwaitingSources } from "../src/engine/walletAwaiting";
 import type { LightningOp } from "../src/engine/paymentAdapters/providers/lightningService";
+import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import type { StoredPayment, StoredQuote } from "../src/shared/types";
 import { removalRisksFunds, walletRemoval } from "../src/shared/walletRemoval";
 // covers: wallet.instances.remove
@@ -32,6 +33,15 @@ describe("what a wallet still waits for", () => {
       { type: "cashu", kind: "unclaimed", amount: 300 },
       { type: "cashu", kind: "invoice", amount: 50_000 },
     ]);
+  });
+
+  it("Cashu: a quote kept with no expiry (its mint gave none) waits for nothing once its invoice expired", () => {
+    const invoice = fakeInvoice(100, new Uint8Array(32).fill(1));
+    const kept = (now: number) => ({ quotes: [quote({ quote: "q1", amount: 100, invoice, expiresAt: null })], now });
+    expect(read(kept(Date.now()))).toEqual([{ type: "cashu", kind: "invoice", amount: 100 }]);
+    // An hour long: two hours on, removing its mint or its wallet loses nothing.
+    expect(read(kept(Date.now() + 2 * 3_600_000))).toEqual([]);
+    expect(mintAwaiting(REAL, { network: "mainnet", payments: [], ...kept(Date.now() + 2 * 3_600_000) })).toEqual([]);
   });
 
   it("a chat request whose invoice is a Cashu quote is one request, not a request and an invoice; once paid it is the paid quote", () => {

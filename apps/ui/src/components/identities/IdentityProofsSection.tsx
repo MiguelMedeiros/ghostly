@@ -4,10 +4,9 @@ import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types"
 import type { ApprovalRequest } from "@ghostly/browser/proofs/contract";
 import { Block, Button, Notice, Row } from "../wallet/ui";
 import { Deck } from "../deck/Deck";
-import { addableProviders, chatsByPeer, contactName, profileSince, providerOf, sharedStatus, useEngineValue, useNewProof } from "../../lib/identities";
+import { addableProviders, contactName, profileSince, providerOf, sharedStatus, useEngineValue, useNewProof, usePeerChats } from "../../lib/identities";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
-import type { ChatSession } from "../../lib/types";
 import { useI18n } from "../../contexts/I18nContext";
 import { IdCardFace, IdCardMark } from "./IdCardFace";
 import { GHOSTLY, ghostlyCard, idCard, idCardTone, type IdCardContent } from "./idCard";
@@ -56,6 +55,8 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
   const state = useEngineValue(s => s && proofsView(s));
   const { t } = useI18n();
   const nav = useAppNavigation();
+  // Who refused a proof, by the name the chat list shows: read again when they rename or get a nickname (`usePeerChats`).
+  const chats = usePeerChats(!!state?.links.some(l => l.identities?.shared.length), state?.links);
   const proofs = state?.identityProofs ?? [];
   const [chosen, setChosen] = useState<string>();
   const [removing, setRemoving] = useState<string | null>(null);
@@ -91,7 +92,6 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
   const now = Math.floor(Date.now() / 1000);
   const providers = addableProviders().map(p => p.id);
   const canAdd = providers.length > 0;
-  const chats = state.links.some(l => l.identities?.shared.length) ? chatsByPeer() : new Map<string, ChatSession>();
   const nameOf = (link: Pick<LinkView, "peerPubKeyZ32">) => contactName(chats.get(link.peerPubKeyZ32)) ?? t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
   /** Contacts whose app checked this proof and refused it. */
   const refusedBy = (id: string) => state.links.filter(l => l.identities?.shared.some(s => s.id === id && s.status === "rejected")).map(nameOf);
@@ -209,7 +209,11 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
                 <Button disabled={revoking === p.id} onClick={e => { handOff.current = { from: e.currentTarget, to: [REMOVE] }; removeAbort.current?.abort(); setRemoving(null); setRemoval({}); }}>{t("identities.mine.keep")}</Button>
               </> : <Button data-testid="identity-proof-remove" onClick={() => setRemoving(p.id)}>{t("identities.mine.remove")}</Button>}
             </Row>
-            {removing === p.id && <Block testId="identity-proof-remove-notes"><Notice>{t("identities.mine.removeNote")}{localOf(p.provider)?.unpublish ? ` ${localOf(p.provider)!.unpublish!.description}` : ""}</Notice>
+            {removing === p.id && <Block testId="identity-proof-remove-notes">
+              {/* The take-down's step below, said out loud (a server is written to, an approval may be asked): there
+                  from Remove on, so its first words are heard. */}
+              <p role="status" data-testid="identity-proof-remove-live" className="sr-only">{busyHere ? removal.progress : ""}</p>
+              <Notice>{t("identities.mine.removeNote")}{localOf(p.provider)?.unpublish ? ` ${localOf(p.provider)!.unpublish!.description}` : ""}</Notice>
               {approval && takingDown === p.id && <ApprovalPanel request={approval} onCancel={() => removeAbort.current?.abort()} />}
               {removal.progress && busyHere && <Notice testId="identity-proof-remove-progress">{removal.progress}</Notice>}
               {removal.failed === p.id && !busyHere && <p className="text-xs text-text-muted">{t("identities.mine.takeDownFailed")}</p>}

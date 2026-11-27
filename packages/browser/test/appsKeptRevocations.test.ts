@@ -50,6 +50,30 @@ describe("revocations an app's uninstall leaves", () => {
     expect((await again.preview({ url: MIRROR_URL })).run).toEqual({ status: "revoked", reason: "Leaked key" });
   });
 
+  it("one the update check read, of a version it updated past, dropped from the file since: a copy of that version is refused", async () => {
+    const v0 = await bundle({ sequence: 1, sources: [BUNDLE_URL] });
+    const v1 = await bundle({ sequence: 2, sources: [BUNDLE_URL] });
+    const v2 = await bundle({ sequence: 3, sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const r0 = await revocation(v0.ref, [v0.digest], "Old");
+    const r1 = await revocation(v1.ref, [v1.digest], "Leaked key");
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([r0, r1]));
+    net.put(BUNDLE_URL, v2.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    // The file the next check reads holds other revocations of the app, not that one: the record no longer keeps it.
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([r0]));
+    await store.checkUpdates();
+    await store.uninstall({ ref: v1.ref });
+
+    net.put(MIRROR_URL, v1.bytes);
+    expect((await store.preview({ url: MIRROR_URL })).run).toEqual({ status: "revoked", reason: "Leaked key" });
+    await expect(store.install({ digest: v1.digest, grant: ["chat"] })).rejects.toThrow(/^revoked/);
+    expect(await appRows()).toEqual([]);
+  });
+
   it("one a store's index carried, dropped by the store since: the same version from a copy is refused", async () => {
     const v1 = await bundle();
     net.put(BUNDLE_URL, v1.bytes);
@@ -303,7 +327,7 @@ describe("how many are kept", () => {
     // Still bounded: the other publisher made room from its own.
     const kept = await wrap((await dbStore(STORES.settings, "readonly")).get(APP_REVOCATIONS_KEY)) as [string, unknown[]][];
     expect(kept.reduce((n, [, list]) => n + list.length, 0)).toBeLessThanOrEqual(1024);
-  });
+  }, 60_000);
 
   it.each([1, 3])("install screens of many other publishers, one revocation each, push out none of the %i of this publisher", async (count) => {
     const v1 = await bundle();

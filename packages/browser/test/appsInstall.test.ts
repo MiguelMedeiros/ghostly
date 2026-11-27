@@ -659,7 +659,7 @@ describe("updates", () => {
     expect(await bundleIds()).toEqual([`app-${v4.digest}`]);
   });
 
-  it("an update the person accepts while a check reads its publisher's revocation of it keeps its files", async () => {
+  it("an update the person accepts while a check reads its publisher's revocation of it is refused, and the version installed keeps its files", async () => {
     const v1 = await bundle({ sources: [BUNDLE_URL] });
     net.put(BUNDLE_URL, v1.bytes);
     const store = apps(net);
@@ -681,12 +681,16 @@ describe("updates", () => {
     });
     const check = store.checkUpdates();
     await started;
-    expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, digest: v2.digest });
+    // Accept reads that file too (beside where the update waits): it is refused once the read answers.
+    const accepting = store.acceptUpdate({ ref: v1.ref });
     release();
+    await expect(accepting).rejects.toThrow(/^revoked/);
     await check;
     net.fetch.mockImplementation(answer);
-    expect((await store.list())[0], "the version accepted is the one installed").toMatchObject({ sequence: 2, digest: v2.digest });
-    expect(await bundleIds(), "it keeps the files it runs from").toEqual([`app-${v2.digest}`]);
+    expect((await store.list())[0], "the version installed stays").toMatchObject({ sequence: 1, digest: v1.digest, run: { status: "ok" } });
+    await store.checkUpdates();
+    expect((await store.list())[0]!.pending).toBeUndefined();
+    expect(await bundleIds(), "it keeps the files it runs from").toEqual([`app-${v1.digest}`]);
   });
 
   it("a lower sequence is never installed over a higher one", async () => {
@@ -766,8 +770,10 @@ describe("updates", () => {
     });
     const check = store.checkUpdates();
     await started;
-    expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, digest: v2.digest });
+    // Accept reads the same file (beside where the update waits): it goes on once that read answers.
+    const accepting = store.acceptUpdate({ ref: v1.ref });
     release();
+    expect(await accepting).toMatchObject({ sequence: 2, digest: v2.digest });
     await check;
     const after = (await store.list())[0]!;
     expect(after, "the check does not put back the version it read").toMatchObject({ sequence: 2, digest: v2.digest, permissions: ["chat", "name"], run: { status: "ok" } });
@@ -793,14 +799,21 @@ describe("updates", () => {
     let reading!: () => void;
     const started = new Promise<void>((resolve) => { reading = resolve; });
     const answer = net.fetch.getMockImplementation()!;
+    // The check's read of v3 waits until Accept is done, so the check finds it only after the person's yes.
+    let found!: () => void;
+    const v3Held = new Promise<void>((resolve) => { found = resolve; });
     net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).endsWith("/ghostly-revoke.json")) { reading(); await held; }
+      if (String(input) === v3Url) await v3Held;
       return answer(input, init);
     });
     const check = store.checkUpdates();
     await started;
-    expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, digest: v2.digest });
+    // Accept reads the same file (beside where the update waits): it goes on once that read answers.
+    const accepting = store.acceptUpdate({ ref: v1.ref });
     release();
+    expect(await accepting).toMatchObject({ sequence: 2, digest: v2.digest });
+    found();
     await check;
     net.fetch.mockImplementation(answer);
     const after = (await store.list())[0]!;
@@ -1226,6 +1239,75 @@ describe("an app installed from a store updates only to the version that store l
     expect(await pinnedTo()).toBe(keyOf(STORE_KEY));
     expect(await bundleIds()).toEqual([`app-${u2.digest}`]);
     await expect(again.acceptUpdate({ ref: u2.ref })).rejects.toThrow(/^no-update/);
+  });
+
+  it("a screen whose Install would end the pin names the store it leaves; one that keeps it names none", async () => {
+    const { store, v1 } = await fromStore();
+    const leaving = { leavesStore: { key: keyOf(STORE_KEY), name: "Test store" } };
+    // The same version by URL leaves the record as it is: still pinned.
+    expect(await store.preview({ url: HEAD })).not.toHaveProperty("leavesStore");
+    expect(await store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).not.toHaveProperty("leavesStore");
+    // A newer version by URL, or a contact's card of it: Install unpins the app, and the screen says from which store.
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    net.put(HEAD, v2.bytes);
+    // From then on its updates come from the publisher's links: no store to go to.
+    const byLink = await store.preview({ url: HEAD });
+    expect(byLink).toMatchObject({ install: "update" });
+    expect(byLink.leavesStore).toEqual(leaving.leavesStore);
+    expect((await store.preview({ card: { ref: v2.ref, url: HEAD, sequence: 2, digest: v2.digest } })).leavesStore).toEqual(leaving.leavesStore);
+    // Another store's listing moves the pin to that store, the same version or a newer one: this one's review ends, and
+    // the screen names where the updates then wait.
+    const pinned1 = `https://cdn.jsdelivr.net/gh/ana/chess@${"b".repeat(40)}/app.ghostlyapp`;
+    const pinned2 = `https://cdn.jsdelivr.net/gh/ana/chess@${"c".repeat(40)}/app.ghostlyapp`;
+    net.put(pinned1, v1.bytes);
+    net.put(pinned2, v2.bytes);
+    await net.putStore(await storeFiles({ by: OTHER_STORE, name: "Other store", apps: [listing(v1, [pinned1])] }), OTHER_STORE_URL);
+    await store.addStore({ url: OTHER_STORE_URL });
+    const toOther = { ...leaving.leavesStore, to: keyOf(OTHER_STORE) };
+    const same = await store.preview({ store: keyOf(OTHER_STORE), ref: v1.ref });
+    expect([same.install, same.leavesStore]).toEqual(["same", toOther]);
+    await net.putStore(await storeFiles({ by: OTHER_STORE, name: "Other store", sequence: 2, apps: [listing(v2, [pinned2])] }), OTHER_STORE_URL);
+    await store.refreshStores();
+    const newer = await store.preview({ store: keyOf(OTHER_STORE), ref: v1.ref });
+    expect([newer.install, newer.leavesStore]).toEqual(["update", toOther]);
+    // Installed from the link's screen, as it said: no longer pinned.
+    const screen = await store.preview({ url: HEAD });
+    await store.install({ stage: screen.stage, digest: v2.digest, grant: ["chat"] });
+    expect(await pinnedTo()).toBeUndefined();
+    net.put(HEAD, (await bundle({ sequence: 3, sources: [HEAD] })).bytes);
+    expect(await store.preview({ url: HEAD }), "an app pinned to no store leaves none").not.toHaveProperty("leavesStore");
+  });
+
+  it("a screen drawn before the app was pinned to a store, which named no store, does not end that pin", async () => {
+    const v1 = await bundle({ sources: [HEAD] });
+    net.put(HEAD, v1.bytes);
+    net.put(PINNED_URL, v1.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v1, [PINNED_URL])] }));
+    const store = apps(net);
+    await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) });
+    await store.preview({ url: HEAD });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    // A newer version by link, its screen drawn while the app is pinned to no store: it names none.
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    net.put(HEAD, v2.bytes);
+    const screen = await store.preview({ url: HEAD });
+    expect(screen).toMatchObject({ install: "update" });
+    expect(screen).not.toHaveProperty("leavesStore");
+    // Meanwhile (another tab) the version installed is taken again from the store's listing: pinned to it.
+    const listed = await store.preview({ store: keyOf(STORE_KEY), ref: v1.ref });
+    await store.install({ stage: listed.stage, digest: v1.digest, grant: ["chat"] });
+    expect(await pinnedTo()).toBe(keyOf(STORE_KEY));
+    // Install on the first screen would end that pin, which it never said: it is shown again first.
+    await expect(store.install({ stage: screen.stage, digest: v2.digest, grant: ["chat"] })).rejects.toThrow(/^store-changed: /);
+    expect(await pinnedTo()).toBe(keyOf(STORE_KEY));
+    expect((await store.list())[0]).toMatchObject({ sequence: 1, digest: v1.digest });
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    // Read again, the screen says so, and its Install ends the pin as said.
+    const again = await store.preview({ url: HEAD });
+    expect(again.leavesStore).toEqual({ key: keyOf(STORE_KEY), name: "Test store" });
+    await store.install({ stage: again.stage, digest: v2.digest, grant: ["chat"] });
+    expect(await pinnedTo()).toBeUndefined();
+    expect((await store.list())[0]).toMatchObject({ sequence: 2, digest: v2.digest });
   });
 
   it("the version installed, taken again from a store's listing, pins it to that store", async () => {
@@ -1914,5 +1996,37 @@ describe("while it runs (WISP 1200 § Takedowns: the app is stopped)", () => {
     await store.install({ digest: v1.digest, grant: ["chat"] });
     await store.checkUpdates();
     expect(checked).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the record keeps the hash of each bundle's whole file, as written (a device move hands the file over by it)", () => {
+  const hashOf = (bytes: Uint8Array) => toBase64Url(sha256(bytes));
+  type Row = { sha256?: string; pending?: { sha256?: string } };
+  const row = async () => (await appRows())[0] as Row;
+
+  it("at install, for an update waiting and once accepted, and when a restored app's files are fetched again", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    expect((await row()).sha256).toBe(hashOf(v1.bytes));
+
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    expect(await row()).toMatchObject({ sha256: hashOf(v1.bytes), pending: { sha256: hashOf(v2.bytes) } });
+
+    await store.acceptUpdate({ ref: v1.ref });
+    expect((await row()).sha256).toBe(hashOf(v2.bytes));
+
+    // A record from before the hash was kept, its files gone (a restored profile): fetched again, it keeps it.
+    const { sha256: _kept, ...older } = await row();
+    await wrap((await openDb()).transaction(STORES.apps, "readwrite").objectStore(STORES.apps).put(older));
+    await (await fileBytes()).remove(`app-${v2.digest}`);
+    expect(await apps(net).fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect((await row()).sha256).toBe(hashOf(v2.bytes));
   });
 });

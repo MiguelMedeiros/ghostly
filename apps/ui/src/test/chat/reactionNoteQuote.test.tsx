@@ -5,6 +5,7 @@ import type { GroupMemberView, ReactionNote } from "@ghostly/browser/shared/type
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { forgetInstalledApps } from "../../lib/apps/installed";
+import { isolate } from "../../lib/ownStatus";
 import { reactionNoteText } from "../../lib/reactions";
 import { saveSession } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
@@ -40,24 +41,24 @@ afterEach(() => forgetInstalledApps());
 
 describe("reactionNoteText in Portuguese", () => {
   it("with the message's row: a voice message and an app card read as their quotes do, with no link", () => {
-    expect(reactionNoteText(note({ message: voiceRow.id }), "Ana", pt, { row: voiceRow })).toBe('Você reagiu com ❤️ a "🎤 Mensagem de voz (0:07)"');
+    expect(reactionNoteText(note({ message: voiceRow.id }), "Ana", pt, { row: voiceRow })).toBe(`Você reagiu com ❤️ a "${isolate("🎤 Mensagem de voz (0:07)")}"`);
     // Where the chat draws the card: its line. Where it draws its text (a group, Apps off): that text, without the link.
     const app = note({ by: "peer", snippet: `🧩 Opened Chess 1.2.0 in this chat (Ghostly app) ${URL}`, mine: true, message: appRow.id });
-    expect(reactionNoteText(app, "Ana", pt, { row: appRow, appCards: true })).toBe('Ana reagiu com ❤️ a "🧩 App: Chess 1.2.0"');
+    expect(reactionNoteText(app, "Ana", pt, { row: appRow, appCards: true })).toBe(`${isolate("Ana")} reagiu com ❤️ a "${isolate("🧩 App: Chess 1.2.0")}"`);
     const asText = reactionNoteText(app, "Ana", pt, { row: appRow, appCards: false });
-    expect(asText).toBe('Ana reagiu com ❤️ a "🧩 Opened Chess 1.2.0 in this chat (Ghostly app)"');
+    expect(asText).toBe(`${isolate("Ana")} reagiu com ❤️ a "${isolate("🧩 Opened Chess 1.2.0 in this chat (Ghostly app)")}"`);
     expect(asText).not.toContain("https://");
   });
 
   it("without the row: what the note says its message is, and a note from before that says its snippet", () => {
-    expect(reactionNoteText(note({ kind: { voice: 7_000 } }), "Ana", pt)).toBe('Você reagiu com ❤️ a "🎤 Mensagem de voz (0:07)"');
-    expect(reactionNoteText(note({ snippet: "🎬 Video (0:12)", kind: { video: 12_000 } }), "Ana", pt)).toBe('Você reagiu com ❤️ a "🎬 Vídeo (0:12)"');
+    expect(reactionNoteText(note({ kind: { voice: 7_000 } }), "Ana", pt)).toBe(`Você reagiu com ❤️ a "${isolate("🎤 Mensagem de voz (0:07)")}"`);
+    expect(reactionNoteText(note({ snippet: "🎬 Video (0:12)", kind: { video: 12_000 } }), "Ana", pt)).toBe(`Você reagiu com ❤️ a "${isolate("🎬 Vídeo (0:12)")}"`);
     const app = note({ snippet: "🧩 Opened Chess 1.2.0 in this chat (Ghostly app)", kind: { app: { ref: REF, title: "Chess", version: "1.2.0" } } });
-    expect(reactionNoteText(app, "Ana", pt, { appCards: true })).toBe('Você reagiu com ❤️ a "🧩 App: Chess 1.2.0"');
-    expect(reactionNoteText(app, "Ana", pt, { appCards: false })).toBe('Você reagiu com ❤️ a "🧩 Opened Chess 1.2.0 in this chat (Ghostly app)"');
+    expect(reactionNoteText(app, "Ana", pt, { appCards: true })).toBe(`Você reagiu com ❤️ a "${isolate(`🧩 App: ${isolate("Chess")} ${isolate("1.2.0")}`)}"`);
+    expect(reactionNoteText(app, "Ana", pt, { appCards: false })).toBe(`Você reagiu com ❤️ a "${isolate("🧩 Opened Chess 1.2.0 in this chat (Ghostly app)")}"`);
     // A plain text, or a note kept from before the engine said what its message is.
-    expect(reactionNoteText(note({ snippet: "almoço?" }), "Ana", pt)).toBe('Você reagiu com ❤️ a "almoço?"');
-    expect(reactionNoteText(note({}), "Ana", pt, { row: undefined })).toBe(`Você reagiu com ❤️ a "${VOICE_TEXT}"`);
+    expect(reactionNoteText(note({ snippet: "almoço?" }), "Ana", pt)).toBe(`Você reagiu com ❤️ a "${isolate("almoço?")}"`);
+    expect(reactionNoteText(note({}), "Ana", pt, { row: undefined })).toBe(`Você reagiu com ❤️ a "${isolate(VOICE_TEXT)}"`);
   });
 });
 
@@ -75,7 +76,37 @@ describe("the chat list's rows in Portuguese", () => {
       lastReaction: note({ by: key(101), at: NOW - 30_000, snippet: "🎬 Video (0:12)", kind: { video: 12_000 }, message: `${key(101)}:0:1` }),
     })] });
     renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "pt" });
-    await waitFor(() => expect(within(screen.getByTestId("chat-row")).getByTestId("chat-row-preview")).toHaveTextContent('reagiu com ❤️ a "🎤 Mensagem de voz (0:07)"'));
-    expect(screen.getByTestId("group-row-note")).toHaveTextContent('Member 1 reagiu com ❤️ a "🎬 Vídeo (0:12)"');
+    await waitFor(() => expect(within(screen.getByTestId("chat-row")).getByTestId("chat-row-preview")).toHaveTextContent(`reagiu com ❤️ a "${isolate("🎤 Mensagem de voz (0:07)")}"`));
+    expect(screen.getByTestId("group-row-note")).toHaveTextContent(`${isolate("Member 1")} reagiu com ❤️ a "${isolate("🎬 Vídeo (0:12)")}"`);
+  });
+});
+
+/*
+ * A name and a message are the person's own words, in their own direction: "Bob!" in an Arabic line, or "مرحبا!" in an
+ * English one, keeps its "!" on its own side, as the group's lines keep theirs (each name its own <bdi>, GroupChat).
+ */
+describe("the reaction line in Arabic", () => {
+  const key = (i: number) => `p${i}`.padEnd(52, "a");
+
+  it("isolates the member's name and the message it quotes", async () => {
+    await loadLocale("ar");
+    const ar = translatorFor("ar");
+    const said = reactionNoteText(note({ by: "peer", snippet: "hi!", mine: true }), "Bob!", ar);
+    expect(said).toContain(isolate("Bob!"));
+    expect(said).toContain(isolate("hi!"));
+  });
+
+  it("in a group's row of the list", async () => {
+    const NOW = Date.now();
+    const members: GroupMemberView[] = [
+      { key: key(100), role: "admin", me: true, nick: "Me", online: true, missing: 0 },
+      { key: key(101), role: "member", me: false, nick: "Bob!", online: true, missing: 0 },
+    ];
+    fakeEngine.update({ groupsLoaded: true, groups: [groupView({ id: "g-1", name: "Group", status: "active", lastMessageAt: NOW - 60_000, myKey: key(100), members,
+      lastReaction: note({ by: key(101), at: NOW - 30_000, snippet: "hi!", message: `${key(101)}:0:1` }) })] });
+    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "ar" });
+    const line = await screen.findByTestId("group-row-note");
+    expect(line.textContent).toContain(isolate("Bob!"));
+    expect(line.textContent).toContain(`"${isolate("hi!")}"`);
   });
 });

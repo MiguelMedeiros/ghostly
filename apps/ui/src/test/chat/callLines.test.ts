@@ -153,8 +153,9 @@ describe("a burst of missed calls from the contact", () => {
 });
 
 describe("why a chat's call buttons are off", () => {
-  // As the engine says them (packages/core ghostlink.ts `callsUnavailable`, packages/browser engine/node.ts linkView).
-  const REASONS = ["Calls need a live connection", "Your contact's app cannot take calls", "Your contact needs an updated Ghostly for calls", "Calls are not available in this app"];
+  // As the engine says them (packages/core ghostlink.ts `callsUnavailable`, packages/browser engine/node.ts viewOf).
+  const REASONS = ["Calls need a live connection", "Your contact's app cannot take calls", "Your contact needs an updated Ghostly for calls", "Calls are not available in this app",
+    "You blocked this contact. Unblock them to call"];
 
   it("is nothing while the chat can call", () => {
     expect(callsBlockedText(english, null)).toBeNull();

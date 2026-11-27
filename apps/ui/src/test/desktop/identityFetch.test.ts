@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@ghostly/browser/inPageHost", () => ({ createInPageHost: (options: unknown) => options }));
 
 import { boundedIdentityFetch } from "@ghostly/browser/proofs/verify";
+import { atprotoReader } from "@ghostly/browser/profiles/readers";
 import { createDesktopHost } from "../../desktop/host";
 
 /*
@@ -41,9 +42,17 @@ describe("the Desktop host's identity reads", () => {
     vi.stubGlobal("fetch", page);
     invoke.mockImplementation(async (command) => command === "hold_fetch" ? { status: 200, contentType: "application/did+json", bodyB64: btoa("{}") } : undefined);
     const answer = await read()("https://contact.example/.well-known/did.json", { headers: { accept: "application/did+json" } });
-    expect(invoke).toHaveBeenCalledWith("hold_fetch", { url: "https://contact.example/.well-known/did.json", headers: [["accept", "application/did+json"]] });
+    expect(invoke).toHaveBeenCalledWith("hold_fetch", { url: "https://contact.example/.well-known/did.json", headers: [["accept", "application/did+json"]], maxBytes: 64 * 1024, timeoutMs: 10_000 });
     expect(page).not.toHaveBeenCalled();
     expect(answer).toMatchObject({ status: 200, contentType: "application/did+json", text: "{}" });
+  });
+
+  it("tell Rust the read's own size and time, not a held item's, and refuse what Rust found past the size", async () => {
+    invoke.mockImplementation(async () => ({ status: 200, contentType: "", bodyB64: "" }));
+    await boundedIdentityFetch({ online: () => true, timeoutMs: 7_000, fetcher: identityFetch() })("https://contact.example/x", { maxBytes: 256 * 1024 });
+    expect(invoke).toHaveBeenCalledWith("hold_fetch", expect.objectContaining({ maxBytes: 256 * 1024, timeoutMs: 7_000 }));
+    invoke.mockImplementation(async () => { throw "The held item is too large"; });
+    await expect(read()("https://contact.example/.well-known/did.json")).rejects.toThrow("Identity check response too large");
   });
 
   it("fail when Rust refuses a name that leads to this machine or its network", async () => {
@@ -54,6 +63,13 @@ describe("the Desktop host's identity reads", () => {
   it("refuse a redirect, as the page's fetch does", async () => {
     invoke.mockImplementation(async () => ({ status: 302, contentType: "", bodyB64: "" }));
     await expect(read()("https://contact.example/.well-known/did.json")).rejects.toThrow(/Redirect refused/);
+  });
+
+  it("keep an error answer's body, so an account that is gone reads as no profile, not a failed read", async () => {
+    invoke.mockImplementation(async () => ({ status: 400, contentType: "application/json", bodyB64: btoa('{"error":"AccountDeactivated"}') }));
+    const did = "did:plc:abcdefghijklmnopqrstuvwx";
+    await expect(atprotoReader.read(did, { fetch: read(), signal: AbortSignal.timeout(5_000) } as Parameters<typeof atprotoReader.read>[1]))
+      .resolves.toMatchObject({ found: false });
   });
 
   it("send nothing but a GET, and nothing once the read gave up", async () => {

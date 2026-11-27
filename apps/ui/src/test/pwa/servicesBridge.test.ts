@@ -81,7 +81,7 @@ describe("the bridge's frame of the contact's app", () => {
 
   afterEach(() => { vi.unstubAllGlobals(); vi.resetModules(); document.body.replaceChildren(); });
 
-  async function bridgeFrame(relayOnly?: boolean): Promise<HTMLIFrameElement> {
+  async function bridgeFrame(relayOnly?: boolean, title?: unknown): Promise<HTMLIFrameElement> {
     const dom = (window as unknown as { happyDOM?: { setURL(url: string): void; settings: { disableIframePageLoading: boolean; handleDisabledFileLoadingAsSuccess: boolean } } }).happyDOM!;
     Object.assign(dom.settings, { disableIframePageLoading: true, handleDisabledFileLoadingAsSuccess: true });
     dom.setURL(`https://${LABEL}.svc.ghostly.example/_ghostly-svc/bridge.html`);
@@ -97,7 +97,7 @@ describe("the bridge's frame of the contact's app", () => {
     await import("../../../../web/src/svc/bridge");
     expect(parent.postMessage).toHaveBeenCalled();
     const { port1 } = new MessageChannel();
-    window.dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_PORT, ...(relayOnly === undefined ? {} : { relayOnly }) }, origin: APP_ORIGIN, source: parent as unknown as Window, ports: [port1] }));
+    window.dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_PORT, ...(relayOnly === undefined ? {} : { relayOnly }), ...(title === undefined ? {} : { title }) }, origin: APP_ORIGIN, source: parent as unknown as Window, ports: [port1] }));
     await vi.waitFor(() => expect(document.querySelector("iframe")).not.toBeNull());
     return document.querySelector("iframe")!;
   }
@@ -105,6 +105,16 @@ describe("the bridge's frame of the contact's app", () => {
   it("cannot take the screen from the view's bar: no full screen", async () => {
     const frame = await bridgeFrame();
     expect(frame.getAttribute("allow")).toBe("");
+  });
+
+  it("is named by the view's label in the profile's language, never \"Ghostly\": the bar says the app is not Ghostly", async () => {
+    document.title = "Ghostly";
+    expect((await bridgeFrame(false, "Démo, partagée par Ana")).title).toBe("Démo, partagée par Ana");
+    for (const title of [undefined, 42, ""]) {
+      document.body.replaceChildren();
+      vi.resetModules();
+      expect((await bridgeFrame(false, title)).title, String(title)).toBe("");
+    }
   });
 
   it("runs the WebRTC guard first while Hide my IP from contacts is on: the app's frame, on this origin, reaches this window", async () => {
@@ -315,6 +325,75 @@ describe("the bridge's frame of the contact's app", () => {
     } finally {
       windowSpy.mockRestore();
       documentSpy.mockRestore();
+      for (const [name, descriptor] of own) {
+        if (descriptor) Object.defineProperty(Document.prototype, name, descriptor);
+        else delete (Document.prototype as unknown as Record<string, unknown>)[name];
+      }
+      delete (Navigator.prototype as { userActivation?: unknown }).userActivation;
+    }
+  });
+
+  it("hands on the links of the app's page after it rewrites itself with document.open(), which takes its listeners away", async () => {
+    class FakeActivation { get isActive() { return true; } }
+    vi.stubGlobal("UserActivation", FakeActivation);
+    const activation = new FakeActivation();
+    Object.defineProperty(Navigator.prototype, "userActivation", { get: () => activation, configurable: true });
+    const page = document.implementation.createHTMLDocument();
+    const own = ["URL", "contentType", "readyState"].map((name) => [name, Object.getOwnPropertyDescriptor(Document.prototype, name)] as const);
+    for (const [name, value] of [["URL", () => `https://${LABEL}.svc.ghostly.example/`], ["contentType", () => "text/plain"], ["readyState", () => "interactive"]] as const) {
+      Object.defineProperty(Document.prototype, name, { get: value, configurable: true });
+    }
+    // The page's window, whose listeners `document.open()` takes away as a browser does (HTML's document open steps;
+    // happy-dom takes only the document's).
+    const target = new EventTarget();
+    const listening: Parameters<EventTarget["addEventListener"]>[] = [];
+    const win = Object.assign(target, { open: () => null, document: page }) as unknown as Window;
+    const add = EventTarget.prototype.addEventListener;
+    win.addEventListener = ((...args: Parameters<EventTarget["addEventListener"]>) => { listening.push(args); add.apply(target, args); }) as Window["addEventListener"];
+    const rewrite = page.open as (this: Document) => Document;
+    page.open = function (this: Document) {
+      for (const [type, listener, options] of listening.splice(0)) target.removeEventListener(type, listener, options);
+      return rewrite.call(this);
+    } as unknown as Document["open"];
+    const framed = [vi.spyOn(HTMLIFrameElement.prototype, "contentWindow", "get").mockReturnValue(win), vi.spyOn(HTMLIFrameElement.prototype, "contentDocument", "get").mockReturnValue(page)];
+    // A click on a link to another site in a new window, in the page as the browser hands it to the window.
+    const click = () => {
+      const link = page.createElement("a");
+      link.setAttribute("href", "https://docs.example/guide");
+      link.setAttribute("target", "_blank");
+      page.body.append(link);
+      const event = new MouseEvent("click", { button: 0, cancelable: true });
+      Object.defineProperty(event, "composedPath", { value: () => [link, page.body, page.documentElement, page, win] });
+      win.dispatchEvent(event);
+    };
+    const tap = () => win.dispatchEvent(Object.defineProperty(new Event("pointerdown"), "isTrusted", { value: true }));
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      await bridgeFrame();
+      const parent = window.parent as unknown as { postMessage: ReturnType<typeof vi.fn> };
+      const handed = () => parent.postMessage.mock.calls.filter(([data]) => (data as { type?: unknown }).type === BRIDGE_OPEN_LINK).length;
+      await vi.waitFor(() => expect(parent.postMessage).toHaveBeenCalledWith({ type: BRIDGE_SHOWN }, APP_ORIGIN));
+      const each = listening.length;
+      tap();
+      click();
+      expect(handed()).toBe(1);
+      // The page writes itself anew, twice: the bridge's listeners are back, once each.
+      for (let i = 0; i < 2; i++) {
+        page.open();
+        page.write("<p>written</p>");
+        page.close();
+        await vi.waitFor(() => expect(listening).toHaveLength(each));
+      }
+      click();
+      expect(handed()).toBe(2);
+      // A tap after the seconds the one before counts: seen again too.
+      vi.setSystemTime(Date.now() + 6_000);
+      tap();
+      click();
+      expect(handed()).toBe(3);
+    } finally {
+      vi.useRealTimers();
+      for (const spy of framed) spy.mockRestore();
       for (const [name, descriptor] of own) {
         if (descriptor) Object.defineProperty(Document.prototype, name, descriptor);
         else delete (Document.prototype as unknown as Record<string, unknown>)[name];

@@ -1,5 +1,7 @@
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { connect, expect, link, test, type Peer } from "../support/fixtures";
+import { watchCalls } from "../support/callTrace";
+import { iosKeyboard, keyboard } from "../support/keyboard";
 import { smallTargets } from "../support/touchTargets";
 
 /**
@@ -278,6 +280,54 @@ for (const width of [320, 414]) {
   });
 }
 
+/**
+ * Makes the call's connection in this page say its ICE went `disconnected` (paired-calls.spec.ts): the call shows
+ * Reconnecting... and restarts ICE. The page must be watched with `watchCalls` from before the call.
+ */
+const loseIce = (peer: Peer) => peer.page.evaluate(() => {
+  const recorded = (globalThis as unknown as { __callPcs?: { pc: RTCPeerConnection }[] }).__callPcs ?? [];
+  const pc = recorded.map((r) => r.pc).filter((pc) => pc.getTransceivers().length > 0).pop();
+  if (!pc) throw new Error("no call connection");
+  Object.defineProperty(pc, "iceConnectionState", { configurable: true, get: () => "disconnected" });
+  pc.oniceconnectionstatechange?.(new Event("iceconnectionstatechange"));
+});
+
+/** The whole window's state line: its parts that lie under the corner button. */
+const underCorner = (page: Page) => page.getByTestId("call-window").evaluate((win) => {
+  const button = win.querySelector("[data-testid=call-minimize]")!.getBoundingClientRect();
+  return [...win.querySelectorAll("[data-testid=call-status] > span")].flatMap((part) => [...part.getClientRects()]
+    .filter((r) => r.left < button.right && r.right > button.left && r.top < button.bottom && r.bottom > button.top)
+    .map((r) => `${part.textContent} at ${Math.round(r.left)}..${Math.round(r.right)}, ${Math.round(r.top)}..${Math.round(r.bottom)}`));
+});
+
+for (const language of ["es", "pt", "it"]) {
+  test(`a 320 px phone's call says Reconnecting clear of the corner button: ${language}`, { tag: ["@feature:calls.reconnect", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+    const alice = await peer("alice");
+    const bob: Peer = await peer("bob", { mobile: true, viewport: { width: 320, height: 640 } });
+    await link(alice, bob);
+    await connect(alice, bob);
+    await bob.page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await bob.page.reload();
+    await expect(bob.page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+    await watchCalls(bob.page);
+    await expect(bob.page.getByTestId("call-audio")).toBeEnabled({ timeout: 30_000 });
+    await bob.page.getByTestId("call-audio").click();
+    await alice.page.getByTitle("Accept audio call").click();
+    const status = bob.page.getByTestId("call-status");
+    await expect(status).toHaveAttribute("data-state", "connected");
+    await loseIce(bob);
+    await expect(status).toHaveAttribute("data-reconnecting", "true");
+    await bob.page.screenshot({ path: testInfo.outputPath(`reconnecting-320-${language}.png`) });
+    // "Llamada de audio  Reconectando..." was centred over the whole 320 px and started at 49: under the button (16..60).
+    await expect.poll(() => underCorner(bob.page)).toEqual([]);
+    await bob.page.getByTestId("call-hang-up").click();
+    await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
+  });
+}
+
 /** The page stops (or, with null, starts again) listing this device, and hears that the devices changed (media-devices.spec.ts). */
 const unplug = (peer: Peer, deviceId: string | null) => peer.page.evaluate((deviceId) => {
   const media = navigator.mediaDevices as MediaDevices & { real?: MediaDevices["enumerateDevices"]; hidden?: string | null };
@@ -421,3 +471,72 @@ test("on a phone the notice that the contact shares their screen is clear of you
   expect([await onTop(box.x + 12), await onTop(box.x + box.width - 12)]).toEqual([true, true]);
   await bob.page.getByTestId("call-hang-up").click();
 });
+
+/**
+ * A phone's small call window with the keyboard up (e2e/support/keyboard.ts: only the visual viewport gets shorter, as
+ * on an iPhone). It stood where the whole screen had placed it: on its side (667×375, a 200 px keyboard, 175 px left)
+ * over the message field's end and its Send, its End call behind the keyboard; upright (375×667, a 300 px keyboard,
+ * 367 px left) wholly behind the keyboard, Mute and End call with it. On its side it is a one-line bar over the chat's
+ * header now, and upright it stands above the field; it is back in its corner when the keyboard goes down.
+ */
+const KEYBOARD_SCREENS = [
+  { name: "on its side", width: 667, height: 375, keyboard: 200, compact: true },
+  { name: "upright", width: 375, height: 667, keyboard: 300, compact: false },
+];
+for (const screen of KEYBOARD_SCREENS) {
+  test(`a phone ${screen.name} with the keyboard up: the small call window stays in what the keyboard leaves, clear of the message field`, { tag: ["@feature:calls.mini-window", "@feature:app.mobile-layout"] }, async ({ peer }, testInfo) => {
+    const alice = await peer("alice");
+    const bob = await peer("bob", { mobile: true, viewport: { width: screen.width, height: screen.height } });
+    await iosKeyboard(bob.page);
+    await expect(bob.page.getByTitle("New Chat")).toBeVisible();
+    await link(alice, bob);
+    await connect(alice, bob);
+    await alice.page.getByTestId("call-audio").click();
+    await bob.page.getByTitle("Accept audio call").click();
+    await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+    await bob.page.getByTestId("call-minimize").click();
+    const small = bob.page.getByTestId("call-window");
+    await expect(small).toHaveAttribute("data-mini", "true");
+    const before = (await small.boundingBox())!;
+    await bob.page.screenshot({ path: testInfo.outputPath(`small-window-keyboard-${screen.width}-before.png`) });
+
+    const field = bob.page.locator(".composer-textarea");
+    await field.focus();
+    await keyboard(bob.page, screen.keyboard);
+    await expect(bob.page.locator("html")).toHaveAttribute("data-keyboard", "true");
+    if (screen.compact) await expect(small).toHaveAttribute("data-compact", "true");
+    else await expect(small).not.toHaveAttribute("data-compact");
+    await bob.page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    await bob.page.screenshot({ path: testInfo.outputPath(`small-window-keyboard-${screen.width}-up.png`) });
+
+    const visible = screen.height - screen.keyboard;
+    const box = (await small.boundingBox())!, composer = (await bob.page.locator("[data-composer]").boundingBox())!;
+    expect(composer.y + composer.height, "the message field above the keyboard").toBeLessThanOrEqual(visible + 1);
+    expect(box.y, "the call's top on screen").toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height, "the call clear of the message field").toBeLessThanOrEqual(composer.y);
+    if (screen.compact) expect(box.y + box.height, "the bar on the chat's header").toBeLessThanOrEqual(56);
+    // A tap on the field, on Send (or voice), on Mute and on End call lands on each: none under the call or the keyboard.
+    const reached = await bob.page.evaluate(([visible, selectors]) => selectors.filter((selector) => {
+      const b = document.querySelector(selector)!.getBoundingClientRect();
+      const x = b.left + b.width / 2, y = b.top + b.height / 2;
+      return y < visible && !!document.elementFromPoint(x, y)?.closest(selector);
+    }), [visible, [".composer-textarea", ".composer-send, [data-testid=voice-record]", "[data-testid=call-mute]", "[data-testid=call-hang-up]"]] as const);
+    expect(reached).toEqual([".composer-textarea", ".composer-send, [data-testid=voice-record]", "[data-testid=call-mute]", "[data-testid=call-hang-up]"]);
+    const tiny = (await smallTargets(bob.page, 44, "[data-testid=call-window] button")).map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`);
+    expect(tiny, "the call's buttons under 44 × 44 px").toEqual([]);
+    // The person is typing: the call takes no focus from the field.
+    await expect(field).toBeFocused();
+    await expect(small.getByRole("button", { name: "Mute" })).toBeVisible();
+    await expect(small.getByRole("button", { name: "End call" })).toBeVisible();
+
+    // Keyboard down: the small window again, in its corner.
+    await keyboard(bob.page, 0);
+    await field.blur();
+    await expect(bob.page.locator("html")).toHaveAttribute("data-keyboard", "false");
+    await expect(small).not.toHaveAttribute("data-compact");
+    await expect.poll(async () => (await small.boundingBox())!).toEqual(before);
+    await bob.page.screenshot({ path: testInfo.outputPath(`small-window-keyboard-${screen.width}-after.png`) });
+    await bob.page.getByTestId("call-hang-up").click();
+    await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
+  });
+}

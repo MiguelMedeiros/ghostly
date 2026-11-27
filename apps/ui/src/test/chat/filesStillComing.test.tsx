@@ -33,10 +33,13 @@ const offer = (patch: Partial<ChatFile> = {}): ChatFile => ({ id: OFFER, name: "
 const taken = (size: number, transferred: number, patch: Partial<FileTransferState> = {}): FileTransferState =>
   ({ state: "transferring", direction: "in", size, transferred, ...patch });
 
-/** Chat 1 offers a 30 MB file; chat 2 (Bob) has two taken files still coming; other transfers hold no room. */
+/**
+ * Chat 1 offers a 30 MB file; chat 2 (Bob) has two taken files still coming; other transfers hold no room. Bob's chat is
+ * stored under its own id, not its link's, and found by his key, as in the app.
+ */
 function world(offerPatch: Partial<FileTransferState> = {}) {
   saveSession({
-    id: "chat2", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: "Ym9i", encKeyB64: "a2V5", createdAt: 1, nick: "Bob",
+    id: "5e4c22ff", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: "bob", encKeyB64: "a2V5", createdAt: 1, nick: "Bob",
     messages: [
       { id: "m1", text: "", sender: "peer", timestamp: 1, file: { id: "chat2-in-big", name: "backup.iso", size: 25 * MB, mime: "application/octet-stream" } },
       { id: "m2", text: "", sender: "peer", timestamp: 2, file: { id: "chat2-in-paused", name: "song.flac", size: 10 * MB, mime: "audio/flac" } },
@@ -98,6 +101,59 @@ describe("an offer refused for the files still coming names them", () => {
     // Arrived, cancelled: it leaves the list.
     act(() => fakeEngine.update({ transfers: { ...fakeEngine.state.transfers, "chat2-in-paused": { state: "failed", direction: "in", size: 10 * MB, transferred: 4 * MB, error: "You cancelled it" } } }));
     expect(rows()).toHaveLength(1);
+  });
+
+  it("a row's Cancel that takes its row away leaves the focus on the next row's Cancel, and the last one's on Accept", async () => {
+    world();
+    renderApp(<FileBubble file={offer()} peerName="Ana" />);
+    fireEvent.click(screen.getByTestId("file-accept"));
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    const cancelled = (fileId: string, size: number) =>
+      act(() => fakeEngine.update({ transfers: { ...fakeEngine.state.transfers, [fileId]: { state: "failed", direction: "in", size, transferred: 0, error: "You cancelled it" } } }));
+    const first = within(rows()[0]).getByRole("button", { name: "Cancel backup.iso" });
+    first.focus();
+    fireEvent.click(first);
+    await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toHaveLength(2));
+    cancelled("chat2-in-big", 25 * MB);
+    expect(rows()).toHaveLength(1);
+    await waitFor(() => expect(document.activeElement).toBe(within(rows()[0]).getByRole("button", { name: "Cancel song.flac" })));
+    fireEvent.click(document.activeElement!);
+    await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toHaveLength(3));
+    cancelled("chat2-in-paused", 10 * MB);
+    // The list is gone with its last row: the focus goes to the offer's Accept, to take it now that there is room.
+    expect(screen.queryByTestId("files-coming")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("file-accept")));
+  });
+
+  it.each([
+    ["video", () => <VideoBubble file={offer({ name: "clip.mp4", mime: "video/mp4" })} sender="peer" peerName="Ana" />],
+    ["audio", () => <AudioBubble file={offer({ name: "talk.mp3", mime: "audio/mpeg" })} sender="peer" peerName="Ana" />],
+  ])("a %s offer: the last row's Cancel leaves the focus on the offer's Accept", async (kind, bubble) => {
+    world();
+    act(() => fakeEngine.update({ transfers: { [OFFER]: taken(30 * MB, 0, { stage: "asking", room: 4 * MB }), "chat2-in-big": taken(25 * MB, 1 * MB) } }));
+    renderApp(bubble());
+    fireEvent.click(screen.getByTestId(`${kind}-accept`));
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    const cancel = within(rows()[0]).getByRole("button", { name: "Cancel backup.iso" });
+    cancel.focus();
+    fireEvent.click(cancel);
+    await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toHaveLength(2));
+    act(() => fakeEngine.update({ transfers: { ...fakeEngine.state.transfers, "chat2-in-big": { state: "failed", direction: "in", size: 25 * MB, transferred: MB, error: "You cancelled it" } } }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId(`${kind}-accept`)));
+  });
+
+  it("a Cancel the engine refuses keeps its row, and the focus on it", async () => {
+    world();
+    fakeEngine.on("fileAction", ({ action }: { action: string }) => { throw new Error(action === "accept" ? REFUSAL : "That file is not here"); });
+    renderApp(<FileBubble file={offer()} peerName="Ana" />);
+    fireEvent.click(screen.getByTestId("file-accept"));
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    const cancel = within(rows()[0]).getByRole("button", { name: "Cancel backup.iso" });
+    cancel.focus();
+    fireEvent.click(cancel);
+    await waitFor(() => expect(within(screen.getByTestId("files-coming")).getByRole("alert")).toBeInTheDocument());
+    expect(rows()).toHaveLength(2);
+    expect(document.activeElement).toBe(cancel);
   });
 
   it("an offer that shows it does not fit has the list behind a button before Accept; one that fits has none", () => {

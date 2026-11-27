@@ -13,10 +13,19 @@ const GAP = 4;
 /** A field the on-screen keyboard types into. */
 const TYPED = "input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit], [type=file]), textarea, select, [contenteditable]:not([contenteditable=false])";
 /**
- * Whether the rows are in a phone's sheet. There a row's hint wraps: cut, the rest of it showed only in the row's
- * `title`, which a touch screen never shows (the French New menu at a larger text size).
+ * Whether the rows are in a phone's sheet. There a row's hint, and the label of a row with no hint, wrap: cut, the rest
+ * showed only in the row's `title`, which a touch screen never shows (the French New menu at a larger text size, an
+ * Italian device's Check connection at 200 % text on a 320 px phone).
  */
 const InSheet = createContext(false);
+
+/**
+ * The menus open now. One at a time, as a desktop's own menus: one that opens closes the others, but those it opens
+ * from (its opener is in them). Their outside press could not do it for every way a menu opens: a right-click opens its
+ * menu between the press and the release, so at the release the menu open before had a newer layer over it and stayed
+ * (three right-clicks on three messages left three menus open), and the keyboard's menu key presses nothing.
+ */
+const openMenus = new Set<{ menu: RefObject<HTMLElement | null>; close: () => void }>();
 
 /**
  * A dropdown of actions. Every row is one line in every language: the menu is as wide as its longest row
@@ -145,20 +154,28 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
     };
     // A scroll of the page under it moves its opener; one of its own rows (the wheel, its scrollbar, End) moves nothing.
     const pageScrolled = (e: Event) => { if (!(e.target instanceof Node && ref.current?.contains(e.target))) fit(); };
+    // The keyboard coming up or going down moves the opener (the message field's row rides it) while the window hears
+    // no resize on iOS: fitted again once the page has its new height.
+    let frame = 0;
+    const keyboardMoved = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(fit); };
     fit();
     window.addEventListener("resize", fit);
+    window.visualViewport?.addEventListener("resize", keyboardMoved);
     if (portal) window.addEventListener("scroll", pageScrolled, true);
     return () => {
+      cancelAnimationFrame(frame);
       window.removeEventListener("resize", fit);
+      window.visualViewport?.removeEventListener("resize", keyboardMoved);
       window.removeEventListener("scroll", pageScrolled, true);
     };
   }, [open, phone, anchorRef, prefer, portal, align, within, at]);
 
   // A sheet opened while typing (a long press on a message, the composer's +): the keyboard goes down, as in a native
   // app. iOS keeps it up otherwise, over the sheet's bottom rows, and the keys went on into the field behind the sheet:
-  // it moves no focus to a button from a timer (the long press) nor from a tap.
+  // it moves no focus to a button from a timer (the long press) nor from a tap. A popover too while a keyboard is up
+  // (a phone on its side is two panes wide): the composer's + menu opened under the keyboard, every row of it.
   useEffect(() => {
-    if (!open || !phone) return;
+    if (!open || !(phone || keyboardUp())) return;
     const at = document.activeElement;
     if (at instanceof HTMLElement && !ref.current?.contains(at) && at.matches(TYPED)) at.blur();
   }, [open, phone]);
@@ -172,14 +189,26 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
   // alone (on a phone the keyboard would come back up). In the layout phase, as the menu leaves: a dialog a row opens
   // then finds the button focused, and gives the focus back there when it closes. Before, it all went to the page.
   const openedFrom = useRef<Element | null>(null);
+  // Closed because another menu opened: the focus is the new one's, never taken back to this one's button.
+  const replaced = useRef(false);
   useLayoutEffect(() => {
     const opener = document.activeElement, menu = ref.current;
     openedFrom.current = opener;
     return () => {
-      if (!(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected || opener.matches(TYPED)) return;
+      if (replaced.current || !(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected || opener.matches(TYPED)) return;
       if (menu?.contains(document.activeElement)) opener.focus({ preventScroll: true });
     };
   }, []);
+
+  // One menu at a time (openMenus): after the line above, so this one's opener is read before another one closes.
+  const closing = useRef(onClose); closing.current = onClose;
+  useLayoutEffect(() => {
+    const self = { menu: ref, close: () => { replaced.current = true; closing.current(); } };
+    const from = anchorRef.current;
+    for (const other of [...openMenus]) if (!(from && other.menu.current?.contains(from))) other.close();
+    openMenus.add(self);
+    return () => { openMenus.delete(self); };
+  }, [anchorRef]);
 
   if (!open) return null;
 
@@ -232,13 +261,17 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
 
 type Rect = { left: number; right: number; top: number; bottom: number };
 
+/** Whether an on-screen keyboard is up (hooks/useViewportHeight.ts). */
+const keyboardUp = () => document.documentElement.dataset.keyboard === "true";
+
 /**
  * The window's safe area, or the part of it the opener's `within` ancestor covers. On a phone on its side the notch's
  * side, the rounded corners and the home indicator are off limits: with larger text a menu kept to the window's edges
  * reached into them.
  */
 function bounds(anchor: HTMLElement, within?: string): Rect {
-  const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
+  // With a keyboard up iOS keeps the window's height: the room ends where the keyboard starts.
+  const width = document.documentElement.clientWidth || window.innerWidth, height = keyboardUp() ? Math.min(window.innerHeight, window.visualViewport?.height ?? window.innerHeight) : window.innerHeight;
   const safe = safeAreaInsets();
   const box = { left: safe.left, top: safe.top, right: width - safe.right, bottom: height - safe.bottom };
   const area = within ? anchor.closest(within)?.getBoundingClientRect() : undefined;
@@ -260,7 +293,10 @@ function titleIfCut(row: HTMLElement) {
 export function MenuItem({ icon, children, hint, onClick, danger, disabled, busy, title, testId, className = "", data, checked, radio }: {
   icon?: ReactNode;
   children: ReactNode;
-  /** A second, quieter line under the label; one line too in a popover, wrapped in a phone's sheet. */
+  /**
+   * A second, quieter line under the label; one line too in a popover, wrapped in a phone's sheet. A row with a hint
+   * keeps its label (a name) on one line; a row with none is an action, whose label wraps in a sheet as a hint does.
+   */
   hint?: ReactNode;
   onClick: () => void;
   danger?: boolean;
@@ -301,7 +337,7 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, busy
       {icon && <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${hint ? "text-accent" : ""}`}>{icon}</span>}
       {hint
         ? <span className="min-w-0"><span data-menu-text className="block truncate">{children}</span><span data-menu-text className={`block ${sheet ? "whitespace-normal break-words" : "truncate"} text-xs text-text-muted`}>{hint}</span></span>
-        : <span data-menu-text className="min-w-0 truncate">{children}</span>}
+        : <span data-menu-text className={`min-w-0 ${sheet ? "whitespace-normal break-words" : "truncate"}`}>{children}</span>}
     </button>
   );
 }

@@ -1,9 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bech32, createBase58check } from "@scure/base";
+import { HDKey } from "@scure/bip32";
+import { generateMnemonic } from "@scure/bip39";
+import { wordlist as englishWords } from "@scure/bip39/wordlists/english.js";
 import { appRevocationFor, canonicalJsonBytes, readAppBundle, readAppRevocations, seedSigner, signAppRevocation, type AppManifest } from "@ghostly/core";
 import { publishApp, verifyApp, writeWhole } from "../src/apps";
 import { CliError } from "../src/errors";
@@ -254,6 +259,7 @@ describe("app publish", () => {
     }
     // A key kept elsewhere, but a key file (this one, another's, any PEM private key) left in the folder.
     const key = vectorKey(tmp(), "publisher");
+    const pem = readFileSync(key, "utf8");
     for (const [path, text] of [
       ["publisher.key", readFileSync(key, "utf8")],
       ["old/store.pem", `Ghostly store key (WISP 1200). Secret.\n${readFileSync(key, "utf8")}`],
@@ -263,6 +269,26 @@ describe("app publish", () => {
       ["deploy/server.key", generateKeyPairSync("ec", { namedCurve: "P-256", publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "sec1", format: "pem", cipher: "aes-256-cbc", passphrase: "hunter2" } }).privateKey],
       // An OpenPGP secret key (`gpg --export-secret-keys --armor`): a "PRIVATE KEY BLOCK", here with a version header.
       ["signing/secret.asc", `-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: GnuPG v2.4.5\n\n${"lQOYBGVt3n8BCADKz1x9".repeat(4)}\n=Xk2Q\n-----END PGP PRIVATE KEY BLOCK-----\n`],
+      // A key in a JSON or JS string, its line breaks written `\n`: a cloud service account's file, a key pasted into code.
+      ["firebase-adminsdk.json", JSON.stringify({ type: "service_account", private_key: generateKeyPairSync("rsa", { modulusLength: 2048, publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "pkcs8", format: "pem" } }).privateKey }, null, 2)],
+      ["config.js", `export const key = ${JSON.stringify(readFileSync(key, "utf8").replace(/\n/g, "\r\n"))};\n`],
+      // A service account's JSON kept in a JSON string (an env var, a config value): its line breaks written `\\n`.
+      ["env.json", JSON.stringify({ GOOGLE_CREDENTIALS: JSON.stringify({ type: "service_account", private_key: pem }) })],
+      // The key base64-encoded, as CI and Kubernetes secrets keep it: on one line, wrapped at 76 (`base64`), or after a
+      // header line (a Ghostly key file), so its "-----BEGIN" is not where a group of 3 bytes starts.
+      ["deploy.env", `APP=chess\nPRIVATE_KEY_B64=${Buffer.from(pem).toString("base64")}\n`],
+      ["secret.b64", `${Buffer.from(pem).toString("base64").replace(/.{76}/g, "$&\n")}\n`],
+      ["k8s/secret.yaml", `data:\n  publisher.key: ${Buffer.from(`Ghostly publisher key (WISP 1200). Secret.\n${pem}`).toString("base64")}\n`],
+      // Encoded twice: a base64 secret's value itself base64-encoded (a Kubernetes manifest's `data:` of an env file).
+      ["twice.env", `K=${Buffer.from(`KEY=${Buffer.from(pem).toString("base64")}\n`).toString("base64")}\n`],
+      // A key built from joined strings, one line each, or a JSON array of its lines.
+      ["key.js", `export const key =\n  ${pem.trimEnd().split("\n").map((line) => JSON.stringify(`${line}\n`)).join(" +\n  ")};\n`],
+      ["key-lines.json", JSON.stringify({ private_key: pem.trimEnd().split("\n") }, null, 2)],
+      // A template literal indented with tabs.
+      ["tabbed.js", `export function key() {\n\treturn \`\n${pem.replace(/^(?=.)/gm, "\t\t")}\t\`;\n}\n`],
+      // A file saved as UTF-16 (PowerShell's `>`, Notepad's "Unicode"), either byte order.
+      ["publisher-utf16.key", Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(pem, "utf16le")])],
+      ["publisher-utf16be.key", Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(pem, "utf16le").swap16()])],
     ] as const) {
       const leaky = appFolder(manifest, files);
       mkdirSync(dirname(join(leaky, path)), { recursive: true });
@@ -272,8 +298,60 @@ describe("app publish", () => {
       expect(existsSync(join(leaky, "app.ghostlyapp"))).toBe(false);
     }
     // Code that only names the block (a PEM parser) is not a key.
-    const parser = appFolder(manifest, new Map([...files, ["pem.js", new TextEncoder().encode('const head = "-----BEGIN PRIVATE KEY-----";\n')]]));
-    expect(ok(await ghostly(["app", "publish", parser, "--key", key]))).toMatchObject({ files: ["index.html", "pem.js"] });
+    // Nor code that wraps a body it is given in the block's lines, nor a picture's base64.
+    const lib = 'export const toPem = (base64DerOfThePrivateKeyWrappedAt64Columns) =>\n  "-----BEGIN PRIVATE KEY-----\\n" + base64DerOfThePrivateKeyWrappedAt64Columns + "\\n" +\n  "-----END PRIVATE KEY-----\\n";\n';
+    const parser = appFolder(manifest, new Map([...files, ["pem.js", new TextEncoder().encode(`const head = "-----BEGIN PRIVATE KEY-----";\n${lib}`)], ["icon.css", new TextEncoder().encode(`a{background:url(data:image/png;base64,${Buffer.alloc(3000, 7).toString("base64")})}\n`)]]));
+    expect(ok(await ghostly(["app", "publish", parser, "--key", key]))).toMatchObject({ files: ["icon.css", "index.html", "pem.js"] });
+  }, 60_000);
+
+  it("never bundles a Ghostly home: the CLI's own inside the folder, or any folder holding a profile's store", async () => {
+    const key = vectorKey(tmp(), "publisher");
+    // A bot's repository with its home beside the code (`GHOSTLY_HOME=./data`): the store holds the profile's seed.
+    const dir = tmp();
+    ok(await ghostly(["app", "init", dir]));
+    ok(await ghostly(["--home", join(dir, "data"), "profile", "create", "first", "--use"]));
+    mkdirSync(join(dir, "data", "profiles", "first", "db"), { recursive: true });
+    writeFileSync(join(dir, "data", "profiles", "first", "db", "snapshot.bin"), "a store");
+    for (const env of [{ GHOSTLY_HOME: join(dir, "data") }, { GHOSTLY_HOME: join(tmp(), "home") }]) {
+      const refusal = error(await ghostly(["app", "publish", dir, "--key", key], { env }), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+      expect(refusal.details?.reason).toBe("private-key");
+      expect(refusal.details?.detail).toMatch(/^data(\/profiles\/first)?$/);
+      expect(refusal.message).toContain("move it out of the app's folder");
+      expect(existsSync(join(dir, "app.ghostlyapp"))).toBe(false);
+    }
+    // --home names it as the variable does; the home is refused before its profile has a store too.
+    const fresh = tmp();
+    ok(await ghostly(["app", "init", fresh]));
+    ok(await ghostly(["--home", join(fresh, "bot"), "profile", "create", "first", "--use"]));
+    expect((error(await ghostly(["--home", join(fresh, "bot"), "app", "publish", fresh, "--key", key]), "refused", 1) as { details?: unknown }).details).toEqual({ reason: "private-key", detail: "bot" });
+    // Another home's profile, deeper in the folder, and the folder that is a profile's own.
+    const other = tmp();
+    ok(await ghostly(["app", "init", other]));
+    mkdirSync(join(other, "backup", "old", "profiles", "ana", "db"), { recursive: true });
+    writeFileSync(join(other, "backup", "old", "profiles", "ana", "db", "journal.bin"), "a journal");
+    await expect(publishApp(other, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "backup/old/profiles/ana" } });
+    writeFileSync(join(other, "backup", "old", "profiles", "ana", "ghostly-app.json"), readFileSync(join(other, "ghostly-app.json")));
+    await expect(publishApp(join(other, "backup", "old", "profiles", "ana"), key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "." } });
+    // A store under any name: a profile's folder copied as another, a bare store folder, and the store folder itself.
+    const copied = tmp();
+    ok(await ghostly(["app", "init", copied]));
+    mkdirSync(join(copied, "data", "db"), { recursive: true });
+    for (const file of ["snapshot.bin", "journal.bin"]) writeFileSync(join(copied, "data", "db", file), "a store");
+    await expect(publishApp(copied, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "data/db" } });
+    const loose = tmp();
+    ok(await ghostly(["app", "init", loose]));
+    mkdirSync(join(loose, "store"));
+    for (const file of ["journal.bin", "rows.db", "snapshot.bin"]) writeFileSync(join(loose, "store", file), "a store");
+    await expect(publishApp(loose, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "store" } });
+    writeFileSync(join(loose, "store", "ghostly-app.json"), readFileSync(join(loose, "ghostly-app.json")));
+    await expect(publishApp(join(loose, "store"), key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "." } });
+    // A folder that is only named so, with no store in it, is the app's.
+    const plain = tmp();
+    ok(await ghostly(["app", "init", plain]));
+    mkdirSync(join(plain, "profiles", "ana"), { recursive: true });
+    writeFileSync(join(plain, "profiles", "ana", "card.json"), "{}");
+    writeFileSync(join(plain, "snapshot.bin"), "a game's save");
+    expect(ok(await ghostly(["app", "publish", plain, "--key", key]))).toMatchObject({ files: expect.arrayContaining(["profiles/ana/card.json", "snapshot.bin"]) });
   }, 60_000);
 
   it("reads a file of key headers with no end once: 1 MiB of them publishes in moments, a key after them is still found", async () => {
@@ -288,6 +366,112 @@ describe("app publish", () => {
     expect(performance.now() - started).toBeLessThan(3_000);
     const leaky = appFolder(manifest, new Map([...files, ["fixtures/cut.pem", new TextEncoder().encode(cut + readFileSync(key, "utf8"))]]));
     await expect(publishApp(leaky, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "fixtures/cut.pem" } });
+  }, 60_000);
+
+  it("reads one long base64 run without running out of stack: a 6 MiB inlined asset publishes", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    // A wasm inlined as a data URL: one run of base64 past the 5 MiB the scan's stack held.
+    const wasm = `export const url = "data:application/wasm;base64,${randomBytes(4.5 * 1024 * 1024).toString("base64")}";\n`;
+    const dir = appFolder(manifest, new Map([...files, ["engine.js", new TextEncoder().encode(wasm)]]));
+    expect(await publishApp(dir, key)).toMatchObject({ files: ["engine.js", "index.html"] });
+  }, 60_000);
+
+  it("reads a long body after a key header without running out of stack: 8 MB of data publishes, with an end it is a key", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    // A header, then more body than the scan's stack held (about 5.6 M characters): an engine error, no file named.
+    const long = `-----BEGIN PRIVATE KEY-----\n${"MC4CAQAwBQYDK2VwBCIEI-".repeat(8 * 1024 * 1024 / 22)}`;
+    const dir = appFolder(manifest, new Map([...files, ["data.txt", new TextEncoder().encode(long)]]));
+    expect(await publishApp(dir, key)).toMatchObject({ files: ["data.txt", "index.html"] });
+    const leaky = appFolder(manifest, new Map([...files, ["data.txt", new TextEncoder().encode(`${long}\n-----END PRIVATE KEY-----\n`)]]));
+    await expect(publishApp(leaky, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "data.txt" } });
+  }, 60_000);
+
+  // Secrets the CLI's guard knows (secretGuard.ts, findSecret) in any text file, a key file's first line after a byte
+  // order mark or blank lines, and ghostly-app.json itself, whose description and release notes stores show. Every
+  // value is made here: no real key or seed sits in the repository.
+  it("never bundles a wallet's secret, a key file after a byte order mark or blank lines, nor a secret in ghostly-app.json", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    const pem = readFileSync(key, "utf8");
+    const hex = (bytes: number) => randomBytes(bytes).toString("hex");
+    const mnemonic = generateMnemonic(englishWords);
+    const nsec = bech32.encode("nsec", bech32.toWords(randomBytes(32)));
+    const wif = createBase58check(sha256).encode(Uint8Array.from([0x80, ...randomBytes(32), 0x01]));
+    const xprv = HDKey.fromMasterSeed(randomBytes(32)).privateExtendedKey;
+    const proof = { amount: 8, id: "00ad268c4d1f5826", secret: hex(32), C: `02${hex(32)}` };
+    const cashuA = `cashuA${Buffer.from(JSON.stringify({ token: [{ mint: "https://mint.example", proofs: [proof] }], unit: "sat" })).toString("base64url")}`;
+    // CBOR of {t: [{p: [{a: 8}]}], u: "sat"}.
+    const cashuB = `cashuB${Buffer.from("a2617481a1617081a1616108617563736174", "hex").toString("base64url")}`;
+    for (const [path, text] of [
+      ["publisher.key", `\ufeffGhostly publisher key (WISP 1200). Secret.\n`],
+      ["old/store.key", `\n\r\nGhostly store key (WISP 1200). Secret.\n`],
+      ["seed.txt", `${mnemonic}\n`],
+      ["wallet.json", JSON.stringify({ mnemonic }, null, 2)],
+      ["backup.js", `export const words = ${JSON.stringify(mnemonic.split(" "))};\n`],
+      ["nostr.js", `export const nsec = "${nsec}";\n`],
+      // After a `\n` written in a JSON string: the letter n is not part of the key.
+      ["notes.json", JSON.stringify({ text: `line one\n${nsec}` })],
+      ["keys.json", JSON.stringify({ wif })],
+      ["hd.js", `const root = '${xprv}';\n`],
+      ["tip.txt", `Thanks! ${cashuA}\n`],
+      ["tip-b.json", JSON.stringify({ token: cashuB })],
+      ["config.json", JSON.stringify({ relay: "wss://relay.example", privkey: hex(32) }, null, 2)],
+      // Base64 after a line of base64's letters: the run starts one character past a group of 4.
+      ["ci/token.b64", `token\n${Buffer.from(pem).toString("base64")}\n`],
+    ] as const) {
+      const leaky = appFolder(manifest, files);
+      mkdirSync(dirname(join(leaky, path)), { recursive: true });
+      writeFileSync(join(leaky, path), text);
+      const refusal = error(await ghostly(["app", "publish", leaky, "--key", key]), "refused", 1) as { details?: { reason?: string; detail?: string } };
+      expect(refusal.details, path).toEqual({ reason: "private-key", detail: path });
+      expect(existsSync(join(leaky, "app.ghostlyapp"))).toBe(false);
+    }
+    // In the manifest's own fields: refused as ghostly-app.json, which is said to keep it out of its fields.
+    for (const leak of [{ description: `${manifest.description}\n\n${pem}` }, { releaseNotes: `Fixed the clock. ${mnemonic}` }]) {
+      const leaky = appFolder({ ...manifest, ...leak }, files);
+      const refusal = error(await ghostly(["app", "publish", leaky, "--key", key]), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+      expect(refusal.details).toEqual({ reason: "private-key", detail: "ghostly-app.json" });
+      expect(refusal.message).toContain("take it out of the manifest's fields");
+      expect(existsSync(join(leaky, "app.ghostlyapp"))).toBe(false);
+    }
+    // Not secrets: hashes under their own names, a lockfile's integrity, prose and docs that name the kinds, a key
+    // file's first line inside a page, a wallet's copy of BIP39's list, whole (a run of 2048 seed words is no seed) or a
+    // piece of it in the list's order, and a file of 12 list words whose checksum fails (a message of them alone is
+    // asked about; a file's are not a seed).
+    const clean = appFolder(manifest, new Map([...files, ...([
+      ["package-lock.json", JSON.stringify({ packages: { "node_modules/x": { version: "1.0.0", integrity: `sha512-${randomBytes(64).toString("base64")}` } } }, null, 2)],
+      ["hashes.json", JSON.stringify({ sha256: hex(32), digest: `0x${hex(32)}`, seedHash: hex(32), commit: hex(20) }, null, 2)],
+      ["about.txt", `${manifest.description}\n`],
+      ["docs.md", "# Keys\n\nBack up the 12 or 24 words of your seed; never paste an nsec1… key, an xprv or a WIF, and a Cashu token (cashuA…) is money.\nThe key file opens with Ghostly publisher key (WISP 1200), on its first line.\n"],
+      ["twelve.txt", `ability ${"abandon ".repeat(11).trim()}`],
+      // Names that start as a token does, which decode to none.
+      ["wallet.js", "export const cashuAmountFormatterHelper = (sat) => `${sat} sat`;\n"],
+      // Code is full of the list's words, these 13 between its marks pass a checksum (apps/ui's useFloatingBox).
+      ["box.js", "export function fit(field, top, bottom) {\n  if (field.height > 0 && field.top > top && field.top < bottom) bottom = field.top;\n  return { top, bottom };\n}\n"],
+      ["words.js", `export const words = ${JSON.stringify(englishWords)};\n`],
+      // 24 of the list in its order, some 12 of which pass the checksum.
+      ["words-b.txt", `${englishWords.slice(24, 48).join("\n")}\n`],
+      // A game's bank of 64 of the list's words, in no order: more in a row than a seed has.
+      ["bank.json", JSON.stringify(Array.from({ length: 64 }, (_, i) => englishWords[(i * 997) % 2048]))],
+    ] as const).map(([path, text]) => [path, new TextEncoder().encode(text)] as [string, Uint8Array])]));
+    expect(ok(await ghostly(["app", "publish", clean, "--key", key]))).toMatchObject({ files: ["about.txt", "bank.json", "box.js", "docs.md", "hashes.json", "index.html", "package-lock.json", "twelve.txt", "wallet.js", "words-b.txt", "words.js"] });
+  }, 60_000);
+
+  it("refuses a source with a query or fragment, where a private repository's link carries its token, and writes no bundle", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    for (const source of ["https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?token=GHSAT0SECRET", "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp#GHSAT0SECRET"]) {
+      const dir = appFolder({ ...manifest, sources: [source] }, files);
+      const refusal = error(await ghostly(["app", "publish", dir, "--key", key]), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+      expect(refusal.details).toMatchObject({ reason: "private-link", detail: "sources" });
+      expect(refusal.message).toContain("https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?…");
+      expect(refusal.message).not.toContain("GHSAT0SECRET");
+      expect(existsSync(join(dir, "app.ghostlyapp"))).toBe(false);
+    }
+    // A homepage's query is no token: no client reads it.
+    expect(await publishApp(appFolder({ ...manifest, homepage: "https://ana.example/chess?ref=ghostly" }, files), key)).toMatchObject({ files: ["index.html"] });
   }, 60_000);
 
   it("lists a folder's files in the manifest's order when a file and a folder share a prefix", async () => {
@@ -735,7 +919,7 @@ describe("app verify <url>", () => {
   it("reads the ghostly-revoke.json beside each of the manifest's sources too, as a client does, each once", async () => {
     const { manifest, files } = chess();
     const head = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
-    const dir = appFolder({ ...manifest, sources: [head, `${head}?again=1`] }, files);
+    const dir = appFolder({ ...manifest, sources: [head, head.replace("app.ghostlyapp", "chess-2.ghostlyapp")] }, files);
     const key = vectorKey(tmp(), "publisher");
     ok(await ghostly(["app", "publish", dir, "--key", key]));
     ok(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "1", "--reason", "Leaked a test move list"]));
@@ -844,6 +1028,19 @@ describe("store sign", () => {
     expect(readFileSync(join(dir, "ghostly-store.json"), "utf8")).toBe(vector.index);
     expect(readFileSync(join(dir, "ghostly-store.sig"), "utf8")).toBe(vector.sig);
     expect(signed).toMatchObject({ sequence: JSON.parse(vector.index).sequence, previous: null, keyCreated: false });
+  }, 60_000);
+
+  it("refuses a listing's link with a query or fragment, where a private repository's link carries its token, and writes no index", async () => {
+    const dir = tmp();
+    const { key: _key, ...index } = JSON.parse(vector.index) as { key?: string; apps: { ref: string; urls: string[] }[] };
+    index.apps[0]!.urls = [...index.apps[0]!.urls, "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?token=GHSAT0SECRET"];
+    writeFileSync(join(dir, "index.json"), JSON.stringify(index));
+    const refusal = error(await ghostly(["store", "sign", join(dir, "index.json"), "--key", vectorKey(tmp(), "store")]), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+    expect(refusal.details).toMatchObject({ reason: "private-link", detail: "apps: urls" });
+    expect(refusal.message).toContain(`?… for ${index.apps[0]!.ref}`);
+    expect(refusal.message).not.toContain("GHSAT0SECRET");
+    expect(existsSync(join(dir, "ghostly-store.json"))).toBe(false);
+    expect(existsSync(join(dir, "ghostly-store.sig"))).toBe(false);
   }, 60_000);
 
   it("never makes or reads a --key inside the folder it signs into, which is published, a symlinked name for it too", async () => {

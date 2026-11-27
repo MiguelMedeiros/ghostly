@@ -39,7 +39,7 @@ type IceServers = { urls: string; username?: string; credential?: string }[];
 /** `builds`: the engine states the side's manager built whole (`getState`, a view of every chat). */
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView>; builds: number }
 
-function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: IceServers; relayOnlyB?: boolean; earlyAnswerMs?: number; callPaceMs?: number; quickRedialMs?: number; otherChatB?: boolean } = {}): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: IceServers; relayOnlyB?: boolean; earlyAnswerMs?: number; callPaceMs?: number; quickRedialMs?: number; otherChatB?: boolean; checkingRedialMs?: number } = {}): { a: Side; b: Side } {
   // Each side's clock: the same one unless `nowB` gives the second side its own.
   const nowA = stacks.now ?? Date.now, nowB = stacks.nowB ?? nowA;
   const make = (chat: string): Side => {
@@ -60,7 +60,7 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () 
       getState: () => { me.builds++; return state(); },
     };
   };
-  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall, callPaceMs: stacks.callPaceMs, quickRedialMs: stacks.quickRedialMs });
+  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall, callPaceMs: stacks.callPaceMs, quickRedialMs: stacks.quickRedialMs, checkingRedialMs: stacks.checkingRedialMs });
   b.calls = new CallManager({ engine: engine(b, () => a, nowA, stacks.iceServersB, stacks.relayOnlyB, stacks.otherChatB ? [other] : []), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.b, now: stacks.nowB ?? stacks.now, maxRedials: stacks.maxRedials, earlyAnswerMs: stacks.earlyAnswerMs, quickRedialMs: stacks.quickRedialMs });
   return { a, b };
 }
@@ -128,6 +128,38 @@ function refusingStack(refuse: number, ending: "throws" | "fails" = "throws"): (
     return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
   };
   return Object.assign(stack, { refused: () => refused });
+}
+
+/**
+ * The real media stack, but the first `stuck` connections whose answer goes in never connect and say nothing more: as
+ * ICE that stays "checking" because none of the contact's checks arrive (a macOS runner's WKWebView, whose host
+ * address is an mDNS name this side does not look up). The answer is taken and the connection closed unheard.
+ */
+function stuckStack(stuck: number): (() => Promise<CallStack | string>) & { stuck: () => number } {
+  let count = 0;
+  const stack = async () => {
+    const real = await loadCallStack();
+    if (typeof real === "string") return real;
+    const Real = real.ndc.PeerConnection;
+    function PeerConnection(...args: ConstructorParameters<typeof Real>) {
+      const pc = new Real(...args);
+      const apply = pc.setRemoteDescription.bind(pc);
+      const listen = pc.onStateChange.bind(pc);
+      let silent = false;
+      Object.defineProperty(pc, "setRemoteDescription", {
+        value: (sdp: string, type: Parameters<typeof apply>[1]) => {
+          if (type !== "answer" || count >= stuck) return apply(sdp, type);
+          count++;
+          silent = true;
+          pc.close();
+        },
+      });
+      Object.defineProperty(pc, "onStateChange", { value: (cb: Parameters<typeof listen>[0]) => listen((state) => { if (!silent) cb(state); }) });
+      return pc;
+    }
+    return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
+  };
+  return Object.assign(stack, { stuck: () => count });
 }
 
 /**
@@ -664,6 +696,26 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  // Found in a bug hunt: `call start` over the contact's call ringing here said only that a call was on, `call answer`
+  // on a call placed here that it was not ringing (while it read `ringing`), and `call hangup` answered with the audio
+  // socket it had just removed and the stats of a connection it had closed.
+  it("says how to answer the contact's call that rings here, whose a ringing call is, and leaves a hung-up call no audio", async () => {
+    const { a, b } = pairOfManagers();
+    const placed = await a.calls.start("chat-ab", {}) as { call: string; audio: { socket: string } };
+    const rang = await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await expect(b.calls.start("chat-ba", {})).rejects.toMatchObject({
+      code: "busy", message: "The contact is calling: their call rings here (ghostly call answer chat-ba)", details: { call: rang.call },
+    });
+    await expect(a.calls.answer(undefined, {})).rejects.toMatchObject({ code: "refused", message: "That call is yours: it rings at the contact's" });
+    const ended = await a.calls.hangup(undefined);
+    expect(ended).toMatchObject({ call: placed.call, direction: "out", state: "ended", reason: "hangup", audio: null });
+    expect(ended).not.toHaveProperty("stats");
+    expect(existsSync(placed.audio.socket)).toBe(false);
+    await until(() => b.events.find((e) => e.type === "call.ended"));
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("a call placed, rung and answered by its chat's id builds no engine state; a call placed by a name builds it once", async () => {
     const { a, b } = pairOfManagers();
     b.calls.setAuto({ on: true, from: ["chat-ba"], rate: 16000 });
@@ -1083,6 +1135,23 @@ describe("two call managers", { timeout: 60_000 }, () => {
       await a.calls.stopAll();
       await b.calls.stopAll();
     });
+
+    it("a call placed after this side's clock, a day ahead, was fixed rings: its signals are not dated after the ones the wrong clock dated", async () => {
+      const real = Date.now();
+      let at = real + 24 * 60 * 60_000;
+      const { a, b } = pairOfManagers({ now: () => at, nowB: () => real, callPaceMs: 0, quickRedialMs: 0 });
+      // Dated a day ahead of the contact's clock: dropped there (CALL_SIGNAL_FUTURE_MS), it never rang.
+      await a.calls.start("chat-ab", {});
+      await a.calls.hangup(undefined);
+      expect(b.events.filter((e) => e.type === "call.incoming")).toEqual([]);
+      at = real;
+      await a.calls.start("chat-ab", {});
+      await until(() => b.events.find((e) => e.type === "call.incoming"), 2000);
+      const offers = signalsOf(a, "o").map((s) => (JSON.parse(s!) as { ts: number }).ts);
+      expect(offers.at(-1)).toBe(real);
+      await a.calls.stopAll();
+      await b.calls.stopAll();
+    });
   });
 
   it("a call answered seconds after it rang sends its answer at once, though the STUN server never answers: its candidates were gathered as it rang", async () => {
@@ -1349,6 +1418,21 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  // The engine drops a blocked contact's hang-up: the call went on here until its media went quiet.
+  it("a contact blocked during a call ends it as a hang-up, and the contact hears it", async () => {
+    const { a, b } = pairOfManagers();
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    await a.calls.start("chat-ab", {});
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected")))).catch(diagnose(a, b));
+    a.link.blocked = true;
+    await a.calls.endBlocked();
+    expect(a.calls.list()).toEqual([]);
+    expect(a.events.find((e) => e.type === "call.ended")).toMatchObject({ direction: "out", reason: "hangup" });
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   /** Both sides call each other at once; the side whose offer lost is the one that ends its call as `crossed`. */
   async function glare(a: Side, b: Side) {
     await Promise.allSettled([a.calls.start("chat-ab", {}), b.calls.start("chat-ba", {})]);
@@ -1596,7 +1680,7 @@ describe("two call managers", { timeout: 60_000 }, () => {
         callee.side.calls.onSignal("chat-ba", offer());
         await new Promise((r) => setTimeout(r, 50));
         expect(rang()).toBe(3);
-        await expect(callee.side.calls.start("chat-ba", {})).rejects.toMatchObject({ code: "busy" });
+        await expect(callee.side.calls.start("chat-ba", {})).rejects.toMatchObject({ code: "busy", message: "The contact is calling: their call rings here (ghostly call answer chat-ba)" });
         expect(rang()).toBe(4);
         expect(signalsOf(callee.side, "o")).toEqual([]);
         await caller.side.calls.stopAll();
@@ -1725,6 +1809,42 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  it("an answered call still not connected a while after its answer offers again: it connects on the new connection, on the same sockets", async () => {
+    // CI run 44619228595: the bot's ICE said "checking" for 23 s after the Mac app's answer, the app waited 8 s for a
+    // newer offer (RESTART_GRACE_MS), none came, and it hung up.
+    const stack = stuckStack(1);
+    const { a, b } = pairOfManagers({ a: stack, checkingRedialMs: 1000 });
+    b.calls.setAuto({ on: true });
+    const placed = await a.calls.start("chat-ab", {}) as { call: string; audio: { socket: string } };
+    await Promise.all([
+      until(() => a.events.find((e) => e.type === "call.connected")),
+      until(() => b.events.find((e) => e.type === "call.connected")),
+    ]).catch(diagnose(a, b));
+    expect(stack.stuck()).toBe(1);
+    expect(signalsOf(a, "o")).toHaveLength(2);
+    expect(signalsOf(b, "a")).toHaveLength(2);
+    expect(signalsOf(a, "h")).toHaveLength(0);
+    expect(signalsOf(b, "h")).toHaveLength(0);
+    expect(a.events.map((e) => e.type)).toEqual(["call.outgoing", "call.connected"]);
+    expect(b.events.map((e) => e.type)).toEqual(["call.incoming", "call.connected"]);
+    expect(a.calls.list()).toMatchObject([{ call: placed.call, state: "connected", audio: { socket: placed.audio.socket } }]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("a plain hang-up after a call offered again for not connecting a while after its answer is the contact's, not a failure", async () => {
+    // The contact pressed End on "Connecting…": nothing refused an answer, so the start-over says nothing failed.
+    const { a, b } = pairOfManagers({ a: stuckStack(1), checkingRedialMs: 1000 });
+    b.calls.setAuto({ on: true });
+    await a.calls.start("chat-ab", {});
+    await until(() => signalsOf(b, "a").length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 1050));
+    await b.calls.hangup("chat-ba");
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("answers refused past the last start-over end the call as failed, and the contact is told", async () => {
     // The first offer and MAX_REDIALS more, each answer refused.
     const { a, b } = pairOfManagers({ a: refusingStack(MAX_REDIALS + 1) });
@@ -1758,6 +1878,28 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await a.calls.stopAll();
     await b.calls.stopAll();
   });
+
+  it("a contact that hangs up while the offer made again is on its way is told: their app rings no call nobody places", async () => {
+    // The person on 'Connecting...' hangs up as the call offers again (CHECKING_REDIAL_MS): the hang-up and the offer
+    // cross. With no hang-up after it, the offer reaches a side with no call, and rings there as a new one.
+    const stack = stuckStack(1);
+    const { a, b } = pairOfManagers({ a: stack, checkingRedialMs: 1000, delay: 300 });
+    b.calls.setAuto({ on: true });
+    await a.calls.start("chat-ab", {});
+    await until(() => signalsOf(b, "a").length > 0);
+    b.calls.setAuto({ on: false });
+    await until(() => signalsOf(a, "o").length === 2);
+    await b.calls.hangup(undefined);
+    // Its reason is the redial's to say: only that it ended, and that the contact is told.
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toBeTruthy();
+    expect(signalsOf(a, "h")).toHaveLength(1);
+    // The offer rings a moment on B, and the hang-up after it ends that ring as missed.
+    await until(() => b.events.filter((e) => e.type === "call.ended").length === 2, 5_000).catch(diagnose(a, b));
+    expect(b.events.filter((e) => e.type === "call.ended").map((e) => e.reason)).toEqual(["hangup", "missed"]);
+    expect(b.calls.list()).toEqual([]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
 });
 
 describe("auto-answer from the chats named", () => {
@@ -1771,7 +1913,15 @@ describe("auto-answer from the chats named", () => {
 
   it("takes a chat by its id, its contact's key or this side's label", () => {
     const calls = manager();
-    expect(calls.setAuto({ on: true, from: ["chat-mallory", KEY, "alice"] }).from).toEqual(["chat-mallory", "chat-mallory", "chat-real-alice"]);
+    expect(calls.setAuto({ on: true, from: ["chat-mallory", KEY, "alice"] }).from).toEqual(["chat-mallory", "chat-real-alice"]);
+  });
+
+  it("keeps each chat once", () => {
+    // Found in a bug hunt: 50,000 refs from a script were each resolved (8 s of the daemon's thread) and all kept in
+    // calls.json (900 KB), read again on each incoming call.
+    const calls = manager();
+    expect(calls.setAuto({ on: true, from: Array(50_000).fill("chat-mallory") }).from).toEqual(["chat-mallory"]);
+    expect(JSON.parse(readFileSync(saved(calls), "utf8")).autoAnswer.from).toEqual(["chat-mallory"]);
   });
 
   it("refuses a chat named only by its contact's own name or a prefix of its id, and keeps nothing", () => {
@@ -1791,6 +1941,13 @@ describe("auto-answer from the chats named", () => {
     calls.forgetChat("chat-real-alice");
     expect(calls.getAuto()).toEqual({ on: false, from: [], rate: 48000 });
     expect(JSON.parse(readFileSync(saved(calls), "utf8"))).toEqual({ autoAnswer: { on: false, from: [], rate: 48000 } });
+  });
+
+  it("answers at 48000 when turned on again without --rate, whatever rate it had before", () => {
+    const calls = manager();
+    calls.setAuto({ on: true, rate: 16000 });
+    expect(calls.setAuto({ on: true, from: ["alice"] })).toEqual({ on: true, from: ["chat-real-alice"], rate: 48000 });
+    expect(JSON.parse(readFileSync(saved(calls), "utf8"))).toEqual({ autoAnswer: { on: true, from: ["chat-real-alice"], rate: 48000 } });
   });
 
   it("leaves auto-answer from anyone on when a chat is removed", () => {

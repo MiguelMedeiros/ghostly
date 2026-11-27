@@ -24,6 +24,8 @@ interface CallOverlayProps {
   isVideoOff: boolean;
   /** We are sending our screen instead of the camera. */
   isScreenSharing?: boolean;
+  /** The shared screen's sound goes with it, or not (the picture alone): the sharing notice says which. */
+  screenSound?: boolean;
   /** Offer the camera button: the call has a video lane our side may send on. */
   canSendVideo?: boolean;
   /** The share button works: that lane, in a browser that can capture the screen. */
@@ -50,6 +52,11 @@ interface CallOverlayProps {
   /** The chat is off screen. The call rides along in its small window until you go back to it. */
   pinned?: boolean;
   onReturnToChat?: () => void;
+  /**
+   * Where the focus goes when the call ends and what had it before is gone: a call answered by a ringing card's End and
+   * answer (the card and the call that was on both gone) had no button of its own to go back to. Null off screen.
+   */
+  returnFocus?: () => HTMLElement | null;
   /** Where to hang the call window, so it does not go off screen with its chat. */
   layer?: HTMLElement | null;
   /** The microphone, camera and speaker menu, where the call can switch them (`useCallDevices`). */
@@ -90,6 +97,7 @@ export function CallOverlay({
   isMuted,
   isVideoOff,
   isScreenSharing = false,
+  screenSound = true,
   canSendVideo = false,
   canShareScreen = false,
   screenShareUnavailable = null,
@@ -105,6 +113,7 @@ export function CallOverlay({
   onToggleScreenShare,
   pinned = false,
   onReturnToChat,
+  returnFocus,
   layer,
   devices = null,
   notices,
@@ -138,15 +147,22 @@ export function CallOverlay({
     () => (phone
       ? touch ? { x: window.innerWidth - 280, y: window.innerHeight - 272, w: 264, h: 168 } : { x: window.innerWidth - 206, y: window.innerHeight - 240, w: 190, h: 136 }
       : { x: window.innerWidth - 364, y: window.innerHeight - 316, w: 340, h: 220 }),
-    { enabled: mini, minWidth: touch ? 264 : 190, minHeight: touch ? 168 : 128 },
+    // With a phone's keyboard up the window keeps to what it leaves: above the message field, or a one-line bar over
+    // the chat's header (`compact`) where there is no room for it (a phone on its side). It covered the field's end and
+    // its Send, or stood behind the keyboard with Mute and End call.
+    { enabled: mini, minWidth: touch ? 264 : 190, minHeight: touch ? 168 : 128, keyboard: touch },
   );
+  const compact = mini && miniWindow.compact;
 
   // Whole-screen, the call covers its chat: the focus comes into it and Tab stays in it, as with a ringing call. Not in
   // the small window: the chat beside it is in use. Either way, what had the focus (the button that started the call)
   // has it back when the call ends with the focus gone with it: a call ended from the small window's own End call, or
-  // by the contact while the focus was on its Mute, left it on the page body.
+  // by the contact while the focus was on its Mute, left it on the page body. With no such button left (End and
+  // answer), the chat's own call button has it, as after a call started from there.
   const box = miniWindow.boxProps.ref;
   const opener = useRef<HTMLElement | null>(null);
+  const fallback = useRef(returnFocus);
+  fallback.current = returnFocus;
   // Over a contact's app too (the web draws it over everything): it closes first, so Mute and End call are in reach.
   useEffect(callWindowShown, []);
   // A video made to fill the window after it (Desktop on Linux) is drawn over everything: the small window stays over
@@ -165,7 +181,7 @@ export function CallOverlay({
       if (!mini) box.current.focus({ preventScroll: true });
     }
     return () => {
-      const before = opener.current;
+      const before = opener.current?.isConnected ? opener.current : fallback.current?.();
       if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true });
     };
   }, [mini, box]);
@@ -260,6 +276,7 @@ export function CallOverlay({
       {...miniWindow.boxProps}
       data-testid="call-window"
       data-mini={mini}
+      data-compact={compact || undefined}
       {...(mini ? {} : { role: "dialog", "aria-modal": true, "aria-label": peerName, tabIndex: -1 })}
       className={
         mini
@@ -267,7 +284,9 @@ export function CallOverlay({
           : `fixed inset-0 ${stack} bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center focus:outline-none`
       }
     >
-      {mini && <Grips handleProps={miniWindow.handleProps} />}
+      {mini && !compact && <Grips handleProps={miniWindow.handleProps} />}
+      {/* The one-line bar's who (index.css): the contact's picture or avatar, which says it otherwise, has no room there. */}
+      {compact && <p dir="auto" className="call-compact-name min-w-0 truncate text-text-primary text-sm font-medium">{peerName}</p>}
       {/* Shrink to a floating window, or back to the whole screen */}
       <button
         onClick={() => (pinned ? onReturnToChat?.() : setMini(!mini))}
@@ -321,14 +340,17 @@ export function CallOverlay({
         </div>
       )}
 
-      {/* Status. Over the contact's picture (`data-over-picture`) it is white with a shadow (index.css). */}
-      <div className="call-top absolute top-8 left-0 right-0 text-center z-10">
+      {/* Status. Over the contact's picture (`data-over-picture`) it is white with a shadow (index.css). The whole window
+          keeps it clear of the corner button (44 px at 1rem past the safe area) on both sides, so it stays centred: on
+          a 320 px phone "Llamada de audio  Reconectando..." started at 49 px, under the button, which ends at 60. */}
+      <div className={`call-top absolute top-8 left-0 right-0 text-center z-10 ${mini ? "" : "px-[calc(3.75rem+env(safe-area-inset-left))]"}`}>
         <p className="text-text-muted text-sm" data-testid="call-status" data-over-picture={showRemoteVideo ? true : undefined} data-state={callState} data-reconnecting={reconnecting || undefined} role={callState === "connected" ? undefined : "status"}>
           {!remoteHasVideo && isVideoOff && callState === "connected" && (
-            <span className="text-accent">{t("calls.audio")}</span>
+            <span className="inline-block text-accent">{t("calls.audio")}</span>
           )}
+          {/* Each part a block of its own: wrapped, the line breaks between "Llamada de audio" and "Reconectando...". */}
           {statusText && (
-            <span className={callState === "connected" ? "ms-2" : ""}>
+            <span className={`inline-block ${callState === "connected" ? "ms-2" : ""}`}>
               {statusText}
             </span>
           )}
@@ -354,6 +376,13 @@ export function CallOverlay({
           </svg>
           {/* The whole sentence, on two lines if need be: cut to one, "… está compartiendo su p…" lost what is shared. */}
           <span className="call-notice-words min-w-0 break-words">{sharingNotice}</span>
+          {/* What your contact gets of your screen's sound: all the system plays (but this page), or nothing when the
+              browser gave the picture alone (or the sound was left unticked). */}
+          {isScreenSharing && (
+            <span data-testid="call-sharing-sound" data-sound={screenSound} className="call-notice-words min-w-0 break-words">
+              {` · ${t(screenSound ? "calls.sharing.withSound" : "calls.sharing.noSound")}`}
+            </span>
+          )}
         </p>
       )}
 
@@ -399,7 +428,7 @@ export function CallOverlay({
         {/* Mute */}
         <button
           onClick={onToggleMute}
-          className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+          className={`call-compact-keep w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
             isMuted
               ? "bg-danger/30 text-danger"
               : "bg-white/10 text-white hover:bg-white/20"
@@ -513,7 +542,7 @@ export function CallOverlay({
         {/* Hang up */}
         <button
           onClick={onHangUp}
-          className="w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer"
+          className="call-compact-keep w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer"
           data-testid="call-hang-up"
           title={t("calls.end")}
         >
@@ -630,7 +659,7 @@ export function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
       <span className="call-notice-words min-w-0 break-words">{fillNames(t(NOTICE_TEXT[notice.type]), { name })}</span>
       {notice.type === "back" && (
         <button type="button" data-testid="call-device-switch-back" onClick={devices.switchBack}
-          className="tap-target shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
+          className="tap-target shrink-0 rounded-full bg-accent forced-colors:border forced-colors:border-[color:ButtonText] text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
           {t("calls.devices.switchBack")}
         </button>
       )}

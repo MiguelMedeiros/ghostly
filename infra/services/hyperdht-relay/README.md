@@ -43,18 +43,19 @@ are in WISP 103, "Browser profile".
 | WebSockets at once (when full, an address that would hold fewer than the one holding the most gets in, in place of that one's oldest client; once per 10 s per address) | 512 | `GHOSTLY_RELAY_CLIENTS` |
 | from one address | 16 | `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS` |
 | largest message | 256 KiB | `GHOSTLY_RELAY_PAYLOAD_BYTES` |
-| bytes a client sends per second, burst | 512 KiB/s, 4 MiB | `GHOSTLY_RELAY_BYTES_PER_SECOND`, `GHOSTLY_RELAY_BURST_BYTES` |
+| bytes an address sends per second, burst, over all its clients, closed ones too (each message counts 64 bytes more) | 512 KiB/s, 4 MiB | `GHOSTLY_RELAY_BYTES_PER_SECOND`, `GHOSTLY_RELAY_BURST_BYTES` |
 | keys one client listens on | 16 | `GHOSTLY_RELAY_LISTENS` |
 | listens per client per minute, refused ones too (an app starts at most 8 on start or reconnect) | 60 | `GHOSTLY_RELAY_LISTENS_PER_MINUTE` |
 | dials per client per minute | 60 | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
+| listens and dials per address per minute, over all its clients, closed ones too | each per-client rate × clients from one address (960) | (the two above, `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS`) |
 | HyperDHT streams one client holds open (its dials and incoming ones) | 64 | `GHOSTLY_RELAY_STREAMS` |
 | bytes waiting for a client that it has not read yet, with what it sent that its far peers have not taken yet (one stream past half of it is closed) | 8 MiB | `GHOSTLY_RELAY_QUEUED_BYTES` |
 | bytes waiting, both ways, over all clients (past it, the client holding the most is dropped) | 96 MiB | `GHOSTLY_RELAY_QUEUED_TOTAL_BYTES` |
 | a client with no listen open and no dial | 30 s | `GHOSTLY_RELAY_IDLE_MS` |
-| ping, dropped when the last went unanswered | every 30 s | `GHOSTLY_RELAY_PING_MS` |
+| ping, dropped when the last went unanswered (not while its socket was paused for the byte rate since: the answer waits unread behind what it sent) | every 30 s | `GHOSTLY_RELAY_PING_MS` |
 | a connection's request before it upgrades | 15 s | `GHOSTLY_RELAY_REQUEST_MS` |
 | a client's part of a handshake (its answer) | 15 s | `GHOSTLY_RELAY_HANDSHAKE_MS` |
-| handshakes waiting on one client's answer at once (its dials and incoming ones; one key's incoming ones at most a quarter, and a quarter kept for its dials) | 64 | `GHOSTLY_RELAY_HANDSHAKES` |
+| handshakes waiting on one client's answer at once (its dials and incoming ones; one key's incoming ones at most a quarter but at least one, and a quarter rounded down kept for its dials: none at 1 to 3) | 64 | `GHOSTLY_RELAY_HANDSHAKES` |
 
 Past a limit the client is dropped, or its socket is paused (the byte rate), or an incoming stream past
 `streams` is closed, or a handshake past `handshakes` is refused (`refused handshake <why>` in the log). Topic lookups and announcements
@@ -72,13 +73,14 @@ at most 5 a minute, then one count a minute while it goes on (`refused address (
 | `refused address` | a new client got 429: its address already holds `clientsPerAddress` | `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS`; behind a proxy, `GHOSTLY_RELAY_PROXIES` or `GHOSTLY_RELAY_CLOUDFLARE`, or every client counts as the proxy |
 | `dropped room` | on a full relay, the oldest client of the address holding the most, for a newcomer | `GHOSTLY_RELAY_CLIENTS` |
 | `dropped idle` | a client with no listen and no dial for `idleMs` | `GHOSTLY_RELAY_IDLE_MS` |
-| `dropped no pong` | a client that had not answered the last ping by the next | `GHOSTLY_RELAY_PING_MS` |
+| `dropped no pong` | a client that had not answered the last ping by the next, its socket not paused for the byte rate meanwhile | `GHOSTLY_RELAY_PING_MS` |
 | `dropped listen rate`, `dropped listen limit` | a client past `listensPerMinute`, or past `listens` at once | `GHOSTLY_RELAY_LISTENS_PER_MINUTE`, `GHOSTLY_RELAY_LISTENS` |
 | `dropped dial limit` | a client past `connectsPerMinute` | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
+| `dropped address listen rate`, `dropped address dial limit` | a client whose address has started `listensPerMinute` (or `connectsPerMinute`) × `clientsPerAddress` in the last minute, over all its clients, closed ones too | `GHOSTLY_RELAY_LISTENS_PER_MINUTE`, `GHOSTLY_RELAY_CONNECTS_PER_MINUTE`, `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS` |
 | `dropped stream limit` | a client dialling past `streams` open | `GHOSTLY_RELAY_STREAMS` |
 | `dropped queue`, `closed far queue` | a client holding more than `queuedBytes` unread or untaken, or one of its streams half of it (closed, the client stays) | `GHOSTLY_RELAY_QUEUED_BYTES` |
 | `dropped queue total` | the client holding the most, while all of them hold more than `queuedTotalBytes` | `GHOSTLY_RELAY_QUEUED_TOTAL_BYTES` |
-| `refused handshake limit`, `refused handshake listen share`, `refused handshake incoming` | a handshake past `handshakes` waiting on one client, past a quarter of it on one of its keys, or incoming ones past the three quarters left after its dials' | `GHOSTLY_RELAY_HANDSHAKES` |
+| `refused handshake limit`, `refused handshake listen share`, `refused handshake incoming` | a handshake past `handshakes` waiting on one client, past a quarter of it (at least one) on one of its keys, or incoming ones past what is left after its dials' quarter rounded down (all of it at 1 to 3) | `GHOSTLY_RELAY_HANDSHAKES` |
 
 The rest name no limit: `refused stopping` (a new client while the relay stops), `refused origin "<origin>"` (see
 `GHOSTLY_RELAY_ORIGINS` below), `refused listen <code>` (HyperDHT refused the listen, `KEYPAIR_ALREADY_USED` for a key

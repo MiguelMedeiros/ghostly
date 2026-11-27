@@ -135,7 +135,7 @@ export function ProtocolSteps({ t, wisps }: { t: StepsCopy; wisps: Record<string
             </svg>
             <span className="psx-btn-text">{t.replay}</span>
           </button>
-          <button type="button" className="psx-btn" onClick={() => clock.toggleAll()} aria-pressed={playing} aria-label={playLabel} data-action="all">
+          <button type="button" className="psx-btn" onClick={() => clock.toggleAll()} aria-label={playLabel} data-action="all">
             {playing ? (
               <svg viewBox="0 0 20 20" aria-hidden="true">
                 <path d="M7 4v12M13 4v12" />

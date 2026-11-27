@@ -10,7 +10,8 @@
 //! A contact's identity proof and public data (WISP 300, PUBLIC-PROFILES.md) are read here too, for the same reason
 //! (apps/ui/src/desktop/identityFetch.ts): those reads say what they accept, and the answer says its type. So is a
 //! Lightning address or LNURL service (apps/ui/src/desktop/lnurlFetch.ts), and a group's call node is asked here
-//! (`post`, apps/ui/src/desktop/groupCallFetch.ts): both are addresses another party names.
+//! (`post`, apps/ui/src/desktop/groupCallFetch.ts): both are addresses another party names. Those reads say how much
+//! they take and for how long (`Limits`): Rust stops there, not at a held item's 8 MiB and 150 s.
 
 use std::net::IpAddr;
 use std::sync::OnceLock;
@@ -25,10 +26,40 @@ use crate::link_preview::{is_public, PublicOnly};
 
 /// The largest held item: one bundle (`HOLD_LIMITS.maxBundleBytes`, packages/core/src/storeForward.ts).
 const MAX_BODY: usize = 8 * 1024 * 1024;
+/// The most of an error answer's body kept: room for a service to name the cause (a Lightning address service's
+/// `{"status":"ERROR","reason":…}`, Bluesky's `{"error":"AccountDeactivated"}`); the engine refuses a held item's unread.
+const MAX_ERROR_BODY: usize = 64 * 1024;
 /// Past the engine's own limit for the largest item (`holdFetchTimeoutMs`, packages/browser/src/engine/hold.ts).
 const TIMEOUT: Duration = Duration::from_secs(150);
+/// The least time a read that names its own is given.
+const MIN_TIMEOUT: Duration = Duration::from_secs(1);
 /// The request headers an identity read sends (`accept`; a Pubky homeserver's `pubky-host`); any other is dropped.
 const HEADERS: [&str; 2] = ["accept", "pubky-host"];
+
+/// How much of a 2xx body a read takes and how long it may take, the whole body read included. A held item's by
+/// default; a read that names smaller ones (an identity's, a Lightning address service's) gets those, never more.
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    max_body: usize,
+    timeout: Duration,
+}
+
+impl Limits {
+    pub fn new(max_bytes: Option<u64>, timeout_ms: Option<u64>) -> Self {
+        Limits {
+            max_body: max_bytes.map_or(MAX_BODY, |n| n.min(MAX_BODY as u64) as usize),
+            timeout: timeout_ms.map_or(TIMEOUT, |ms| {
+                Duration::from_millis(ms).clamp(MIN_TIMEOUT, TIMEOUT)
+            }),
+        }
+    }
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Limits::new(None, None)
+    }
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,7 +67,7 @@ pub struct HoldResponse {
     pub status: u16,
     /// The answer's `Content-Type`, empty when it has none.
     pub content_type: String,
-    /// Empty for any status but 2xx: the engine refuses those without reading them.
+    /// For a status but 2xx, a short body only (`MAX_ERROR_BODY`), else empty.
     pub body_b64: String,
     /// The answer's `Retry-After`, empty when it has none (a call node's 429, WISP 602 § Moderation).
     pub retry_after: String,
@@ -97,8 +128,9 @@ async fn get(
     client: &reqwest::Client,
     url: reqwest::Url,
     headers: Vec<(String, String)>,
+    limits: Limits,
 ) -> Result<HoldResponse, String> {
-    let mut request = client.get(url);
+    let mut request = client.get(url).timeout(limits.timeout);
     for (name, value) in headers {
         if HEADERS.contains(&name.to_ascii_lowercase().as_str())
             && value.len() < 2048
@@ -107,7 +139,7 @@ async fn get(
             request = request.header(name, value);
         }
     }
-    send(request).await
+    send(request, limits.max_body).await
 }
 
 /// One POST of a JSON request to `url` (a group's call node, WISP 602), as `get` reads.
@@ -121,11 +153,12 @@ async fn post_json(
             .post(url)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body),
+        MAX_BODY,
     )
     .await
 }
 
-async fn send(request: reqwest::RequestBuilder) -> Result<HoldResponse, String> {
+async fn send(request: reqwest::RequestBuilder, max_body: usize) -> Result<HoldResponse, String> {
     let mut response = request
         .send()
         .await
@@ -141,21 +174,28 @@ async fn send(request: reqwest::RequestBuilder) -> Result<HoldResponse, String> 
     };
     let content_type = header(reqwest::header::CONTENT_TYPE);
     let retry_after = header(reqwest::header::RETRY_AFTER);
-    if !response.status().is_success() {
-        return Ok(HoldResponse {
-            status,
-            content_type,
-            body_b64: String::new(),
-            retry_after,
-        });
-    }
+    let success = response.status().is_success();
+    let limit = if success {
+        max_body
+    } else {
+        MAX_ERROR_BODY.min(max_body)
+    };
     // Word for word what apps/ui/src/desktop/holdFetch.ts answers as an item past the largest, for the engine to refuse.
-    let too_large = || "The held item is too large".to_string();
-    if response
-        .content_length()
-        .is_some_and(|n| n > MAX_BODY as u64)
-    {
-        return Err(too_large());
+    // An error answer's body past its limit is only left out: the status says what happened.
+    let too_large = || {
+        if success {
+            Err("The held item is too large".to_string())
+        } else {
+            Ok(HoldResponse {
+                status,
+                content_type: content_type.clone(),
+                body_b64: String::new(),
+                retry_after: retry_after.clone(),
+            })
+        }
+    };
+    if response.content_length().is_some_and(|n| n > limit as u64) {
+        return too_large();
     }
     let mut body = Vec::new();
     while let Some(chunk) = response
@@ -163,8 +203,8 @@ async fn send(request: reqwest::RequestBuilder) -> Result<HoldResponse, String> 
         .await
         .map_err(|e| format!("Body: {}", reason(e)))?
     {
-        if body.len() + chunk.len() > MAX_BODY {
-            return Err(too_large());
+        if body.len() + chunk.len() > limit {
+            return too_large();
         }
         body.extend_from_slice(&chunk);
     }
@@ -177,12 +217,16 @@ async fn send(request: reqwest::RequestBuilder) -> Result<HoldResponse, String> 
 }
 
 /// One GET of a held item or manifest (or an identity's proof or public data, a Lightning address service's answer) at
-/// `url`, on public addresses only.
-pub async fn fetch(url: String, headers: Vec<(String, String)>) -> Result<HoldResponse, String> {
+/// `url`, on public addresses only, within `limits`.
+pub async fn fetch(
+    url: String,
+    headers: Vec<(String, String)>,
+    limits: Limits,
+) -> Result<HoldResponse, String> {
     let url =
         reqwest::Url::parse(&url).map_err(|_| "The storage address is not a URL".to_string())?;
     allowed(&url)?;
-    get(client()?, url, headers).await
+    get(client()?, url, headers, limits).await
 }
 
 /// One POST of a JSON request to a group's call node at `url`, on public addresses only.
@@ -270,7 +314,9 @@ mod tests {
                 answers.iter().map(|a| a.parse().unwrap()).collect(),
             ))
             .unwrap();
-            let error = get(&client, at(port), vec![]).await.err();
+            let error = get(&client, at(port), vec![], Limits::default())
+                .await
+                .err();
             assert!(
                 error
                     .as_deref()
@@ -297,7 +343,7 @@ mod tests {
     #[tokio::test]
     async fn the_app_s_own_resolver_refuses_this_machine() {
         // The shipped path: `localhost` resolves here, with no network, to loopback only.
-        let error = fetch("https://localhost/b/o".into(), vec![])
+        let error = fetch("https://localhost/b/o".into(), vec![], Limits::default())
             .await
             .unwrap_err();
         assert!(error.contains("not a public address"), "{error}");
@@ -306,9 +352,14 @@ mod tests {
     #[tokio::test]
     async fn a_public_storage_is_read_and_a_redirect_is_not_followed() {
         let (port, _) = serve(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nheld").await;
-        let read = get(&build(Storage).unwrap(), at(port), vec![])
-            .await
-            .unwrap();
+        let read = get(
+            &build(Storage).unwrap(),
+            at(port),
+            vec![],
+            Limits::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(read.status, 200);
         assert_eq!(STANDARD.decode(read.body_b64).unwrap(), b"held");
 
@@ -316,17 +367,77 @@ mod tests {
             b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/\r\nContent-Length: 0\r\n\r\n",
         )
         .await;
-        let moved = get(&build(Storage).unwrap(), at(port), vec![])
-            .await
-            .unwrap();
+        let moved = get(
+            &build(Storage).unwrap(),
+            at(port),
+            vec![],
+            Limits::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!((moved.status, moved.body_b64.as_str()), (302, ""));
         assert_eq!(taken.load(Ordering::SeqCst), 1);
 
         let (port, _) = serve(b"HTTP/1.1 200 OK\r\nContent-Length: 9000000\r\n\r\n").await;
-        let error = get(&build(Storage).unwrap(), at(port), vec![])
-            .await
-            .unwrap_err();
+        let error = get(
+            &build(Storage).unwrap(),
+            at(port),
+            vec![],
+            Limits::default(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error, "The held item is too large");
+    }
+
+    /// The issue: every error answer came back with no body, so a Lightning address service's refusal
+    /// (`{"status":"ERROR","reason":…}` with a 400, LUD-06) read as "did not answer with JSON", and Bluesky's
+    /// `{"error":"AccountDeactivated"}` as a failed read, where the web and the CLI read the cause.
+    #[tokio::test]
+    async fn an_error_answer_keeps_a_short_body_that_names_its_cause() {
+        let refusal: &[u8] = br#"{"status":"ERROR","reason":"Amount too small"}"#;
+        let (port, _) = serve(b"HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 46\r\n\r\n{\"status\":\"ERROR\",\"reason\":\"Amount too small\"}").await;
+        let read = get(
+            &build(Storage).unwrap(),
+            at(port),
+            vec![],
+            Limits::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(read.status, 400);
+        assert_eq!(STANDARD.decode(read.body_b64).unwrap(), refusal);
+        let (port, _) = serve(b"HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 46\r\n\r\n{\"status\":\"ERROR\",\"reason\":\"Amount too small\"}").await;
+        let posted = post_json(&build(Storage).unwrap(), at(port), "{}".into())
+            .await
+            .unwrap();
+        assert_eq!(STANDARD.decode(posted.body_b64).unwrap(), refusal);
+
+        // A long one is left out, and is no failure either: the status still says what happened. Said long, or found
+        // long as it comes.
+        let unsaid: &'static [u8] = [
+            &b"HTTP/1.1 500 Internal Server Error\r\nTransfer-Encoding: chunked\r\n\r\n10001\r\n"[..],
+            &[b'x'; 0x10001][..],
+            b"\r\n0\r\n\r\n",
+        ]
+        .concat()
+        .leak();
+        for answer in [
+            &b"HTTP/1.1 404 Not Found\r\nContent-Length: 9000000\r\n\r\n"[..],
+            unsaid,
+        ] {
+            let (port, _) = serve(answer).await;
+            let read = get(
+                &build(Storage).unwrap(),
+                at(port),
+                vec![],
+                Limits::default(),
+            )
+            .await
+            .unwrap();
+            assert!(matches!(read.status, 404 | 500), "{}", read.status);
+            assert_eq!(read.body_b64, "");
+        }
     }
 
     #[tokio::test]
@@ -355,6 +466,7 @@ mod tests {
                 .iter()
                 .map(|(n, v)| (n.to_string(), v.to_string()))
                 .collect(),
+            Limits::default(),
         )
         .await
         .unwrap();
@@ -457,10 +569,81 @@ mod tests {
             "file:///etc/passwd",
             "not a url",
         ] {
-            assert!(fetch(refused.into(), vec![]).await.is_err(), "{refused}");
+            assert!(
+                fetch(refused.into(), vec![], Limits::default())
+                    .await
+                    .is_err(),
+                "{refused}"
+            );
         }
         for url in ["https://s3.example.com/b/o", "https://93.184.215.14/b/o"] {
             assert!(allowed(&reqwest::Url::parse(url).unwrap()).is_ok(), "{url}");
         }
+    }
+
+    /// An identity's or a Lightning address service's read stops at its own size and time, not a held item's: a 1 MiB
+    /// answer, said long or found long as it comes, is refused, and a host that sends a byte now and then is left when
+    /// the read's time is up.
+    #[tokio::test]
+    async fn a_read_that_names_its_limits_stops_at_its_size_and_its_time() {
+        let small = Limits::new(Some(64 * 1024), Some(2_000));
+        let unsaid: &'static [u8] = [
+            &b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n100000\r\n"[..],
+            &[b'x'; 0x100000][..],
+            b"\r\n0\r\n\r\n",
+        ]
+        .concat()
+        .leak();
+        for answer in [
+            &b"HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\n\r\n"[..],
+            unsaid,
+        ] {
+            let (port, _) = serve(answer).await;
+            let read = get(&build(Storage).unwrap(), at(port), vec![], small).await;
+            assert_eq!(read.err().as_deref(), Some("The held item is too large"));
+        }
+        // A held item still takes its 8 MiB.
+        let (port, _) = serve(unsaid).await;
+        let read = get(
+            &build(Storage).unwrap(),
+            at(port),
+            vec![],
+            Limits::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(STANDARD.decode(read.body_b64).unwrap().len(), 0x100000);
+        // Asked for more than a held item's, a read gets a held item's.
+        let most = Limits::new(Some(u64::MAX), Some(u64::MAX));
+        assert_eq!((most.max_body, most.timeout), (MAX_BODY, TIMEOUT));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request).await;
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n")
+                .await;
+            loop {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                if stream.write_all(b"x").await.is_err() {
+                    break;
+                }
+            }
+        });
+        let started = std::time::Instant::now();
+        let read = tokio::time::timeout(
+            Duration::from_secs(8),
+            get(&build(Storage).unwrap(), at(port), vec![], small),
+        )
+        .await;
+        assert!(
+            matches!(read, Ok(Err(_))),
+            "still reading after {:?}",
+            started.elapsed()
+        );
+        assert!(started.elapsed() < Duration::from_secs(4));
     }
 }

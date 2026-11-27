@@ -12,13 +12,15 @@ name: Android e2e
 # - On pull requests that touch the Desktop crate, the Android specs, this lane, or the page code that only the
 #   Android app runs: apps/ui/src/desktop/android*.ts and every file that branches on `androidApp()`
 #   (tools/scripts/test/androidE2eWorkflow.test.ts keeps that list whole). Not on every apps/ui or packages change:
-#   the lane is two long jobs on the shared runners.
+#   the lane is two long jobs on the shared runners. Not on a draft or a merge train batch (see the draft job below).
 # - Nightly on dev (the default branch, so the schedule reads this file there and checks out dev), so a change to the
 #   engine (packages/*) or the rest of the page is covered within a day. A red nightly stays as a failed run in
 #   Actions: no issue is filed for it.
 # - By hand.
 on:
   pull_request:
+    # ready_for_review: a draft skips this (see the draft job below); leaving draft runs it.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "apps/desktop/**"
       - "e2e/android/**"
@@ -56,8 +58,36 @@ env:
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
+  # As android-native.yml: a draft gets CI's fast tier only (ci.yml, `changes`), so this runs once the pull request
+  # leaves draft (ready_for_review) and on every push after. The draft state is read from the API, not the event: a
+  # push and `gh pr ready` a second apart start two runs, the later cancels the other, and the survivor may be the
+  # push's, whose event still says draft (#742). If the read fails, the lane runs.
+  # A merge train batch (batch/<base>-<stamp>, from this repository) runs nothing: each pull request in it ran this on
+  # its own pull request, and the train lands each of them as its own merge, never the batch. A fork's pull request
+  # runs whatever its branch is called.
+  draft:
+    name: Draft pull request?
+    if: github.event_name == 'pull_request' && !(startsWith(github.head_ref, 'batch/') && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: read
+    outputs:
+      draft: ${{ steps.read.outputs.draft }}
+    steps:
+      - name: Read the draft state
+        id: read
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}
+        run: |
+          draft=$(gh api "$PR_URL" --jq .draft) || draft=unknown
+          echo "Draft: $draft"
+          echo "draft=$draft" >> "$GITHUB_OUTPUT"
+
   apk:
     name: Debug APK (x86_64)
+    needs: draft
+    if: ${{ !cancelled() && needs.draft.outputs.draft != 'true' && !(startsWith(github.head_ref, 'batch/') && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -127,6 +157,9 @@ jobs:
   e2e:
     name: Android e2e (API ${{ matrix.api-level }}, x86_64)
     needs: apk
+    # Not GitHub's default success(): the draft job before apk is skipped on the schedule and by hand, and that skips
+    # this too, with the run still green.
+    if: ${{ !cancelled() && needs.apk.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:

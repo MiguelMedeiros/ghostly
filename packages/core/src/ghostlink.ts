@@ -385,6 +385,18 @@ export class MessagePace {
     this.sent = this.sent.filter(entry => counts(entry, hourWindowMs));
     return this.sent.length < hourly && this.sent.filter(entry => counts(entry, burstWindowMs)).length < burst;
   }
+  /** How long until there is room for one more text (0: now), as the texts counted now leave their windows. */
+  roomIn(): number {
+    if (this.room()) return 0;
+    const now = this.now(), { burst, burstWindowMs, hourly, hourWindowMs } = MESSAGE_RECEIVE_LIMITS;
+    // When the window is under its limit again: once all but `limit - 1` of the texts it counts have left it.
+    const opens = (windowMs: number, limit: number) => {
+      const leave = this.sent.map(entry => entry.answered !== undefined ? entry.answered + windowMs : entry.at + windowMs + PACE_UNANSWERED_MS)
+        .filter(at => at > now).sort((a, b) => a - b);
+      return leave.length < limit ? now : leave[leave.length - limit];
+    };
+    return Math.max(opens(burstWindowMs, burst), opens(hourWindowMs, hourly)) - now;
+  }
   took(id: string): void { this.sent.push({ id, at: this.now() }); }
   /** Its receipt came: the contact counted it by now. */
   answered(id: string): void {
@@ -552,6 +564,11 @@ export interface GhostLinkEvents {
    */
   onPeerNick?(nick: string | null): void;
   onMessageReceipt?(id: string): void | Promise<void>;
+  /**
+   * The contact's windows have room for a text again, after one found none (`textRoom`, `MessagePace`): what waits for
+   * it may go now, not at its next backoff check, minutes away for texts that waited while the contact was away.
+   */
+  onTextRoom?(): void;
   /**
    * A file's offer the contact said on the DHT floor (WISP 403 § Files), already checked: its bubble takes its place
    * now, and its bytes come on the live session under the same wire id. Without this event it is dropped (receipted).
@@ -838,6 +855,12 @@ export interface GhostLinkOptions {
    */
   resume?: PairedTransport;
   /**
+   * This app's last run ended with no goodbye (it crashed, or was killed): the contact still holds the session `resume`
+   * names, and answers the resume over WebRTC only once it finds that gone, seconds on. The looks for that answer share
+   * the relays' minute with the other such offers' (`OFFER_LOOKS_PER_MINUTE`), rather than spend it before it comes.
+   */
+  resumeUnannounced?: boolean;
+  /**
    * When the session that was live when this app last ran began (ms). A contact's offer made before it is the one that
    * set that session up, or an older one, read from a relay that never got the packet clearing it: it is not answered,
    * and a resumed link dials instead. An offer made after it (the contact noticed the session go, during a long
@@ -1017,6 +1040,8 @@ export class GhostLink {
   ];
   /** The texts sent to the contact, against their `messagesReceived` (`MessagePace`). */
   private readonly messagesSent = new MessagePace();
+  /** Set while a text found no room: says when there is again (`onTextRoom`). */
+  private roomWake: ReturnType<typeof setTimeout> | null = null;
   /** Call signals the contact may send per window; the rest are dropped. */
   private readonly callsReceived = new RateWindow(CALL_RECEIVE_LIMIT, CALL_RATE_WINDOW_MS);
   /** WebRTC signals the contact may send on the session (`paired-rtc`) per window; the rest are dropped. */
@@ -1214,6 +1239,8 @@ export class GhostLink {
   private lastLiveOn: PairedTransport | undefined;
   /** `resuming` is a wake's, not a restart's. */
   private resumingWoke = false;
+  /** The offer this dial makes is a resume whose looks share the relays' minute (`resumeUnannounced`). */
+  private offerShares = false;
   /** Until then, a session that ends was lost while the app was away (`WAKE_LOST_MS`). */
   private wokeUntil = 0;
   /** Back after a restart, the first automatic dial is still to go (`INSTANT_FAIL_MS`). */
@@ -1442,7 +1469,8 @@ export class GhostLink {
       },
       // An offer to a saved contact: its answer may be a while (the contact may still hold this app's old session),
       // so the look for it slows after its first seconds (`OFFER_FAST_MS`). A first pairing looks fast throughout.
-      setFastPoll: (fast, offer) => this.session.setFastPoll(fast, !!offer && !!options.pairing?.credentials.peerKey),
+      // A resume after a run that ended with no goodbye shares its looks (`resumeUnannounced`).
+      setFastPoll: (fast, offer) => this.session.setFastPoll(fast, !!offer && !!options.pairing?.credentials.peerKey, !!offer && this.offerShares),
       // An answer that did not connect is made again only while the contact's packet still carries that offer.
       offerStanding: ts => !this.leaving && !this.stopped && !this.streamBlocked && this.peerOfferTs() === ts,
       onAnswerReplaced: () => this.redial(),
@@ -1847,7 +1875,15 @@ export class GhostLink {
   }
   get canSendText(): boolean { return this.textDelivery !== "unavailable"; }
   /** A text on the live session would find room in the contact's windows now (`MessagePace`); the DHT floor has its own pace. */
-  get textRoom(): boolean { return this.textDelivery !== "stream" || this.messagesSent.room(); }
+  get textRoom(): boolean { return this.textDelivery !== "stream" || this.paceRoom(); }
+  /** Room for one more text on the session; with none, `onTextRoom` says once when there is. */
+  private paceRoom(): boolean {
+    if (this.messagesSent.room()) return true;
+    if (!this.roomWake && !this.stopped) {
+      this.roomWake = setTimeout(() => { this.roomWake = null; if (!this.stopped) this.options.events?.onTextRoom?.(); }, this.messagesSent.roomIn());
+    }
+    return false;
+  }
   get dhtDelivery(): DhtDeliveryView | undefined { return this.dht?.view; }
   /** The chat is on screen: on the DHT its mailbox is read at the signaling pace (WISP 403, poll pace). */
   setChatActive(active: boolean): void {
@@ -1948,6 +1984,7 @@ export class GhostLink {
     if (this.refusedPause) clearTimeout(this.refusedPause);
     if (this.retryLook) clearTimeout(this.retryLook);
     if (this.dhtPinGrace) clearTimeout(this.dhtPinGrace);
+    if (this.roomWake) { clearTimeout(this.roomWake); this.roomWake = null; }
     if (this.waiting?.timer) clearTimeout(this.waiting.timer);
     await this.dht?.stop();
     this.disconnect();
@@ -2649,8 +2686,12 @@ export class GhostLink {
     // is currently offline.
     if (!this.isDataLinkOpen) {
       // Invalidate an older, incomplete attempt. A late native dial must not
-      // install a session using preferences that have since been changed.
-      if (this.channel || this.dialing || this.dataLink.state !== "idle") this.disconnect();
+      // install a session using preferences that have since been changed. Not this side's answer to the contact's
+      // offer while WebRTC may carry the chat: leaving DHT only answers it (`streamBlockChanged`) just before the menu
+      // applies the transport picked, and cancelled, the contact's offer waited out its 90 s before it offered again.
+      // A session it opens elsewhere than chosen moves there (the switch intent).
+      const answering = this.attempt?.side === "answered" && (fallback || preferred === "webrtc/1");
+      if (!answering && (this.channel || this.dialing || this.dataLink.state !== "idle")) this.disconnect();
       // Someone chose: the dialling side tries at once, the choice first.
       if (automatic || choice) this.dialNow();
       return;
@@ -2715,6 +2756,8 @@ export class GhostLink {
           const offeredAt = standing?.at ?? Date.now();
           this.offered = fallback ? standing ?? { epoch, at: offeredAt, ...(resume && { resume }), ...(woke && { woke }), ...(knockMissed && { knockMissed }) } : undefined;
           this.offerMade = { epoch, at: offeredAt };
+          // The restart's own resume only: one a wake starts later in the run (`resumeAfterAbsence`) looks at its own pace.
+          this.offerShares = resume && !woke && !!this.options.resumeUnannounced;
           const gate = this.dialGate;
           this.dialGate = undefined;
           // The contact's offer, read while this one still gathers, is answered in its place: the dial is over then, not
@@ -3211,7 +3254,7 @@ export class GhostLink {
       // Past the contact's frame limit its session would end on it, and again on each retry.
       const frame = pairedMessageFrame(id, timestamp, trimmed, preview, reply, forwarded, card);
       if (frame.length > SESSION_FRAME_MAX) return PAIRED_FRAME_TOO_LARGE;
-      if (!this.messagesSent.room()) return MESSAGE_PACED;
+      if (!this.paceRoom()) return MESSAGE_PACED;
       this.pairedPending.set(id, timestamp);
       try { this.channel.send(frame); this.messagesSent.took(id); return null; }
       catch { this.pairedPending.delete(id); return "The connection closed before sending. Reconnect and retry."; }
@@ -4970,6 +5013,8 @@ export class GhostLink {
             if (live) live.send(JSON.stringify({ t: "paired-received", id: frame.id }));
           } else if (frame.t === "paired-received") {
             this.messagesSent.answered(frame.id);
+            // Counted from its receipt now, not a minute past its send: the room it waits for comes sooner.
+            if (this.roomWake) { clearTimeout(this.roomWake); this.roomWake = null; if (this.paceRoom()) this.options.events?.onTextRoom?.(); }
             const timestamp = this.pairedPending.get(frame.id);
             if (timestamp !== undefined) {
               await this.options.events?.onMessageReceipt?.(frame.id);

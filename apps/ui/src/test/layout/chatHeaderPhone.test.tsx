@@ -224,7 +224,7 @@ describe("a chat's ⋮ menu, in groups", () => {
     await user.click(await screen.findByTestId("chat-options"));
     const menu = screen.getByTestId("chat-options-menu");
     expect(menu).toHaveAttribute("data-menu", "sheet");
-    expect(layout(menu)).toEqual(["call-video", "chat-search-open", "chat-mute-open", "chat-pin-toggle", "—", "chat-identity-badges", "—", "chat-more-open", "—", "Delete chat"]);
+    expect(layout(menu)).toEqual(["call-video", "chat-search-open", "chat-mute-open", "chat-pin-toggle", "—", "chat-identity-badges", "—", "chat-more-open", "—", "chat-block", "Delete chat"]);
     expect(within(menu).getByTestId("chat-more-open")).toHaveTextContent("More…");
     // Without a bot's task going, no Tasks row and no count on ⋮.
     expect(within(menu).queryByTestId("chat-tasks")).not.toBeInTheDocument();
@@ -261,7 +261,7 @@ describe("a chat's ⋮ menu, in groups", () => {
     await user.click(await screen.findByTestId("chat-options"));
     const menu = screen.getByTestId("chat-options-menu");
     expect(menu).toHaveAttribute("data-menu", "popover");
-    expect(layout(menu).filter(row => row !== "chat-hold-open")).toEqual(["chat-search-open", "chat-mute-open", "chat-pin-toggle", "—", "chat-folder-open", "chat-refresh", "chat-tech-info", "—", "Delete chat"]);
+    expect(layout(menu).filter(row => row !== "chat-hold-open")).toEqual(["chat-search-open", "chat-mute-open", "chat-pin-toggle", "—", "chat-folder-open", "chat-refresh", "chat-tech-info", "—", "chat-block", "Delete chat"]);
   });
 });
 
@@ -344,6 +344,8 @@ describe("a chat's Tech Info", () => {
     await user.click(options);
     await user.click(screen.getByTestId("chat-tech-info"));
     const dialog = screen.getByRole("dialog", { name: "Tech Info" });
+    // 32 px drawn; on a phone a thumb gets 44 (`.tap-target`, index.css) without the header growing.
+    expect(within(dialog).getByRole("button", { name: "Close" })).toHaveClass("tap-target");
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Tech Info" })).not.toBeInTheDocument();
     expect(options).toHaveFocus();

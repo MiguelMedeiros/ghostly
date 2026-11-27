@@ -16,6 +16,16 @@ interface IncomingCallNotificationProps {
    * as it came: with the camera for a video call) and Decline. Never two calls at once (WISP 601, "On a call already").
    */
   onCall?: boolean;
+  /**
+   * Delete chat, as in the chat's ⋮ (it asks first, then declines the ring and deletes the chat): a contact who rings
+   * again after each Decline can still be removed for good, without a dialog to reach first (agents#8557).
+   */
+  onDelete?: () => void;
+  /**
+   * Block contact, as in the chat's ⋮ (it asks first; blocked, the ring stops with nothing sent to the caller, and the
+   * contact never rings again). Absent for a contact blocked already, or a chat with no contact's key.
+   */
+  onBlock?: () => void;
 }
 
 const ICON = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -45,6 +55,12 @@ const ROUND = "w-14 h-14 max-md:w-[72px] max-md:h-[72px] shrink-0 rounded-full f
 export const DECLINE = `${ROUND} bg-danger-fill text-white hover:bg-danger-fill/80`;
 export const ACCEPT = `${ROUND} bg-accent text-on-accent hover:bg-accent-hover`;
 
+/**
+ * Each card's box, and where its focus goes back to. Two chats can ring at once: the second card's target is then the
+ * first's box, and once that one is gone the focus goes on to where the first's would have, never to the page.
+ */
+const focusBackOf = new WeakMap<HTMLElement, HTMLElement | null>();
+
 export function IncomingCallNotification({
   peerName,
   hasVideo,
@@ -52,6 +68,8 @@ export function IncomingCallNotification({
   onAcceptVideo,
   onReject,
   onCall = false,
+  onDelete,
+  onBlock,
 }: IncomingCallNotificationProps) {
   const { t } = useI18n();
   const box = useRef<HTMLDivElement>(null);
@@ -65,9 +83,29 @@ export function IncomingCallNotification({
   // app. The call takes an entry again.
   useBackCloses(() => {});
   useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
-    box.current?.focus({ preventScroll: true });
-    return () => { if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true }); };
+    let before = document.activeElement as HTMLElement | null;
+    const card = box.current;
+    // An open <dialog> (Delete chat?, Forward) is modal: everything outside it, this card too, takes no click and no
+    // focus. It makes way as Escape would close it (its own cancel), and once it is gone the card takes the focus; it
+    // goes back to where the dialog put it on leaving (what opened it).
+    const open = [...document.querySelectorAll<HTMLDialogElement>("dialog[open]")];
+    for (const dialog of open.reverse()) dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
+    if (card) focusBackOf.set(card, before);
+    card?.focus({ preventScroll: true });
+    const gone = open.length ? setTimeout(() => {
+      if (!card?.isConnected || card.contains(document.activeElement)) return;
+      if (document.activeElement && document.activeElement !== document.body) before = document.activeElement as HTMLElement;
+      focusBackOf.set(card, before);
+      card.focus({ preventScroll: true });
+    }) : undefined;
+    return () => {
+      clearTimeout(gone);
+      if (document.activeElement && document.activeElement !== document.body) return;
+      let back = before;
+      // The target may be a button inside a card gone (the user had tabbed to it): the card that held it has the entry.
+      while (back && !back.isConnected) back = focusBackOf.get(back.closest<HTMLElement>(".incoming-call") ?? back) ?? null;
+      back?.focus({ preventScroll: true });
+    };
   }, []);
   // A newer offer of the contact's can take the ringing call's place as the other kind (useWebRTC): the card stays and
   // its kind changes. That change is said once, politely; one of the same kind says nothing. Accept video goes with a
@@ -116,40 +154,60 @@ export function IncomingCallNotification({
           </div>
         </div>
 
-        {onCall ? (
-          // On a call already: two choices, each named under its button, since no icon says "End and answer".
-          <div className="flex items-start justify-center gap-10 max-md:gap-6">
-            <div className="flex w-24 flex-col items-center gap-2">
+        {/* The answers, and under them Block contact and Delete chat, kept together: on a phone they sit at the bottom, in thumb reach. */}
+        <div className="incoming-call-answers flex flex-col items-center gap-4">
+          {onCall ? (
+            // On a call already: two choices, each named under its button, since no icon says "End and answer".
+            <div className="flex items-start justify-center gap-10 max-md:gap-6">
+              <div className="flex w-24 flex-col items-center gap-2">
+                <button onClick={onReject} className={DECLINE} title={t("calls.decline")} aria-label={t("calls.decline")}>
+                  <DeclineIcon />
+                </button>
+                <span aria-hidden="true" className="text-text-secondary text-xs">{t("calls.decline")}</span>
+              </div>
+              <div className="flex w-24 flex-col items-center gap-2">
+                <button ref={endAndAnswer} onClick={hasVideo ? onAcceptVideo : onAcceptAudio} className={ACCEPT} data-testid="end-and-answer"
+                  title={t("calls.endAndAnswer")} aria-label={t("calls.endAndAnswer")}>
+                  {hasVideo ? <VideoIcon /> : <PhoneIcon />}
+                </button>
+                <span aria-hidden="true" className="text-text-secondary text-xs">{t("calls.endAndAnswer")}</span>
+              </div>
+            </div>
+          ) : (
+            // On a phone the gap gives way first (the screen less its 2rem sides and three 72px buttons), so on a
+            // 320-375px phone the buttons stay round instead of being squeezed into ovals.
+            <div className="flex items-center justify-center gap-4 max-md:gap-[clamp(0.5rem,calc((100vw-4rem-216px)/2),3rem)]">
               <button onClick={onReject} className={DECLINE} title={t("calls.decline")} aria-label={t("calls.decline")}>
                 <DeclineIcon />
               </button>
-              <span aria-hidden="true" className="text-text-secondary text-xs">{t("calls.decline")}</span>
-            </div>
-            <div className="flex w-24 flex-col items-center gap-2">
-              <button ref={endAndAnswer} onClick={hasVideo ? onAcceptVideo : onAcceptAudio} className={ACCEPT} data-testid="end-and-answer"
-                title={t("calls.endAndAnswer")} aria-label={t("calls.endAndAnswer")}>
-                {hasVideo ? <VideoIcon /> : <PhoneIcon />}
+              <button ref={acceptAudio} onClick={onAcceptAudio} className={ACCEPT} title={t("calls.acceptAudio")} aria-label={t("calls.acceptAudio")}>
+                <PhoneIcon />
               </button>
-              <span aria-hidden="true" className="text-text-secondary text-xs">{t("calls.endAndAnswer")}</span>
+              {hasVideo && (
+                <button onClick={onAcceptVideo} className={ACCEPT} title={t("calls.acceptVideo")} aria-label={t("calls.acceptVideo")}>
+                  <VideoIcon />
+                </button>
+              )}
             </div>
-          </div>
-        ) : (
-          // On a phone the gap gives way first (the screen less its 2rem sides and three 72px buttons), so on a
-          // 320-375px phone the buttons stay round instead of being squeezed into ovals.
-          <div className="flex items-center justify-center gap-4 max-md:gap-[clamp(0.5rem,calc((100vw-4rem-216px)/2),3rem)]">
-            <button onClick={onReject} className={DECLINE} title={t("calls.decline")} aria-label={t("calls.decline")}>
-              <DeclineIcon />
-            </button>
-            <button ref={acceptAudio} onClick={onAcceptAudio} className={ACCEPT} title={t("calls.acceptAudio")} aria-label={t("calls.acceptAudio")}>
-              <PhoneIcon />
-            </button>
-            {hasVideo && (
-              <button onClick={onAcceptVideo} className={ACCEPT} title={t("calls.acceptVideo")} aria-label={t("calls.acceptVideo")}>
-                <VideoIcon />
-              </button>
-            )}
-          </div>
-        )}
+          )}
+          {/* Block contact and Delete chat side by side, wrapping on a narrow phone or in a long language. */}
+          {(onBlock || onDelete) && (
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {onBlock && (
+                <button type="button" onClick={onBlock} data-testid="incoming-call-block"
+                  className="min-h-11 rounded-lg px-4 text-sm text-danger-ink hover:bg-danger/15 focus-visible:ring-2 focus-visible:ring-danger">
+                  {t("chat.menu.block")}
+                </button>
+              )}
+              {onDelete && (
+                <button type="button" onClick={onDelete} data-testid="incoming-call-delete-chat"
+                  className="min-h-11 rounded-lg px-4 text-sm text-danger-ink hover:bg-danger/15 focus-visible:ring-2 focus-visible:ring-danger">
+                  {t("sidebar.deleteChat")}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
         {/* In the card from the start, empty until a newer offer changes the call's kind: a region added with its text
             is not read by every screen reader. */}
         <p role="status" className="sr-only" data-testid="incoming-call-kind-said">

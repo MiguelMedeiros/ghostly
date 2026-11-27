@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, truncateSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -162,6 +162,50 @@ describe("a voice note's waveform, measured from its file", () => {
     expect(voice.duration).toBeGreaterThan(VOICE_LIMITS.maxDurationMs + 5_000);
     expect(voice.duration).toBeLessThanOrEqual(VOICE_LIMITS.maxDurationMs + 6_000);
   });
+
+  // The Opus frames were decoded in one turn of the event loop: a 14-minute Ogg held the daemon 2.2 s, every other call
+  // (a message coming in, a listen's events, a call's audio) waiting behind it. WAV and MP3 await a read between pieces.
+  it("decodes an Ogg Opus in batches, the event loop running between them", async () => {
+    // tone.ogg's sound pages again and again (each 1.5 s), their granule positions none: a 2-minute Ogg.
+    const ogg = readFileSync(join(fixtures, "tone.ogg"));
+    const pages: Buffer[] = [];
+    for (let at = 0; at + 27 <= ogg.length;) {
+      const segments = ogg[at + 26]!, table = ogg.subarray(at + 27, at + 27 + segments);
+      const end = at + 27 + segments + table.reduce((a, b) => a + b, 0);
+      pages.push(ogg.subarray(at, end));
+      at = end;
+    }
+    const sound = pages.slice(2).map((page) => { const copy = Buffer.from(page); copy.fill(0xff, 6, 14); return copy; });
+    const path = join(dir, "long-opus.ogg");
+    writeFileSync(path, Buffer.concat([...pages.slice(0, 2), ...Array.from({ length: 80 }, () => sound).flat()]));
+    // The decoder loaded first (its module and wasm), so what is timed below is the decoding.
+    await measured(join(fixtures, "tone.ogg"));
+    let longest = 0, last = performance.now(), measuring = true;
+    const turn = () => { const now = performance.now(); longest = Math.max(longest, now - last); last = now; if (measuring) setImmediate(turn); };
+    setImmediate(turn);
+    const started = performance.now();
+    const voice = await measured(path);
+    const took = performance.now() - started;
+    measuring = false;
+    expect(voice.duration).toBeGreaterThan(115_000);
+    expect(longest).toBeLessThan(took / 4);
+  });
+
+  // An MP3 was handed to its decoder 256 KiB at a time: at a voice note's 8 kbit/s, over four minutes of sound in a turn.
+  it.skipIf(!hasFfmpeg)("decodes an MP3 at a voice note's bit rate in small pieces, the event loop running between them", async () => {
+    const path = join(dir, "voice-8k.mp3");
+    execFileSync("ffmpeg", ["-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=330:sample_rate=8000:duration=600", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "8k", path]);
+    await measured(join(fixtures, "tone.mp3"));
+    let longest = 0, last = performance.now(), measuring = true;
+    const turn = () => { const now = performance.now(); longest = Math.max(longest, now - last); last = now; if (measuring) setImmediate(turn); };
+    setImmediate(turn);
+    const started = performance.now();
+    const voice = await measured(path);
+    const took = performance.now() - started;
+    measuring = false;
+    expect(voice.duration).toBeGreaterThan(590_000);
+    expect(longest).toBeLessThan(took / 4);
+  }, 60_000);
 
   it.skipIf(!hasFfmpeg)("an MP3 and a sound through ffmpeg stop past the limit too", async () => {
     const mp3 = join(dir, "long.mp3"), flac = join(dir, "long.flac");

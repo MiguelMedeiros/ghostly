@@ -3,8 +3,9 @@ import type {WalletInstanceView, WalletNetwork, WalletPlatform, WalletState} fro
 import type {WalletCard,WalletRail} from './walletCardTypes';
 import type {Translate} from '../contexts/I18nContext';
 import {english} from '../lib/english';
+import {providerLabel} from './wallet/providers/providerText';
 import { formatAmount, formatTokenAmount } from "../lib/amount";
-export type {ChatRail,WalletCard,WalletRail} from './walletCardTypes';
+export type {WalletCard,WalletRail} from './walletCardTypes';
 export const CASHU_MINT_SOURCE = 'cashu-mint';
 /** The fee limit an on-chain payment starts with, in sats: a small transaction at a few sat/vB. The review shows the real fee. */
 export const ONCHAIN_FEE_CAP = 2_000;
@@ -171,6 +172,25 @@ export function holdsLess(rail:WalletRail,s:WalletState|null|undefined,amount:nu
  return holds!==undefined&&amount!>holds?holds:undefined;
 }
 
+/**
+ * How a Pay left pending ended, once its wallet says (`undefined` until then): the result shown was what the mint said
+ * when Pay was answered. A Cashu card's melt `quote` is paid once it is on a payment row; failed once it is on a fee row,
+ * or once what was set aside since (`held`) is all back with no row of it (a failure that cost no fee writes none).
+ * Another payment still set aside only makes that later, never wrong. A Lightning card's invoice is read in its journal,
+ * by its `hash`, with the fee a failed one cost when its source says it (the mints do). Shared by the Cashu card's Send
+ * and a Lightning address's Pay.
+ */
+export function pendingPayEnd(sent:{quote?:string;hash?:string;held?:boolean},s:WalletState|null|undefined):{paid:boolean;fee:number}|undefined {
+ if(sent.hash){
+  const op=s?.lightning?.recent.find(o=>o.direction==='out'&&o.paymentHash===sent.hash);
+  return op?.state==='paid'?{paid:true,fee:0}:op?.state==='failed'?{paid:false,fee:op.fee??0}:undefined;
+ }
+ if(!sent.quote||!s)return undefined;
+ const row=s.history.find(tx=>tx.quote===sent.quote&&(tx.kind==='lightning-out'||tx.kind==='fee'));
+ if(row)return {paid:row.kind==='lightning-out',fee:row.kind==='fee'?row.fee:0};
+ return sent.held&&!s.setAside?{paid:false,fee:0}:undefined;
+}
+
 type Face=Omit<WalletCard<string>,'id'|'rail'|'network'>;
 /** Lightning goes through its network's source: the Cashu mints (sharing the Cashu balance) unless another was chosen. */
 function lightningCard(t:Translate,s:WalletState,cashu:string,sats:(n:number)=>string):Face {
@@ -179,7 +199,7 @@ function lightningCard(t:Translate,s:WalletState,cashu:string,sats:(n:number)=>s
  const ready=ln.status==='ready';
  // Reconnecting: the last balance it read (the status says it is not a fresh one), until it is unavailable.
  const last=ln.status==='connecting'&&ln.balance!==undefined?sats(ln.balance):undefined;
- return {name:'Lightning',balance:ready?ln.balance!==undefined?sats(ln.balance):t('wallet.cards.status.ready'):ln.status==='error'?t('wallet.cards.balance.unavailable'):last??t('wallet.cards.status.connecting'),detail:t('wallet.cards.detail.lightningVia',{name:ln.alias??ln.label??ln.providerId}),status:ready?t('wallet.cards.status.ready'):ln.status==='error'?t('wallet.cards.status.checkSettings'):t('wallet.cards.status.connecting'),ready};
+ return {name:'Lightning',balance:ready?ln.balance!==undefined?sats(ln.balance):t('wallet.cards.status.ready'):ln.status==='error'?t('wallet.cards.balance.unavailable'):last??t('wallet.cards.status.connecting'),detail:t('wallet.cards.detail.lightningVia',{name:ln.alias??(ln.label?providerLabel(t,ln.providerId,ln.label):ln.providerId)}),status:ready?t('wallet.cards.status.ready'):ln.status==='error'?t('wallet.cards.status.checkSettings'):t('wallet.cards.status.connecting'),ready};
 }
 /** Federation ecash: the federations joined on this network, one balance. */
 function fedimintCard(t:Translate,s:WalletState,sats:(n:number)=>string):Face {
@@ -193,5 +213,5 @@ function bitcoinCard(t:Translate,s:WalletState,sats:(n:number)=>string):Face {
  const bt=s.bitcoin,ready=bt?.status==='ready';
  const last=bt?.status==='connecting'&&bt.balance!==undefined?sats(bt.balance):undefined;
  return {name:'Bitcoin',balance:ready?sats(bt!.balance??0):!bt||bt.status==='none'?t('wallet.cards.balance.noSource'):bt.status==='error'?t('wallet.cards.balance.unavailable'):last??t('wallet.cards.status.connecting'),
-  detail:bt?.providerId?t('wallet.cards.detail.onchainVia',{name:bt.alias??bt.label??bt.providerId}):t('wallet.cards.detail.onchain'),status:ready?t('wallet.cards.status.ready'):!bt||bt.status==='none'?t('wallet.cards.status.setUp'):bt.status==='error'?t('wallet.cards.status.checkSettings'):t('wallet.cards.status.connecting'),ready};
+  detail:bt?.providerId?t('wallet.cards.detail.onchainVia',{name:bt.alias??(bt.label?providerLabel(t,bt.providerId,bt.label):bt.providerId)}):t('wallet.cards.detail.onchain'),status:ready?t('wallet.cards.status.ready'):!bt||bt.status==='none'?t('wallet.cards.status.setUp'):bt.status==='error'?t('wallet.cards.status.checkSettings'):t('wallet.cards.status.connecting'),ready};
 }

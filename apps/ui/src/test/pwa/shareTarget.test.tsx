@@ -20,6 +20,11 @@ import { GroupChat } from "../../pages/GroupChat";
 
 vi.unmock("@ghostly/browser/platform/sync");
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
+// The real one, counted: the picker reads a share's text (up to 64 MiB) once, not on each letter typed in its search.
+vi.mock("../../lib/incomingShare", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../lib/incomingShare")>();
+  return { ...real, sharePreview: vi.fn(real.sharePreview) };
+});
 
 // covers: app.pwa.share-target
 describe("a share into the app", () => {
@@ -63,6 +68,74 @@ describe("a share into the app", () => {
       expect(shareText(share({ text: `链接：${url}2`, url }))).toBe(`链接：${url}2\n${url}`);
     });
 
+    it("its link is not repeated when the text carries it in a bold, italic, strike or spoiler marker, or in < >", () => {
+      const url = "https://a.example/p";
+      // The bubble draws each as that link (`linkEnd` leaves the closing marker out): a second copy was put under it.
+      for (const text of [`Read *${url}*`, `Read **${url}**`, `Read _${url}_`, `Read ~~${url}~~`, `Read ||${url}||`, `Read <${url}>`]) {
+        expect(shareText(share({ text, url }))).toBe(text);
+      }
+      // A longer address in a marker still does not carry it.
+      expect(shareText(share({ text: `Read *${url}2*`, url }))).toBe(`Read *${url}2*\n${url}`);
+      // Nor does another address that holds it right after one of them: the bubble draws only that address.
+      for (const mark of ["_", "*", "~~", "||", "<"]) {
+        const text = `Go https://r.example/x${mark}${url}`;
+        expect(shareText(share({ text, url }))).toBe(`${text}\n${url}`);
+      }
+    });
+
+    it("its link is not repeated when the text's differs only by a site's closing '/' or the scheme and host's case", () => {
+      expect(shareText(share({ text: "Check this https://x.example", url: "https://x.example/" }))).toBe("Check this https://x.example");
+      expect(shareText(share({ text: "Check this https://x.example/.", url: "https://x.example" }))).toBe("Check this https://x.example/.");
+      expect(shareText(share({ text: "HTTPS://X.EXAMPLE/a", url: "https://x.example/a" }))).toBe("HTTPS://X.EXAMPLE/a");
+      expect(shareText(share({ text: "Look https://x.example/ab", url: "https://x.example/a" }))).toBe("Look https://x.example/ab\nhttps://x.example/a");
+      // The path's case is the page's own.
+      expect(shareText(share({ text: "Look https://x.example/A", url: "https://x.example/a" }))).toBe("Look https://x.example/A\nhttps://x.example/a");
+      // What is no web address is compared as typed.
+      expect(shareText(share({ text: "Code: GHOST-42 here", url: "ghost-42" }))).toBe("Code: GHOST-42 here\nghost-42");
+      expect(shareText(share({ text: "Code: ghost-42 here", url: "ghost-42" }))).toBe("Code: ghost-42 here");
+    });
+
+    it("its link is not repeated when a capital Σ ends a word of it, whatever else the text holds", () => {
+      // Lowered alone, the link's last Σ is a final "ς"; in a text with an "İ" it was lowered one letter at a time ("σ").
+      const url = "https://a.example/ΟΔΟΣ";
+      for (const text of [`İzmir ${url}`, `${url} İzmir`, `İzmir ${url}.`, `İzmir (${url})`, `İzmir *${url}*`, `Ζ ${url}`]) {
+        expect(shareText(share({ text, url }))).toBe(text);
+      }
+      expect(shareText(share({ text: "İzmir https://a.example/ΑΣ/x", url: "https://a.example/ΑΣ/x" }))).toBe("İzmir https://a.example/ΑΣ/x");
+      // In the host, which is read in any case.
+      expect(shareText(share({ text: "Look HTTPS://ΟΔΟΣ", url: "https://οδοσ" }))).toBe("Look HTTPS://ΟΔΟΣ");
+      expect(shareText(share({ text: "İzmir https://οδοσ", url: "https://ΟΔΟΣ/" }))).toBe("İzmir https://οδοσ");
+      // A final ς is another letter: in the path, or in the host, it is another page.
+      expect(shareText(share({ text: "Look https://a.example/ΟΔΟς", url }))).toBe(`Look https://a.example/ΟΔΟς\n${url}`);
+      expect(shareText(share({ text: `Look ${url}`, url: "https://a.example/ΟΔΟς" }))).toBe(`Look ${url}\nhttps://a.example/ΟΔΟς`);
+      expect(shareText(share({ text: "İzmir https://a.example/οδοσ", url: "https://a.example/οδος" })))
+        .toBe("İzmir https://a.example/οδοσ\nhttps://a.example/οδος");
+      expect(shareText(share({ text: "Look https://οδος/", url: "https://ΟΔΟΣ/" }))).toBe("Look https://οδος/\nhttps://ΟΔΟΣ/");
+    });
+
+    it("its link's host is compared as the browser reads it, in the scripts whose case is not plain", () => {
+      const same: [string, string][] = [
+        ["İzmir HTTPS://ΟΔΟΣ.EXAMPLE/p", "https://οδοσ.example/p"],
+        ["Look https://ıstanbul.example/p", "https://ıstanbul.example/p"],
+        ["Look HTTPS://İSTANBUL.EXAMPLE/p", "https://İstanbul.example/p"],
+        ["Look HTTPS://I\u0307.EXAMPLE/p", "https://i\u0307.example/p"],
+        ["Look HTTPS://ﬁ.EXAMPLE/p", "https://ﬁ.example/p"],
+        ["Look https://Ꭰ.example/p", "https://ꭰ.example/p"],
+        ["İzmir https://ꭰ.example/p", "https://Ꭰ.example/p"],
+        ["Look https://Ა.example/p", "https://ა.example/p"],
+        ["İzmir https://ა.example/p", "https://Ა.example/p"],
+        ["İzmir HTTPS://𐐀.EXAMPLE/p", "https://𐐨.example/p"],
+      ];
+      for (const [text, url] of same) expect(shareText(share({ text, url }))).toBe(text);
+      // Another host or page as the browser reads it: a path's "ẞ" is not "ß"; "I" is "i", not "ı".
+      const other: [string, string][] = [
+        ["Look https://a.example/STRAẞE", "https://a.example/STRAßE"],
+        ["Look HTTPS://ISTANBUL.EXAMPLE/p", "https://ıstanbul.example/p"],
+        ["Look https://a.example/e\u0301", "https://a.example/é"],
+      ];
+      for (const [text, url] of other) expect(shareText(share({ text, url }))).toBe(`${text}\n${url}`);
+    });
+
     it("a text where the link turns up at every character is read at once, not once per place (any website can post one)", () => {
       const started = performance.now();
       expect(shareText(share({ text: "(".repeat(60_000), url: "(" })).startsWith("(".repeat(60_000))).toBe(true);
@@ -71,6 +144,19 @@ describe("a share into the app", () => {
       // Read once past many places it turns up inside other words, the link standing on its own is still found.
       const text = `${"x/https://a.example/p ".repeat(40)}see https://a.example/p.`;
       expect(shareText(share({ text, url: "https://a.example/p" }))).toBe(text);
+    });
+
+    it("a link of any length is looked for in the text as it is (any website can post one)", () => {
+      const web = `https://a.example/${"p".repeat(40_000)}`;
+      expect(shareText(share({ url: web }))).toBe(web);
+      expect(shareText(share({ text: "Look", url: web }))).toBe(`Look\n${web}`);
+      expect(shareText(share({ text: `Look ${web.replace("https://a.example", "HTTPS://A.EXAMPLE")}.`, url: web })))
+        .toBe(`Look ${web.replace("https://a.example", "HTTPS://A.EXAMPLE")}.`);
+      // A letter whose lower case is longer, before the link, does not move where it is found.
+      expect(shareText(share({ text: "İSTANBUL HTTPS://A.EXAMPLE/p", url: "https://a.example/p" }))).toBe("İSTANBUL HTTPS://A.EXAMPLE/p");
+      const plain = "(".repeat(40_000);
+      expect(shareText(share({ text: `see ${plain}`, url: plain }))).toBe(`see ${plain}`);
+      expect(sharePreview(share({ text: "Look", url: web }))).toBe(`Look\n${web.slice(0, 2043)}…`);
     });
 
     it("the picker previews the start of a long text, never half a character, and the draft gets it whole", () => {
@@ -477,6 +563,17 @@ describe("a share into the app", () => {
       expect(screen.getByTestId("share-search")).toHaveValue("");
       expect(screen.getAllByTestId("share-chat")).toHaveLength(31);
       expect(takeShareFor("chat1")?.text).toBe("one");
+    });
+
+    it("reads the shared text once per share, not on each letter typed in the search", async () => {
+      receiveShare(share({ text: "Look İSTANBUL", url: "https://a.example" }));
+      const { user } = picker();
+      settled();
+      const read = vi.mocked(sharePreview).mock.calls.length;
+      await user.click(screen.getByTestId("share-search"));
+      await user.keyboard("anabel");
+      expect(screen.getByTestId("share-search")).toHaveValue("anabel");
+      expect(vi.mocked(sharePreview).mock.calls.length).toBe(read);
     });
 
     it("Cancel drops the share and goes home", async () => {

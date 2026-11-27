@@ -11,11 +11,11 @@ import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppDescription } from "./AppDescription";
-import { NAME, withName } from "./aroundName";
+import { NAME, SECOND_NAME, withName, withNames } from "./aroundName";
 import { removedLine } from "./removedLine";
 import { stopReason, stoppedSaid } from "./stoppedSaid";
 import { appErrorCode, appErrorRetryable, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
-import { appStopped, refreshInstalledApps } from "../../lib/apps/installed";
+import { appStopped, refreshInstalledApps, refreshInstalledAppsAfter } from "../../lib/apps/installed";
 import { useTryAgain } from "../../lib/apps/tryAgain";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
@@ -146,6 +146,24 @@ function ErrorLine({ error, testId }: { error: AppErrorView; testId?: string }) 
   return <div role="alert"><InfoLine testId={testId} info={error.info} dir={ownDirection(error.text)} className="text-xs text-danger-ink whitespace-pre-line">{error.text}</InfoLine></div>;
 }
 
+/**
+ * Install here ends the store's hold on the app's updates (a newer version by link or card, WISP 1200 § Updates and
+ * rollback): said before Install, as removing the store says it. The store is named as on its store line, with its
+ * fingerprint unless it is the official one; by its fingerprint alone while no index of it was read. From another store's
+ * listing (`to`), Install pins the app to that store: its updates then wait for it, not for the publisher's links.
+ */
+function LeavesStore({ title, store }: { title: string; store: NonNullable<AppPreview["leavesStore"]> }) {
+  const { t } = useI18n();
+  const fingerprint = appFingerprint(store.key);
+  const named = store.name ?? fingerprint;
+  return (
+    <Line tone="warning" testId="app-install-leaves-store">
+      {withNames(t(store.to === undefined ? "apps.install.leavesStore" : "apps.install.leavesStoreTo", { title: NAME, name: SECOND_NAME }), [title, named])}
+      {store.name !== undefined && store.key !== DEFAULT_STORE_KEY && <> <Fingerprint value={fingerprint} /></>}
+    </Line>
+  );
+}
+
 /** What the app may do: always its own data on this device (not on an update), then each permission it asks for. */
 function Permissions({ asks, update }: { asks: readonly string[]; update: boolean }) {
   const { t } = useI18n();
@@ -222,6 +240,12 @@ function Shell({ titleId, describedBy, onClose, children, testId, box }: { title
 /** What "Version {{version}}" gets in place of the version (a private-use character), to put the version there in its own direction. */
 const VERSION_SLOT = "";
 
+/** A line with a version in it ("Version {{version}} is ready."): the version in its own direction, as in the header. */
+function withVersion(text: string, version: string) {
+  const [before = "", after = ""] = text.split(VERSION_SLOT);
+  return <>{before}<bdi dir="ltr">{version}</bdi>{after}</>;
+}
+
 function Head({ titleId, title, version, tagline, icon, installed }: { titleId: string; title: string; version?: string; tagline?: string; icon?: Uint8Array | null; installed?: InstalledAppView }) {
   const { t } = useI18n();
   const [before = "", after = ""] = version ? t("apps.app.version", { version: VERSION_SLOT }).split(VERSION_SLOT) : [];
@@ -242,10 +266,14 @@ function Head({ titleId, title, version, tagline, icon, installed }: { titleId: 
 
 const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x) => b.includes(x));
 
-/** An app read again is what the screen showed: the same version, from a publisher shown the same, asking the same. */
+/**
+ * An app read again is what the screen showed: the same version, from a publisher shown the same, asking the same, and
+ * ending the same store's hold (or none): a hold that ends only on the read again was never said before Install.
+ */
 function sameScreen(a: AppPreview, b: AppPreview): boolean {
   return a.digest === b.digest && a.install === b.install && a.run.status === b.run.status && a.unknownPublisher === b.unknownPublisher
-    && sameSet(a.asks, b.asks) && sameSet(a.manifest.permissions, b.manifest.permissions);
+    && sameSet(a.asks, b.asks) && sameSet(a.manifest.permissions, b.manifest.permissions)
+    && a.leavesStore?.key === b.leavesStore?.key && a.leavesStore?.to === b.leavesStore?.to;
 }
 
 /**
@@ -302,7 +330,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   // shows is not what Install would be asked to grant, so Install waits until Try again reads it.
   const [stale, setStale] = useState(false);
   // Why it waits for Try again (what the read again was for): the screen says that, not that it is ready.
-  const [staleFor, setStaleFor] = useState<"asks" | "expired">("asks");
+  const [staleFor, setStaleFor] = useState<"asks" | "store" | "expired">("asks");
   const [rechecking, setRechecking] = useState(false);
   const retryButton = useRef<HTMLButtonElement>(null), confirmButton = useRef<HTMLButtonElement>(null);
   // Busy while it reads, its line read out again when it fails again (lib/apps/tryAgain.ts). Once it reads (or fails in
@@ -316,14 +344,16 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     const active = document.activeElement;
     if (!active || active === document.body) (confirmButton.current ?? screenOf.current)?.focus({ preventScroll: true });
   }, [readAgain.tries]);
-  // Why the screen is read again: what it asks changed, or the engine no longer holds what it fetched (`expired`).
-  const rereadFor = useRef<"asks" | "expired">("asks");
+  // Why the screen is read again: what it asks changed, the store's hold it ends changed (`store`), or the engine no
+  // longer holds what it fetched (`expired`).
+  const rereadFor = useRef<"asks" | "store" | "expired">("asks");
   const recheck = async (): Promise<AppPreview | null> => {
     try {
       const again = await engine.call("appPreview", source);
       const was = preview;
       setPreview(again); setStale(false);
       if (rereadFor.current === "asks") setError({ text: t(again.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged") });
+      else if (rereadFor.current === "store") setError({ text: t("apps.errors.storeChanged") });
       // Read again as it was: nothing new to look at, Install takes it. Another version, or other words: look at it first.
       else if (was && sameScreen(was, again)) { setError(null); return again; }
       else setError({ text: t("apps.errors.expired") });
@@ -360,7 +390,10 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     } catch (e) {
       // It asks for more than this screen listed (the app uninstalled since it opened, a version that dropped a permission
       // installed by the check): the screen shows what it asks now, and Install grants only that.
-      if (appErrorCode(e) === "permissions-changed") { rereadFor.current = "asks"; await recheck(); }
+      // Or it would end a store's hold on the app's updates this screen did not name (pinned since, in another tab): the
+      // screen says it now, and the next press takes it as said.
+      const code = appErrorCode(e);
+      if (code === "permissions-changed" || code === "store-changed") { rereadFor.current = code === "store-changed" ? "store" : "asks"; await recheck(); }
       else setError(appErrorView(e, t));
     } finally { setBusy(false); }
   };
@@ -393,7 +426,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   // while Try again reads or fails again.
   const saidId = useId();
   const said = !preview ? !error && t("apps.install.fetching") : blocked ? why
-    : stale ? t(staleFor === "expired" ? "apps.errors.expired" : preview.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged")
+    : stale ? t(staleFor === "expired" ? "apps.errors.expired" : staleFor === "store" ? "apps.errors.storeChanged" : preview.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged")
       : t(preview.install === "update" ? "apps.install.readyUpdate" : "apps.install.ready");
   return (
     <Shell titleId={titleId} describedBy={saidId} onClose={close} testId="app-install">
@@ -405,6 +438,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
           <Publisher fingerprint={preview.fingerprint} unknown={preview.unknownPublisher} listedBy={preview.listedBy} sentBy={sentBy} builtIn={preview.carried && "carried"} />
           {!blocked && (preview.install === "new" || preview.asks.length > 0) && <Permissions asks={preview.asks} update={preview.install === "update"} />}
           {why && <Line tone="danger" testId="app-install-blocked">{why}</Line>}
+          {!blocked && preview.leavesStore && <LeavesStore title={shownTitle} store={preview.leavesStore} />}
           <Privacy from={preview.from} internet={(preview.manifest.permissions as readonly string[]).includes("internet")} carried={preview.carried} />
           {preview.manifest.description && <AppDescription text={preview.manifest.description} from="publisher" testId="app-description" />}
         </>
@@ -509,7 +543,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   const act = async (work: () => Promise<unknown>, close = false, which: string | null = null, view = appErrorView) => {
     focusBack();
     setBusy(true); setPending(which); setError(null);
-    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(view(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
+    try { await refreshInstalledAppsAfter(work); if (close) onClose(); } catch (e) { setError(view(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
   };
   // No link it came from answered with its files (offline, the host down, each holding another version): the engine
   // says so only by its run status, which was still `needs-files`. Said on the screen, or it looked as before.
@@ -560,7 +594,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
       <Permissions asks={app.permissions} update={false} />
       {app.pending && (
         <div className="bg-surface rounded-xl px-4 py-3 space-y-3" data-testid="app-update">
-          <p className="text-sm text-text-primary">{t("apps.app.updateWaits", { version: app.pending.version })}</p>
+          <p className="text-sm text-text-primary">{withVersion(t("apps.app.updateWaits", { version: VERSION_SLOT }), app.pending.version)}</p>
           {/* An update that no longer adds a permission to the version installed meanwhile has nothing to list. */}
           {app.pending.added.length > 0 && <Permissions asks={app.pending.added} update />}
           {/* Update grants only the update listed here: another one found since is refused, and the list read again shows it. */}

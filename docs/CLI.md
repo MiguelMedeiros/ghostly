@@ -61,7 +61,9 @@ the profile.
 To join someone else's invite: `printf '%s' "$INVITE" | ghostly invite join --label bob` (stdin keeps it out of `ps`
 and the shell's history; `ghostly invite join <ghostly1… or link>` works too, with a warning). With no invite given,
 a join whose stdin stays empty says so on stderr after 2 s and gives up with a usage error after 60 s; `invite join -`
-waits for stdin as long as it takes. Any command that reads stdin takes at most 16 MiB there, the most a daemon's
+waits for stdin as long as it takes. A command that reads what you type at a terminal (`send --stdin`,
+`engine <method> -`, `app send … -`, a card's `--json -`) first says on stderr how to end it (Ctrl-D). Any command
+that reads stdin takes at most 16 MiB there, the most a daemon's
 request line holds: more is refused as it comes (`bad_request`), and so is a file a request carries (a card's `--json`,
 `identity complete --evidence-file`, `x401 credential add`). A request whose JSON passes 16 MiB all the same (a text's
 escapes) is refused before it goes to the daemon. The invite is the app's own, so
@@ -83,6 +85,7 @@ tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tool
 | `profile set --name <name>`, `profile picture <jpeg>` | What contacts see |
 | `status set [text…] [--emoji <emoji>] [--availability available\|busy\|away\|dnd] [--until 2h]`, `status show`, `status clear` | The status paired contacts see: up to 60 characters, one emoji, an availability (`dnd`: Do not disturb), until a time. A daemon says it at once; without one it goes on each chat's next live session |
 | `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice); the `group auto` and `call auto` settings and the chats' holds (`chat disconnect --hold`) travel with it |
+| `ghostly device` | None: a CLI profile is on this one device only. It cannot be added to another device, moved or taken over, and the app's Add a device cannot add it; to run it on another machine, back it up here, restore it there and stop using it here. `ghostly device …` says so as a usage error (exit 2) |
 
 Only one process opens a profile at a time.
 
@@ -101,7 +104,8 @@ While it runs, every command goes through its socket. With no daemon, a command 
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
 The daemon listens on a Unix socket, `daemon.sock` in the profile's folder (or in `ghostly-<hash>/` in `$XDG_RUNTIME_DIR`,
-else `/tmp/ghostly-<uid>-<hash>/`, when that path is too long for a socket), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
+else in the system temp folder (`$TMPDIR`, on macOS `/var/folders/…/T/`), else in `/tmp/ghostly-<uid>-<hash>/`, when that
+path is too long for a socket; the daemon removes that folder when it stops), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
 One JSON object per line each way:
 
 ```json
@@ -307,13 +311,14 @@ Safety rules the CLI enforces:
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
   `chat request`, the comment of `pay` to a Lightning address, the name of `group create` and `group rename`, the
-  name contacts see in `profile set`, `profile create --name` and `settings set nick`, a file's name in `file send`,
-  the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
+  name contacts see in `profile set`, `profile create --name` and `settings set nick`, a file's name and type in `file send`,
+  the name of `service add`, the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
   `forwardMessages`, `sendGroupFile` caption and file name, `sendFile`'s file name, payment memos of `sendPayment`,
   `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo,
-  `lnurlInvoice`'s comment, the name of `createGroup` and `renameGroup`, `updateSettings`' nick, `setOwnStatus`'
+  `lnurlInvoice`'s comment, the name of `createGroup`, `renameGroup` and `addService`, `updateSettings`' nick, `setOwnStatus`'
   text and the note or profile fields of `nostrDraft` through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5) unless
-  `--force`, before anything is sent or asked of a server.
+  `--force`, before anything is sent or asked of a server. A text it would read past 16 KiB of UTF-8 (the most any
+  text Ghostly sends carries; a memo goes as its first 140 characters) is refused with its size instead (`bad_request`).
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group create` and `group link`, for a group's link, and `invite create`, for the invite it makes).
 
 Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out),
@@ -435,11 +440,16 @@ The audio contract, one Unix socket per call:
 - **From the call.** The contact's voice in 20 ms frames, as they are decoded.
 - **To the call.** Write any amount, at any pace: the CLI plays it at real time, and silence when there is nothing.
 - **Barge-in.** `ghostly call flush` drops what is queued, at once.
+- **Falling behind.** A program that stops reading finds at most 1 s of the contact's voice waiting when it reads
+  again, the system's socket buffer included; what comes meanwhile is dropped. `call pipe` keeps more on top for a
+  player that stops reading: its stdout pipe and its own buffers, about 260-350 KiB (some 3 s at 48 kHz, 16-20 s at
+  8 kHz).
 - **End.** The program reads EOF when the call ends; `call.ended` says why (`hangup`, `remote-hangup`, `missed`,
   `rejected`, `unanswered`, `crossed`, `failed`, `stopped`).
 - **Silence.** `call.stalled` says the contact's packets stopped for 5 s (its side may have died), `call.resumed` that
   they came back; after 15 s with none the call ends as `failed`.
-- **Shell pipelines.** `ghostly call pipe` puts a call's audio on stdin and stdout, for sox or ffmpeg.
+- **Shell pipelines.** `ghostly call pipe` puts a call's audio on stdin and stdout, for sox or ffmpeg. Ctrl-C stops
+  the pipe, not the call (exit 130, and stderr says how to end it: `ghostly call hangup <call>`).
 
 **When a call does not connect** (it stays `connecting`, then ends `failed`): the daemon's log lists the candidates
 each side offered and every ICE state, and `call list` shows `stats.ice` (the state and the pair). A VPN that is the

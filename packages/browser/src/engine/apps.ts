@@ -9,6 +9,7 @@ import {
 } from "@ghostly/core";
 import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap, committed } from "../shared/idb";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf, fileSpace, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
+import { bundleLength } from "../shared/appBundleLength";
 import { APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, isAppFetchUrl, isGitHubPage, type AppFetcher } from "./appFetch";
 import { BUILT_IN_APPS, DEFAULT_APP_STORES, type BuiltInApp } from "./appDefaults";
 
@@ -115,16 +116,9 @@ const PEEK_FIRST_BYTES = 4 * 1024;
 
 const bundleId = (digest: string) => `app-${digest}`;
 
-/** A bundle's signature statement: `{alg, key, sig}` with its 52-character key and 86-character signature, canonical. */
-const STATEMENT_BYTES = canonicalJsonBytes({ alg: "ed25519", key: "y".repeat(52), sig: "A".repeat(86) }).length;
 
-/**
- * The length of the whole bundle of a manifest (core's `assembleAppBundle` layout: magic, u32, the canonical manifest,
- * u32, the statement, the files): what its stored file holds once written. A shorter or longer one is not that bundle.
- */
-function bundleLength(manifest: AppManifest): number {
-  return utf8Encode(APP_BUNDLE_MAGIC).length + 8 + canonicalJsonBytes(manifest).length + STATEMENT_BYTES + manifest.files.reduce((sum, f) => sum + f.size, 0);
-}
+/** A bundle's file as written: where it is kept, and its whole file's SHA-256 (`InstalledApp.sha256`). */
+type BundleFile = { bytes: FileBytesKind; sha256: string };
 
 /** One installed app, by reference (`STORES.apps`). */
 export interface InstalledApp {
@@ -139,8 +133,20 @@ export interface InstalledApp {
   manifest: AppManifest;
   /** Where the bundle's bytes are kept. */
   bytes: FileBytesKind;
+  /**
+   * The SHA-256 of the bundle's whole file (base64url), as written: a device move hands the file over by it without
+   * reading it all again. Absent on a record from before it was kept, or whose file another write may have replaced.
+   */
+  sha256?: string;
   /** The URL the installed version was read from. */
   from: string;
+  /**
+   * The `ghostly-revoke.json` beside where its earlier versions came from and the sources they named, the first
+   * `FORMER_SOURCES_KEPT` met (`formerSourcesOf`): its publisher's revocations are read there too, so a version that
+   * names only other URLs does not move them away from where the publisher still can publish. Absent on a record from
+   * before they were kept, or of an app that never changed version.
+   */
+  formerSources?: string[];
   /**
    * The key of the store the person installed it from (WISP 1200 § Updates and rollback): it then updates only to the
    * version that store's signed index lists, never to a newer one found at its publisher's sources first. Absent for an
@@ -154,7 +160,7 @@ export interface InstalledApp {
   /** Another bundle with an installed or waiting `sequence` and another digest: refused, the one held kept. */
   equivocation?: { sequence: number; digest: string; at: number };
   /** A newer version that adds permissions: kept until the person accepts them. */
-  pending?: { sequence: number; digest: string; manifest: AppManifest; added: AppPermission[]; bytes: FileBytesKind; from: string; at: number };
+  pending?: { sequence: number; digest: string; manifest: AppManifest; added: AppPermission[]; bytes: FileBytesKind; sha256?: string; from: string; at: number };
   checkedAt?: number;
 }
 
@@ -318,6 +324,14 @@ export interface AppPreview {
   run: AppRunStatus;
   listedBy: AppListedBy[];
   unknownPublisher: boolean;
+  /**
+   * The store the installed app takes its updates from (`InstalledApp.store`), when Install here ends that: a newer
+   * version by URL or card unpins it, another store's listing pins it to that store (WISP 1200 § Updates and rollback).
+   * The screen says so, as removing the store does. `name` is absent while no index of the store was read. `to`: the
+   * store this screen's listing is from, which the app's updates then wait for instead; absent when they then come from
+   * the publisher's links.
+   */
+  leavesStore?: { key: string; name?: string; to?: string };
   /** Read from the bundle this build carries (a built-in app): no server was asked for it, `from` notwithstanding. */
   carried?: true;
   /** This screen's bundle and source, for `install`: Install on it installs from where it said, whatever screen opened since. */
@@ -361,9 +375,19 @@ export interface AppsHost {
 /**
  * `store`: fetched from that store's listing, so installing it pins its updates to that store. `revocations`: its
  * publisher's, read beside it when it was fetched (Install refuses a version they stop, and the record starts with them).
- * `asks`: what the last install screen of it listed (`AppPreview.asks`), for an Install that does not say.
+ * `asks`: what the last install screen of it listed (`AppPreview.asks`), for an Install that does not say. `leaves`: the
+ * store whose hold on the app's updates that screen said Install ends (`AppPreview.leavesStore`), if any.
  */
-interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; asks: AppPermission[]; at: number; carried?: true }
+interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; asks: AppPermission[]; leaves?: string; at: number; carried?: true }
+/**
+ * The store whose hold on the app's updates installing it ends (`AppPreview.leavesStore`), as `install` writes the
+ * record: an update not from the pinned store drops the pin, the same version from another store moves it there; the
+ * same version by URL or card leaves the record as it is.
+ */
+function leftStore(installed: InstalledApp | undefined, install: string, fromStore: string | undefined): string | undefined {
+  const pin = installed?.store;
+  return pin !== undefined && fromStore !== pin && (install === "update" || (install === "same" && fromStore !== undefined)) ? pin : undefined;
+}
 /** What a staged bundle is kept under (`AppPreview.stage`): one install screen's version and source, so another screen of it does not change it. */
 const stagedKey = (digest: string, from: string, store: string | undefined) => `${digest}\n${from}\n${store ?? ""}`;
 
@@ -624,6 +648,44 @@ function withRevocations(app: InstalledApp, read: readonly SignedAppRevocation[]
   return merged.size ? { ...app, revocations: [...merged.values()] } : app;
 }
 
+/**
+ * At most this many `InstalledApp.formerSources`: past the first version's own (its URL and its 8 sources) room for a
+ * few moves, each one more `ghostly-revoke.json` read per check at most. The first met are kept, not the last: a
+ * version signed with a stolen key, and the ones after it, cannot push the publisher's own places out by naming many.
+ */
+const FORMER_SOURCES_KEPT = 16;
+
+/** `InstalledApp.formerSources` as kept: a list, at most `FORMER_SOURCES_KEPT`. */
+const formerOf = (app: InstalledApp): string[] => Array.isArray(app.formerSources) ? app.formerSources.slice(0, FORMER_SOURCES_KEPT) : [];
+
+/** Where a waiting update's publisher's revocations are read: where it was found and the sources it names (at most a manifest's). */
+const pendingUrlsOf = (app: InstalledApp): string[] => app.pending ? [app.pending.from, ...(app.pending.manifest.sources ?? []).slice(0, APP_BUNDLE_LIMITS.sources)] : [];
+
+/**
+ * Where an installed app's publisher's revocations are read: where it came from, the sources it names, its earlier ones,
+ * and the waiting update's own places (Accept judges it with what the record holds).
+ */
+function revocationUrlsOf(installed: InstalledApp | undefined): string[] {
+  return installed ? [installed.from, ...(installed.manifest.sources ?? []), ...formerOf(installed), ...pendingUrlsOf(installed)] : [];
+}
+
+/**
+ * `pinnedRevocations` kept: at most this many (64 apps' earlier places), and of their lists at most `bytes` in all.
+ * Past them none is added (none dropped for it, which the next check would ask again first): the others are asked at
+ * every check.
+ */
+const PINNED_REVOCATIONS_KEPT = { max: 1024, bytes: 1024 * 1024 } as const;
+
+/** `InstalledApp.formerSources` once another version replaces `installed`: its own first, then where it came from and the sources it named. */
+function formerSourcesOf(installed: InstalledApp | undefined): string[] | undefined {
+  const kept = new Set<string>();
+  for (const url of installed ? [...formerOf(installed), installed.from, ...(installed.manifest.sources ?? [])] : []) {
+    if (kept.size >= FORMER_SOURCES_KEPT) break;
+    if (isAppFetchUrl(url)) kept.add(besideUrl(url, "ghostly-revoke.json"));
+  }
+  return kept.size ? [...kept] : undefined;
+}
+
 /** Of these revocations, the ones that stop one of these versions. */
 function stopping(versions: readonly AppVersion[], revocations: readonly SignedAppRevocation[]): SignedAppRevocation[] {
   return revocations.filter((r) => versions.some((v) => appRevocationFor(v, [r])));
@@ -729,7 +791,7 @@ export class Apps {
    * The last write of a bundle under way, by digest: a second write of the same files (Open while the update check
    * fetches them, two Installs) waits for it and finds them stored, never removing the file the first one is filling.
    */
-  private readonly bundleWrites = new Map<string, Promise<FileBytesKind>>();
+  private readonly bundleWrites = new Map<string, Promise<BundleFile>>();
   /**
    * Fetches of an installed app's files under way, by `ref digest`: Open or Get its files while the update check fetches
    * them waits for that fetch, with no download, hash or read-back of its own.
@@ -780,19 +842,27 @@ export class Apps {
   private readonly held = new Map<string, Promise<InstalledApp | undefined>>();
   private heldStores: Promise<Map<string, AddedAppStore>> | null = null;
   /**
-   * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest> <pin>
-   * <installed digest> <waiting digest>`): the same index listing the same, for the same app, is not peeked again at
-   * every check. Only the ones the last check read or wrote stay (`listingsRead`): a store that lists new URLs at each
-   * index does not grow them, and none the index still lists goes (with a count kept, the oldest going first, a check
-   * of more than that dropped each before it was read, and peeked every one again). A store's go when it is removed.
+   * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `seen`: `<index digest> <listed digest>
+   * <pin> <installed digest> <waiting digest>`, and when): the same index listing the same, for the same app, is not
+   * peeked again at every check. A URL pinned to a commit (`isPinnedAppUrl`) never changes, so its miss lasts while
+   * `seen` does; any other may (a raw HEAD still cached at the old version when the store signed its index, then
+   * caught up), so its miss lasts an hour, as `refusedReads` do, and the next check after that peeks it again. Only the
+   * ones the last check read or wrote stay (`listingsRead`): a store that lists new URLs at each index does not grow
+   * them, and none the index still lists goes (with a count kept, the oldest going first, a check of more than that
+   * dropped each before it was read, and peeked every one again). A store's go when it is removed.
    */
-  private readonly listingMisses = new Map<string, string>();
+  private readonly listingMisses = new Map<string, { seen: string; at: number }>();
   /** The `listingMisses` the update check running now read or wrote; null outside a check. */
   private listingsRead: Set<string> | null = null;
 
   private missListing(missed: string, seen: string): void {
-    this.listingMisses.set(missed, seen);
+    this.listingMisses.set(missed, { seen, at: this.now() });
     this.listingsRead?.add(missed);
+  }
+  /** `url`'s peek for `missed` showed nothing to take against `seen`, and is not due again (`listingMisses`). */
+  private listingMissed(missed: string, seen: string, url: string): boolean {
+    const miss = this.listingMisses.get(missed);
+    return miss?.seen === seen && (isPinnedAppUrl(url) || this.checkedWithin(miss.at, APP_CHECK_TIMINGS.freshMs));
   }
   /**
    * URLs whose whole read the update check, or a fetch of missing files, refused (a file hash that does not hold, a bad
@@ -828,6 +898,15 @@ export class Apps {
    * `REVOCATION_FILES_KEPT.bytes` of files, the oldest dropped first (one dropped is downloaded again); none outside a check.
    */
   private revocationReads: Map<string, { bytes: number; read: Promise<Uint8Array> }> | null = null;
+  /**
+   * What a `ghostly-revoke.json` at a commit (jsDelivr, `isPinnedAppUrl`) answered this engine for an app (`<url> <ref>`):
+   * its verified revocations of that app, or null when none is published there. Such a file never changes. An app a
+   * store updates leaves one at each version's commit among its earlier places (`formerSources`): the update check takes
+   * those from here and does not ask them again, while where it comes from now and its sources are asked at every
+   * check. Only the ones an installed app's places name stay (`checkNow`); at most `PINNED_REVOCATIONS_KEPT`.
+   */
+  private readonly pinnedRevocations = new Map<string, { revocations: SignedAppRevocation[] | null; bytes: number }>();
+  private pinnedRevocationBytes = 0;
   /** Revocations read in a store's index and verified, by `appRevocationId`: at most `STORE_REVOCATIONS_KEPT`. */
   private readonly storeRevocations = new Set<string>();
   private readonly checkedRevocations: AppRevocationsChecked = {
@@ -987,8 +1066,10 @@ export class Apps {
   async builtIns(): Promise<BuiltInAppOffer[]> {
     const list = this.host.builtIns ?? BUILT_IN_APPS;
     if (!list.length || !this.host.readBuiltIn) return [];
-    const [installed, marks] = await Promise.all([this.installed(), this.builtInMarks()]);
-    return builtInsDue(list, new Set(installed.map((a) => a.ref)), marks).map((app) => ({
+    // Only which are installed, by their keys: asked with the installed list at each of its reads, which reads every
+    // record whole already (each with its manifest, a waiting update's and its revocations).
+    const [installed, marks] = await Promise.all([store(STORES.apps, "readonly").then((s) => wrap(s.getAllKeys())), this.builtInMarks()]);
+    return builtInsDue(list, new Set(installed as string[]), marks).map((app) => ({
       ref: builtInRef(app), publisher: app.publisher, name: app.name, fingerprint: appFingerprint(app.publisher), digest: app.digest, url: app.url,
       title: app.title, tagline: app.tagline,
     }));
@@ -1070,24 +1151,6 @@ export class Apps {
     const app = isAppRef(ref) ? await this.app(ref) : undefined;
     if (!app && this.ran.has(ref)) fail("not-installed", "This app is not installed");
     if (app) await this.stillRunnable(app, digest);
-  }
-  /**
-   * Writes an app's record, keeping the revocations the record holds now (one kept since the caller read it among them).
-   * Only while the app has a record: one uninstalled since the caller read it (another tab, Uninstall while Update was
-   * busy) is not put back with its data gone. False: not written.
-   */
-  private async putApp(app: InstalledApp): Promise<boolean> {
-    const tx = (await openDb()).transaction(STORES.apps, "readwrite");
-    let put = false;
-    const read = tx.objectStore(STORES.apps).get(app.ref);
-    read.onsuccess = () => {
-      const now = read.result as InstalledApp | undefined;
-      if (!now) return;
-      tx.objectStore(STORES.apps).put(withRevocations(app, now.revocations ?? []));
-      put = true;
-    };
-    try { await done(tx); } finally { this.held.delete(app.ref); }
-    return put;
   }
   /**
    * Writes an app's record back only while it is still the record `was` (`sameRecord`), read and written in one
@@ -1223,7 +1286,7 @@ export class Apps {
    * failure is `storage`, with the browser's own words after it for the logs, and leaves no piece behind. Writes of one
    * digest run one after the other (`bundleWrites`): a file store takes a file's pieces only in order.
    */
-  private writeBundle(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
+  private writeBundle(digest: string, bytes: Uint8Array): Promise<BundleFile> {
     this.written.add(digest);
     const writes = this.writes.get(digest) ?? { started: 0, running: 0 };
     this.writes.set(digest, writes);
@@ -1240,7 +1303,7 @@ export class Apps {
     return write;
   }
 
-  private async writeBundleBytes(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
+  private async writeBundleBytes(digest: string, bytes: Uint8Array): Promise<BundleFile> {
     const id = bundleId(digest);
     const expected = toBase64Url(await sha256Paced(bytes));
     let files: FileBytes | undefined;
@@ -1250,7 +1313,7 @@ export class Apps {
       await noteBundles((noted) => noted.add(digest));
       files = await fileBytes();
       const size = await files.size(id);
-      if (size === bytes.length && (await files.digest(id)) === expected) return files.kind;
+      if (size === bytes.length && (await files.digest(id)) === expected) return { bytes: files.kind, sha256: expected };
       if (size !== null) await files.remove(id);
       for (let at = 0; at < bytes.length; at += FILE_BYTES_STEP) await files.append(id, at, bytes.subarray(at, at + FILE_BYTES_STEP));
       await files.flush(id);
@@ -1267,7 +1330,7 @@ export class Apps {
       await files.remove(id).catch(() => {});
       fail("storage", "The app's files could not be stored on this device");
     }
-    return files.kind;
+    return { bytes: files.kind, sha256: expected };
   }
 
   private async readBundleBytes(kind: FileBytesKind, digest: string): Promise<Uint8Array | null> {
@@ -1505,23 +1568,42 @@ export class Apps {
    * The revocations its publisher signed, read beside each URL (`ghostly-revoke.json`); none there is not an error.
    * `read` holds the files already read, which are skipped, and gets the ones read now. Null when no file answered now.
    * `reach`, when given, learns whether a host answered (a file, or none there) and whether a read failed for a reason
-   * that may pass (offline, the host not reached or too slow, its own trouble).
+   * that may pass (offline, the host not reached or too slow, its own trouble). `former`: the app's earlier places
+   * (`formerSources`), whose files at a commit are taken as they answered before (`pinnedRevocations`), not asked again
+   * and not counted in `reach`: they say nothing of whether its publisher's hosts answer now.
    */
-  private async readRevocations(ref: string, urls: string[], read = new Set<string>(), reach?: RevocationsReach): Promise<SignedAppRevocation[] | null> {
+  private async readRevocations(ref: string, urls: string[], read = new Set<string>(), reach?: RevocationsReach, former?: ReadonlySet<string>): Promise<SignedAppRevocation[] | null> {
     let out: SignedAppRevocation[] | null = null;
     for (const url of new Set(urls.filter(isAppFetchUrl).map((u) => besideUrl(u, "ghostly-revoke.json")))) {
       if (read.has(url)) continue;
       read.add(url);
+      const held = former?.has(url) ? this.pinnedRevocations.get(`${url} ${ref}`) : undefined;
+      if (held) {
+        if (held.revocations) (out ??= []).push(...held.revocations);
+        continue;
+      }
       try {
         const file = await this.readRevocationsFile(ref, await this.fetchRevocationsOnce(url));
         if (file) (out ??= []).push(...file);
         if (reach) reach.answered = true;
+        this.keepPinned(url, ref, file);
       } catch (error) {
         // Not published there (an answer), or not reachable now.
         if (reach) { if (passing(error)) reach.failed = true; else reach.answered = true; }
+        if (error instanceof AppFetchError && !passing(error)) this.keepPinned(url, ref, null);
       }
     }
     return out;
+  }
+
+  /** What a `ghostly-revoke.json` at a commit answered for `ref`, kept while it fits (`pinnedRevocations`). */
+  private keepPinned(url: string, ref: string, revocations: SignedAppRevocation[] | null): void {
+    const key = `${url} ${ref}`;
+    if (!isPinnedAppUrl(url) || this.pinnedRevocations.has(key) || this.pinnedRevocations.size >= PINNED_REVOCATIONS_KEPT.max) return;
+    const bytes = revocations?.length ? canonicalJsonBytes(revocations as unknown as JsonValue).length : 0;
+    if (this.pinnedRevocationBytes + bytes > PINNED_REVOCATIONS_KEPT.bytes) return;
+    this.pinnedRevocations.set(key, { revocations, bytes });
+    this.pinnedRevocationBytes += bytes;
   }
 
   /** A `ghostly-revoke.json` downloaded, once per update check for the same URL (`revocationReads`). */
@@ -1948,8 +2030,9 @@ export class Apps {
     const version = versionOf(manifest, digest);
     // A fetched version is checked against its publisher's revocations before Install, as the update check does: beside
     // the URL it came from and beside each source it names (beside a pinned commit, the file is that commit's). A version
-    // this build carries makes no request here: `install` reads them.
-    const read = carried ? [] : await this.readStopping(version, [from, ...(manifest.sources ?? [])]);
+    // this build carries makes no request here: `install` reads them. Over an installed version, beside every place it
+    // and the earlier ones came from too: a version naming only other URLs does not take the reads away from there.
+    const read = carried ? [] : await this.readStopping(version, [from, ...(manifest.sources ?? []), ...revocationUrlsOf(await this.app(version.ref))]);
     const revocations = [...await this.keptRevocationsOf(version.ref), ...read];
     const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
     // What a store's index revokes of it is kept too (the person is shown it revoked): the store removed, or its next index
@@ -1963,16 +2046,19 @@ export class Apps {
     const stage = stagedKey(digest, from, fromStore);
     this.staged.delete(stage);
     while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
-    this.staged.set(stage, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, at: this.now(), ...(carried && { carried: true as const }) });
+    const pin = leftStore(installed, install, fromStore);
+    this.staged.set(stage, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, ...(pin !== undefined && { leaves: pin }), at: this.now(), ...(carried && { carried: true as const }) });
     if (!this.sweep) this.sweepStaged();
 
     const listedBy = this.listedBy(version, stores);
+    const leftName = pin !== undefined ? stores.find((s) => s.key === pin)?.index?.name : undefined;
     return {
       digest, ref: version.ref, publisher: manifest.publisher, fingerprint: appFingerprint(manifest.publisher), manifest, from,
       icon: bundle.files.get("icon.png")?.slice() ?? null,
       install, asks,
       run: this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
+      ...(pin !== undefined && { leavesStore: { key: pin,...(leftName !== undefined && { name: leftName }), ...(fromStore !== undefined && { to: fromStore }) } }),
       ...(carried && { carried: true as const }),
       stage,
     };
@@ -2000,9 +2086,9 @@ export class Apps {
     const version = versionOf(manifest, digest);
     // A version this build carries was opened with no request: its publisher's revocations are read now, at its public
     // URL and its sources, as for a fetched one. None answering (offline) installs it; the update check reads them later.
-    const revocations = staged.carried ? [...staged.revocations, ...await this.readStopping(version, [from, ...(manifest.sources ?? [])])] : staged.revocations;
+    const revocations = staged.carried ? [...staged.revocations, ...await this.readStopping(version, [from, ...(manifest.sources ?? []), ...revocationUrlsOf(await this.app(version.ref))])] : staged.revocations;
     // The files written here: left only while a record names them (a version refused after all keeps none).
-    let wrote: FileBytesKind | undefined;
+    let wrote: BundleFile | undefined;
     try {
       // Written only over the record read (as the update check and Accept do): one changed while the files were written
       // (the check installed a newer version, an update accepted, another tab) is read and judged again. One gone meanwhile
@@ -2028,6 +2114,10 @@ export class Apps {
         // uninstalled, or before the check installed a version that dropped a permission, is shown again first.
         const added = installed ? addedAppPermissions(installed.permissions, manifest.permissions) : [...manifest.permissions];
         if (added.some((p) => !shown.includes(p))) fail("permissions-changed", `This install now asks for ${added.join(", ")}; look at it again`);
+        // Nor does it end a store's hold on the app's updates the screen did not name: one pinned since (the same version
+        // taken again from a store's listing in another tab) is shown again first, now saying so.
+        const leaves = leftStore(installed, decision, fromStore);
+        if (leaves !== undefined && leaves !== staged.leaves) fail("store-changed", "This install now ends a store's hold on the app's updates; look at it again");
         if (decision === "same" && installed) {
           // A restored profile's app that needs its files gets them back. The same version from a store's listing pins its
           // updates to that store (one by URL or card leaves the record as it is).
@@ -2035,20 +2125,20 @@ export class Apps {
           const pin = fromStore !== undefined && installed.store !== fromStore;
           if (files || pin) {
             const { pending, ...rest } = installed;
-            if (!(await this.putAppIfUnchanged({ ...(pin ? rest : installed), ...(files && { bytes: files }), ...(pin && { store: fromStore }) }, installed))) continue;
+            if (!(await this.putAppIfUnchanged({ ...(pin ? rest : installed), ...files, ...(pin && { store: fromStore }) }, installed))) continue;
             // A newer version found under the other rule does not wait any more.
             if (pin && pending) await this.removeBundle(pending.bytes, pending.digest);
           }
           this.staged.delete(key);
           return this.view((await this.app(version.ref))!, stores);
         }
-        const kind = wrote = await this.writeBundle(digest, bytes);
+        const files = wrote = await this.writeBundle(digest, bytes);
         // A store's index read while the files were written that revokes or removes it: judged again from the top.
         // One of a store removed meanwhile is among the ones kept.
         if (this.runStatus(version, await this.heldViews(), [...(installed?.revocations ?? []), ...known, ...await this.keptRevocationsOf(version.ref)]).status !== "ok") continue;
         // Installed from a store's listing: its updates come from that store from now on; from a URL or a card: from anywhere.
         // It starts with the revocations read for the preview and the ones kept (of other versions: a later one may name one).
-        const next = withRevocations(this.versionRecord(installed, bundle, kind, from, fromStore), known);
+        const next = withRevocations(this.versionRecord(installed, bundle, files, from, fromStore), known);
         if (!(await this.putAppIfUnchanged(next, installed))) continue;
         // The person installed a built-in app they had removed (from a store, a link or a card): it is theirs again.
         if (!installed && this.builtIn(version.ref)) await this.keepBuiltIn(version.ref);
@@ -2058,7 +2148,7 @@ export class Apps {
         return this.view(next, stores);
       }
     } catch (error) {
-      if (wrote) await this.removeUnusedBundle(version.ref, wrote, digest);
+      if (wrote) await this.removeUnusedBundle(version.ref, wrote.bytes, digest);
       throw error;
     }
   }
@@ -2068,15 +2158,19 @@ export class Apps {
    * is the store its updates come from (`InstalledApp.store`); a newer version waiting is kept only while that is
    * unchanged, since it was found under the other rule.
    */
-  private versionRecord(installed: InstalledApp | undefined, bundle: AppBundle, kind: FileBytesKind, from: string, store: string | undefined): InstalledApp {
+  private versionRecord(installed: InstalledApp | undefined, bundle: AppBundle, files: Pick<InstalledApp, "bytes" | "sha256">, from: string, store: string | undefined): InstalledApp {
     const { manifest, digest } = bundle;
     const now = this.now();
+    // Where the version it replaces came from stays where its publisher's revocations are read.
+    const formerSources = formerSourcesOf(installed);
     const kept = installed?.pending && installed.pending.sequence > manifest.sequence && installed.store === store ? installed.pending : undefined;
     // What it adds is worked out again against this version: the person is shown, and grants, only what is new to it.
     const keepPending = kept && { ...kept, added: addedAppPermissions(manifest.permissions, kept.manifest.permissions) as AppPermission[] };
     return {
       ref: appRef(manifest.publisher, manifest.name), publisher: manifest.publisher, name: manifest.name,
-      sequence: manifest.sequence, digest, permissions: [...manifest.permissions], manifest, bytes: kind, from,
+      sequence: manifest.sequence, digest, permissions: [...manifest.permissions], manifest, bytes: files.bytes,
+      ...(files.sha256 !== undefined && { sha256: files.sha256 }), from,
+      ...(formerSources && { formerSources }),
       ...(store !== undefined && { store }),
       installedAt: installed?.installedAt ?? now, updatedAt: now,
       ...(installed?.revocations?.length && { revocations: installed.revocations }),
@@ -2118,8 +2212,12 @@ export class Apps {
       }
       fail("unlisted", "The store no longer lists this update");
     }
+    // Its publisher's revocations beside where it waits and the sources it names are read now, as Install reads a
+    // carried version's: one revoked there since the check found it is not installed.
+    const version = versionOf(read.bundle.manifest, pending.digest);
+    const beside = await this.readStopping(version, pendingUrlsOf(installed));
     // With the ones this profile kept too (`APP_REVOCATIONS_KEY`): an install screen that showed it revoked kept them.
-    const run = this.runStatus(versionOf(read.bundle.manifest, pending.digest), this.storeViews(stores), [...(installed.revocations ?? []), ...await this.keptRevocationsOf(ref)]);
+    const run = this.runStatus(version, this.storeViews(stores), [...(installed.revocations ?? []), ...beside, ...await this.keptRevocationsOf(ref)]);
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     const plan = planAppUpdate(installed, { ...versionOf(read.bundle.manifest, pending.digest), permissions: read.bundle.manifest.permissions });
@@ -2132,7 +2230,7 @@ export class Apps {
     }
     if (shown && added.some((p) => !shown.includes(p))) fail("permissions-changed", `This update now adds ${added.join(", ")}; look at it again`);
     const { pending: _p, ...without } = installed;
-    const next = this.versionRecord(without, read.bundle, pending.bytes, pending.from, installed.store);
+    const next = this.versionRecord(without, read.bundle, pending, pending.from, installed.store);
     // Only over the record read above: an app uninstalled meanwhile (another tab, Uninstall while Update was busy) is
     // not put back on the new version with its data gone, and one changed meanwhile is left as it is.
     if (!(await this.putAppIfUnchanged(next, installed))) return this.acceptedOver(ref, pending.digest);
@@ -2163,6 +2261,9 @@ export class Apps {
    */
   checkUpdates(): Promise<AppCheckResult[]> {
     this.checking ??= this.checkNow().then((results) => {
+      // No app installed: nothing was read, and nothing told (each Apps page visit asks for a check, and every page
+      // would read its installed apps again for nothing).
+      if (!results) return [];
       // A version found removed or revoked stops where it runs: the pages hear of every check, the scheduled one too.
       try { this.host.checked?.(results); } catch { /* a page's listener */ }
       return results;
@@ -2170,9 +2271,10 @@ export class Apps {
     return this.checking;
   }
 
-  private async checkNow(): Promise<AppCheckResult[]> {
+  /** The check's results, or null when no app is installed (nothing read). */
+  private async checkNow(): Promise<AppCheckResult[] | null> {
     const apps = await this.installed();
-    if (!apps.length) return [];
+    if (!apps.length) return null;
     await this.refreshStores();
     const stores = await this.stores();
     // A few apps at a time: each waits on its publisher's files (and its sources' peeks), so one after the other a
@@ -2187,6 +2289,13 @@ export class Apps {
       const out = (await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores).catch(() => null)))).filter((r) => r !== null);
       this.unreachedChecks = out.some((r) => r.unreached) ? this.unreachedChecks + 1 : 0;
       for (const missed of this.listingMisses.keys()) if (!read.has(missed)) this.listingMisses.delete(missed);
+      // A file at a commit no installed app's places name any more (uninstalled, or past its kept earlier places) goes.
+      const named = new Set([...apps, ...out.map((r) => r.app)].flatMap((a) => revocationUrlsOf(a).filter(isAppFetchUrl).map((u) => `${besideUrl(u, "ghostly-revoke.json")} ${a.ref}`)));
+      for (const [key, held] of this.pinnedRevocations) {
+        if (named.has(key)) continue;
+        this.pinnedRevocations.delete(key);
+        this.pinnedRevocationBytes -= held.bytes;
+      }
       // Each one judged with the revocations this profile kept as they are now, read once for every app (up to 1024 of
       // every app: once per app, a check read them again for each one).
       const kept = out.length ? await this.keptValue() : null;
@@ -2243,7 +2352,7 @@ export class Apps {
       for (const url of listingUrls(listing.urls)) {
         const missed = `${s.key} ${app.ref} ${url}`;
         if (candidates.has(url)) continue;
-        if (s.digest !== undefined && this.listingMisses.get(missed) === seen) { this.listingsRead?.add(missed); continue; }
+        if (s.digest !== undefined && this.listingMissed(missed, seen, url)) { this.listingsRead?.add(missed); continue; }
         candidates.set(url, { sequence: listing.sequence, ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
       }
     }
@@ -2259,7 +2368,7 @@ export class Apps {
     // The publisher's revocations are read before a candidate is taken: a version revoked before this check is not installed.
     const revokeRead = new Set<string>();
     const reach: RevocationsReach = { answered: false, failed: false };
-    const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead, reach);
+    let before = await this.readRevocations(app.ref, revocationUrlsOf(app), revokeRead, reach, new Set(formerOf(app)));
     app = withRevocations(app, before ?? []);
     // The ones this profile kept (`APP_REVOCATIONS_KEY`) judge too: one that dropped a waiting update stops it from
     // being taken again, once the record keeps it no more and its store's next index does not carry it.
@@ -2282,7 +2391,7 @@ export class Apps {
     for (const [url, want] of [...candidates].sort(([, a], [, b]) => b.sequence - a.sequence)) {
       // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
       // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
-      // index lists the same.
+      // index lists the same (`listingMisses`: for an hour, unless it is pinned to a commit).
       let holds = want.holds;
       if (want.peek) {
         let peek: ReturnType<typeof peekAppManifest>;
@@ -2336,15 +2445,19 @@ export class Apps {
         } else skip();
         continue;
       }
+      // Its publisher's revocations beside where it was found and the sources it names too, before it is taken: one revoked
+      // there is not installed over the version that runs now.
+      const beside = await this.readRevocations(app.ref, [url, ...(bundle.manifest.sources ?? []).slice(0, APP_BUNDLE_LIMITS.sources)], revokeRead, reach);
+      if (beside) { before = [...(before ?? []), ...beside]; app = withRevocations(app, beside); }
       if (judge(version).status !== "ok") { skip(); continue; }
       // Judged again with the stores as held now: a store's index read while the bundle downloaded may revoke it.
       if (this.runStatus(version, await this.heldViews(), app.revocations).status !== "ok") { skip(); continue; }
       if (app.pending && version.sequence < app.pending.sequence) { skip(); continue; }
-      const kind = await this.writeBundle(version.digest, bytes);
-      wrote = { bytes: kind, digest: version.digest };
+      const files = await this.writeBundle(version.digest, bytes);
+      wrote = { bytes: files.bytes, digest: version.digest };
       if (plan.action === "install") {
         const old = app;
-        const next = this.versionRecord(app, bundle, kind, url, app.store);
+        const next = this.versionRecord(app, bundle, files, url, app.store);
         const passed = old.pending && old.pending.sequence <= version.sequence ? old.pending : undefined;
         if (passed) delete next.pending;
         // Uninstalled while it downloaded, or changed by the person (pinned to a store too): not put back.
@@ -2355,17 +2468,26 @@ export class Apps {
         outcome = "updated";
       } else {
         if (app.pending) dropped.push(app.pending);
-        app = { ...app, pending: { sequence: version.sequence, digest: version.digest, manifest: bundle.manifest, added: plan.added as AppPermission[], bytes: kind, from: url, at: this.now() } };
+        app = { ...app, pending: { sequence: version.sequence, digest: version.digest, manifest: bundle.manifest, added: plan.added as AppPermission[], ...files, from: url, at: this.now() } };
         outcome = "ask";
       }
       break;
     }
-    // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too.
-    const after = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead, reach);
+    // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too (and still
+    // beside where the earlier ones came from).
+    const after = await this.readRevocations(app.ref, revocationUrlsOf(app), revokeRead, reach, new Set(formerOf(app)));
     // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version, or one
     // started here before an update (it may still run). While no file answers, every kept one stays (it may name a
     // version not found yet): a file that changes does not pile up.
     const revocations = before || after ? [...(before ?? []), ...(after ?? [])] : null;
+    // Each one read is kept beside the record too (`APP_REVOCATIONS_KEY`): the record keeps only those that stop one of
+    // these versions, and a file read later without one (moved, or serving part of the list) drops it from there.
+    const keptAlready = new Set(kept.map((r) => canonicalJson(r)));
+    if (revocations?.some((r) => !keptAlready.has(canonicalJson(r)))) {
+      const tx = (await openDb()).transaction(STORES.settings, "readwrite");
+      keepRevocations(tx.objectStore(STORES.settings), new Map([[app.ref, revocations]]));
+      await done(tx);
+    }
     // A store's index carries some too: those that stop one of these are kept, as a store may drop them or be removed.
     const versions = this.versionsOf(app);
     const stays = revocations ? stopping(versions, app.revocations ?? []) : app.revocations ?? [];
@@ -2442,19 +2564,36 @@ export class Apps {
     return { status: "needs-files" };
   }
 
-  /** The installed version's files, fetched again, written back. */
+  /**
+   * The installed version's files, fetched again, written back. Where they are is written only over the record read
+   * (as Install and the update check write): one changed while the files were written (another version installed, an
+   * update accepted, another tab) is read and judged again, so the older record is never put back over it.
+   */
   private async filesBack(app: InstalledApp, bytes: Uint8Array, stores: AddedAppStore[]): Promise<AppRunStatus> {
-    const kind = await this.writeBundle(app.digest, bytes);
-    // Uninstalled meanwhile: its files go again.
-    const now = await this.app(app.ref);
-    if (!now || now.digest !== app.digest || (now.bytes !== kind && !(await this.putApp({ ...now, bytes: kind })))) {
-      await this.removeBundle(kind, app.digest);
-      fail("not-installed", "This app is not installed");
+    const files = await this.writeBundle(app.digest, bytes);
+    let now: InstalledApp | undefined;
+    for (;;) {
+      now = await this.app(app.ref);
+      // Uninstalled meanwhile: its files go again.
+      if (!now) {
+        await this.removeBundle(files.bytes, app.digest);
+        fail("not-installed", "This app is not installed");
+      }
+      // Another version installed meanwhile: the files fetched are not its own, and Open goes on with the one installed
+      // (its files fetched in turn when they are not here either). Not through `fetchFiles`: a fetch of that version
+      // under way may be waiting on this one.
+      if (now.digest !== app.digest) {
+        await this.removeUnusedBundle(app.ref, files.bytes, app.digest);
+        return this.fetchFilesOf(now);
+      }
+      // A store pinned meanwhile (Install of this version from a store's listing) is the one written. The files' hash
+      // is kept with where they are, so a device move needs not read them again.
+      if ((now.bytes === files.bytes && now.sha256 === files.sha256) || await this.putAppIfUnchanged({ ...now, ...files }, now, "kept")) break;
     }
     // Every page reads the list again, as when Open drops them: an Open from a chat's card (or another tab) fetched
     // them, and every card and row still said they were missing, its icon unread, until the next update check.
     try { this.host.checked?.([]); } catch { /* a page's listener */ }
-    return this.runCheckOf({ ...now, bytes: kind }, stores);
+    return this.runCheckOf({ ...now, ...files }, stores);
   }
 
   // ---------- running ----------

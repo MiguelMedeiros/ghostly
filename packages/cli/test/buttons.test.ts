@@ -37,6 +37,8 @@ function fake(links: LinkView[] = [link("chat-one", { label: "Alice", sessionOff
     getMessages: vi.fn(async (linkId: string) => of(linkId).map((m) => ({ ...m }))),
     getMessage: vi.fn(async (linkId: string, id: string) => { const m = of(linkId).find((x) => x.id === id); return m && { ...m }; }),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => of(`group:${groupId}`).map((m) => ({ ...m }))),
+    // As the engine's: a group's message id is the one every member knows, so a group has no wire ids to look up.
+    messagesByWireId: vi.fn(async (linkId: string, wireId: string) => linkId.startsWith("group:") ? [] : of(linkId).filter((m) => m.wireId === wireId).map((m) => ({ ...m }))),
     sendMessage: vi.fn(async ({ linkId, text, card: raw }: { linkId: string; text: string; card?: unknown }) => ({ error: null, messageId: store(linkId, text, raw) })),
     sendGroupMessage: vi.fn(async ({ groupId, text, card: raw }: { groupId: string; text: string; card?: unknown }) => ({ error: null, messageId: store(`group:${groupId}`, text, raw) })),
     editMessage: vi.fn(async ({ linkId, messageId, text, card: raw }: { linkId: string; messageId: string; text: string; card?: unknown }) => {
@@ -214,9 +216,12 @@ describe("button update", () => {
 
   it("finds the message by the id both sides know too, and in a group", async () => {
     const { ctx, node } = fake();
+    await callApi(ctx, "chat.send", { chat: "Alice", text: "Want it?", buttons: [{ id: "yes", label: "Yes" }] });
+    expect(await callApi(ctx, "button.update", { chat: "Alice", message: "w1", close: true })).toMatchObject({ chat: "chat-one", messageId: "me_1" });
+    // A group's message id is the one every member knows.
     await callApi(ctx, "group.send", { group: "Sala", text: "Deploy?", mentions: [], buttons: [{ id: "go", label: "Go" }] });
-    expect(await callApi(ctx, "button.update", { chat: "Sala", message: "w1", chosen: "go", close: true })).toMatchObject({ group: "g1", messageId: "me_1", card: { chosen: "go", closed: true } });
-    expect(node.editMessage).toHaveBeenCalledWith(expect.objectContaining({ linkId: "group:g1", messageId: "me_1" }));
+    expect(await callApi(ctx, "button.update", { chat: "Sala", message: "me_2", chosen: "go", close: true })).toMatchObject({ group: "g1", messageId: "me_2", card: { chosen: "go", closed: true } });
+    expect(node.editMessage).toHaveBeenCalledWith(expect.objectContaining({ linkId: "group:g1", messageId: "me_2" }));
   });
 
   it("refuses a message not mine or not there, one without buttons, a button it lacks, and nothing to do", async () => {
@@ -230,6 +235,8 @@ describe("button update", () => {
     await callApi(ctx, "chat.send", { chat: "Alice", text: "Deploy?", buttons: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }] });
     await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_3", chosen: "maybe" })).rejects.toMatchObject({ code: "not_found", message: 'That message has no button "maybe"; its buttons: yes, no' });
     await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_2" })).rejects.toMatchObject({ code: "bad_request", message: /Nothing to update/ });
+    // A secret given as the button is described, not said back.
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_3", chosen: `nsec1${"q".repeat(58)}` })).rejects.toMatchObject({ code: "not_found", message: "That message has no button (a private key); its buttons: yes, no" });
     expect(node.editMessage).not.toHaveBeenCalled();
   });
 });
@@ -252,7 +259,7 @@ describe("button update and press read the one message they name", () => {
     expect(node.getMessage).toHaveBeenCalledWith("group:g1", "me_2");
   });
 
-  it("by the id both sides know, or a message of the wrong side: the history decides, as before", async () => {
+  it("by the id both sides know, or a message of the wrong side: its rows by that id, never the history", async () => {
     const { ctx, node, theirs } = fake();
     await callApi(ctx, "chat.send", { chat: "Alice", text: "Want it?", buttons: [{ id: "yes", label: "Yes" }] });
     theirs("chat-one", "peer_1", "Ok?", ask);
@@ -260,7 +267,8 @@ describe("button update and press read the one message they name", () => {
     expect(await callApi(ctx, "button.press", { chat: "Alice", message: "w-peer_1", button: "yes", wait: "none" })).toMatchObject({ messageId: "peer_1" });
     await expect(callApi(ctx, "button.update", { chat: "Alice", message: "peer_1", close: true })).rejects.toMatchObject({ code: "not_found" });
     await expect(callApi(ctx, "button.press", { chat: "Alice", message: "me_1", button: "yes" })).rejects.toMatchObject({ code: "not_found" });
-    expect(whole(node)).toBe(4);
+    expect(node.messagesByWireId).toHaveBeenCalledTimes(4);
+    expect(whole(node)).toBe(0);
   });
 });
 
@@ -292,6 +300,7 @@ describe("button press", () => {
     await expect(callApi(ctx, "button.press", { chat: "Alice", message: "me_1", button: "yes" })).rejects.toMatchObject({ code: "not_found", message: /from someone else/ });
     await expect(callApi(ctx, "button.press", { chat: "Alice", message: "peer_plain", button: "yes" })).rejects.toMatchObject({ code: "bad_request", message: /no buttons/ });
     await expect(callApi(ctx, "button.press", { chat: "Alice", message: "peer_closed", button: "maybe" })).rejects.toMatchObject({ code: "not_found", message: /its buttons: yes, no/ });
+    await expect(callApi(ctx, "button.press", { chat: "Alice", message: "peer_closed", button: `nsec1${"q".repeat(58)}` })).rejects.toMatchObject({ code: "not_found", message: "That message has no button (a private key); its buttons: yes, no" });
     expect(node.pressButton).not.toHaveBeenCalled();
     const refused = await callApi(ctx, "button.press", { chat: "Alice", message: "peer_closed", button: "yes" }).catch((error: CliError) => error);
     expect(refused).toMatchObject({ code: "refused", message: "These buttons are closed" });

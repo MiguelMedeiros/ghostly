@@ -11,9 +11,10 @@ import { fileURLToPath } from "node:url";
  * - `ghosts-h264.mp4`: H.264 in MP4, what phones and cameras make: the macOS WKWebView check plays it.
  *
  * And in `e2e/support/audio-fixtures/`, two seconds of a 440 Hz tone sent as an audio file (not a voice message):
- * `ghost-tune.mp3` (the web e2e) and `ghost-tune.flac` (the macOS WKWebView check).
+ * `ghost-tune.mp3` (the web e2e), `ghost-tune.flac`, `ghost-tune.wav` (8 kHz, to stay small) and `ghost-tune.opus`
+ * (Ogg Opus) (the macOS WKWebView check).
  *
- * Run: `node tools/scripts/video-media/make-fixtures.mjs` (needs ffmpeg with libvpx, libx264 and libmp3lame).
+ * Run: `node tools/scripts/video-media/make-fixtures.mjs` (needs ffmpeg with libvpx, libx264, libmp3lame and libopus).
  */
 const dir = fileURLToPath(new URL("../../../e2e/support/video-fixtures/", import.meta.url));
 const source = ["-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24", "-t", "2", "-an", "-movflags", "+faststart"];
@@ -26,3 +27,5 @@ const tone = ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t",
 const sound = (name, codec) => execFileSync("ffmpeg", ["-loglevel", "error", "-y", ...tone, ...codec, `${audioDir}${name}`], { stdio: "inherit" });
 sound("ghost-tune.mp3", ["-c:a", "libmp3lame", "-b:a", "64k"]);
 sound("ghost-tune.flac", ["-c:a", "flac"]);
+sound("ghost-tune.wav", ["-ar", "8000", "-c:a", "pcm_s16le"]);
+sound("ghost-tune.opus", ["-c:a", "libopus", "-b:a", "24k"]);

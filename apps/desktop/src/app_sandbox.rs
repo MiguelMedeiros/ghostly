@@ -55,6 +55,9 @@ const MAX_MESSAGE_BYTES: usize = 2 * MAX_REQUEST_BYTES;
 const MAX_OTHER_MESSAGE_BYTES: usize = 4 * 1024;
 /// The most requests an app may send the broker in a second (WISP 1200: 50), every call counted.
 const MAX_REQUESTS_PER_SECOND: usize = 50;
+/// How many requests in one second stop the app (WISP 1200: ten times the rate), as the web broker stops it: its
+/// window closes, as refusing it each time would leave it asking for as long as it is open.
+const STOP_REQUESTS_PER_SECOND: usize = 10 * MAX_REQUESTS_PER_SECOND;
 /// What a window keeps of what it was refused: the last few, each cut short, so an app that keeps asking to
 /// leave does not grow the Ghostly process.
 const MAX_REFUSED: usize = 64;
@@ -72,7 +75,7 @@ const PICK_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 /// To the Ghostly window: a request of an app window, `{"label", "request"}`.
 pub const REQUEST_EVENT: &str = "ghostly-app-request";
-/// To the Ghostly window: an app window closed, its label.
+/// To the Ghostly window: an app window closed, its label; or `{"label", "reason"}` when it was stopped here.
 pub const CLOSED_EVENT: &str = "ghostly-app-closed";
 
 /// The runner, shipped inside the app, never fetched. Before any app code it deletes the WebRTC constructors,
@@ -442,6 +445,9 @@ struct AppWindow {
     brokered: bool,
     /// When the window's last requests came, for the rate.
     recent: VecDeque<Instant>,
+    /// Stopped for asking past `STOP_REQUESTS_PER_SECOND`: every later request is refused unread, while its window
+    /// closes.
+    flooded: bool,
     /// Requests the Ghostly window's broker has not answered yet, by the app's id.
     pending: HashMap<u64, oneshot::Sender<Value>>,
     /// When the system last gave the window's webview a tap or key (`heard_input`), which no script can make.
@@ -464,6 +470,7 @@ impl AppWindow {
             internet,
             brokered,
             recent: VecDeque::new(),
+            flooded: false,
             pending: HashMap::new(),
             input: None,
             refused: VecDeque::new(),
@@ -853,6 +860,23 @@ pub fn forget_window<R: Runtime>(app: &AppHandle<R>, label: &str) {
     }
 }
 
+/// An app window that asked past `STOP_REQUESTS_PER_SECOND` (WISP 1200): its state goes, and with it every request
+/// still waiting (each gets "No answer"), its window closes, and the Ghostly window's broker stops the app for
+/// `protocol`, as the web broker does.
+fn stop_flooded<R: Runtime>(app: &AppHandle<R>, label: &str) {
+    let brokered = forget(app, label);
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.close();
+    }
+    if brokered == Some(true) {
+        let _ = app.emit_to(
+            "main",
+            CLOSED_EVENT,
+            json!({ "label": label, "reason": "protocol" }),
+        );
+    }
+}
+
 /// The Ghostly window's page was replaced (a profile switch, a reload, the WebView back after its process died): the
 /// brokers of the app windows it opened went with it. Those windows close, and their state goes with every request
 /// still waiting, so none keeps showing the page before's app or asking a broker that is not there. The test
@@ -946,6 +970,8 @@ pub enum Admitted {
     Answer(Value),
     /// For the Ghostly window's broker: its id, and where the answer comes.
     Relay(u64, oneshot::Receiver<Value>),
+    /// The app asked past `STOP_REQUESTS_PER_SECOND`: it stops (`stop_flooded`).
+    Stop,
 }
 
 /// Whether a request of the app window `label` goes on, at `now`. The caller is known by its label alone; the
@@ -962,6 +988,9 @@ pub fn admit(
     }
     state
         .with(label, |window| {
+            if window.flooded {
+                return Err("stopped".to_string());
+            }
             window.recent.push_back(now);
             while window
                 .recent
@@ -969,6 +998,13 @@ pub fn admit(
                 .is_some_and(|at| now.duration_since(*at) >= Duration::from_secs(1))
             {
                 window.recent.pop_front();
+            }
+            // Ten times the rate stops the app (WISP 1200), before anything of the request is read; so `recent`
+            // never holds more than this.
+            if window.recent.len() > STOP_REQUESTS_PER_SECOND {
+                window.flooded = true;
+                window.recent.clear();
+                return Ok(Admitted::Stop);
             }
             if window.recent.len() > MAX_REQUESTS_PER_SECOND {
                 return Err("too-fast".to_string());
@@ -1097,6 +1133,10 @@ pub async fn app_broker<R: Runtime>(
     let (id, receiver) = match admit(&state, &label, &request, Instant::now())? {
         Admitted::Answer(answer) => return json_response(&answer),
         Admitted::Relay(id, receiver) => (id, receiver),
+        Admitted::Stop => {
+            stop_flooded(&app, &label);
+            return Err("stopped".into());
+        }
     };
     let sent = app.emit_to(
         "main",
@@ -1743,6 +1783,86 @@ fn app_settings(settings: &webkit2gtk::Settings, guard: Guard) {
     }
 }
 
+/// An app window's web view on Linux, as it is made, before its page runs: its settings, and no print dialog.
+#[cfg(target_os = "linux")]
+fn app_webview(webview: &webkit2gtk::WebView, guard: Guard) {
+    use webkit2gtk::WebViewExt;
+    if let Some(settings) = WebViewExt::settings(webview) {
+        app_settings(&settings, guard);
+    }
+    no_print(webview);
+}
+
+/// No print dialog for the page of an app or contact window on Linux: the page's `print()` returns at once, with
+/// nothing shown. WebKitGTK's own dialog is modal to the whole app, and the page's `print()` waits on it: a page that
+/// calls it again at each Cancel would keep every Ghostly window from a click.
+#[cfg(target_os = "linux")]
+pub fn no_print(webview: &webkit2gtk::WebView) {
+    use webkit2gtk::WebViewExt;
+    webview.connect_print(|_, _| true);
+}
+
+/// Whether a page's `print()` returned and whether a print dialog was up, in a web view `prepare` was given. GTK and
+/// WebKit belong to the first thread that uses them, so a test that calls this needs a display and a process of its
+/// own: `xvfb-run -a cargo test --manifest-path apps/desktop/Cargo.toml --lib -- --ignored --exact <test>`.
+/// GTK runs on a thread that never ends: WebKit stops the process when the thread it started on does.
+#[cfg(all(test, target_os = "linux"))]
+pub fn print_in(prepare: fn(&webkit2gtk::WebView)) -> (bool, bool) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(print_once(prepare));
+        loop {
+            std::thread::park();
+        }
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the page never ran")
+}
+
+#[cfg(all(test, target_os = "linux"))]
+fn print_once(prepare: fn(&webkit2gtk::WebView)) -> (bool, bool) {
+    use gtk::glib;
+    use gtk::prelude::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use webkit2gtk::WebViewExt;
+    gtk::init().expect("GTK");
+    let window = gtk::OffscreenWindow::new();
+    let webview = webkit2gtk::WebView::new();
+    window.add(&webview);
+    window.show_all();
+    prepare(&webview);
+    webview.load_html(
+        "<script>window.print(); document.title = 'returned';</script>",
+        Some("https://example.test/"),
+    );
+    // A dialog that is up is cancelled, so its nested main loop gives the page's `print()` back.
+    let dialog = Rc::new(Cell::new(false));
+    let seen = dialog.clone();
+    let watch = glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        for toplevel in gtk::Window::list_toplevels() {
+            if toplevel.type_().name() != "GtkPrintUnixDialog" {
+                continue;
+            }
+            seen.set(true);
+            if let Ok(shown) = toplevel.downcast::<gtk::Dialog>() {
+                shown.response(gtk::ResponseType::Cancel);
+            }
+        }
+        glib::ControlFlow::Continue
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let returned = || webview.title().is_some_and(|title| title == "returned");
+    while !returned() && std::time::Instant::now() < deadline {
+        glib::MainContext::default().iteration(false);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    watch.remove();
+    let result = (returned(), dialog.get());
+    unsafe { window.destroy() };
+    result
+}
+
 /// The WebKitGTK side of an app window on Linux, the counterpart of `webkit`: a user content filter made from
 /// the same rule list (public API, required), and `WebKitSettings` for DNS prefetch and WebRTC (public API,
 /// best effort). WebKitGTK has no switch for `<link rel=preconnect>`: the filter is what is measured for it.
@@ -1806,9 +1926,7 @@ mod webkitgtk {
         store: &Path,
         done: impl FnOnce(Result<(), String>) + 'static,
     ) {
-        if let Some(settings) = WebViewExt::settings(webview) {
-            super::app_settings(&settings, guard);
-        }
+        super::app_webview(webview, guard);
         if !guard.rules {
             return done(Ok(()));
         }
@@ -1884,7 +2002,9 @@ pub fn webkit_candidates() -> Vec<String> {
 mod tests {
     // covers: apps.desktop-sandbox
     use super::*;
+    use std::sync::Arc;
     use tauri::test::{mock_builder, MockRuntime};
+    use tauri::Listener;
 
     fn app() -> tauri::App<MockRuntime> {
         mock_builder()
@@ -2387,7 +2507,7 @@ mod tests {
             at(1_020)
         )
         .is_ok());
-        // Sustained flooding stays refused.
+        // Asking on past the rate, but under ten times it, stays refused: the app is not stopped.
         for ms in 0..60 {
             let _ = admit(&state, "app-1", &json!({"type": "x"}), at(1_100 + ms));
         }
@@ -2401,6 +2521,109 @@ mod tests {
             .unwrap_err(),
             "too-fast"
         );
+    }
+
+    /// WISP 1200: an app that asks ten times the rate (more than 500 in one second) is stopped, not refused on and
+    /// on; from then on every request is refused unread. Up to 500 is only `too-fast`, and 50 a second for long
+    /// never stops it. Another window is not stopped with it.
+    #[test]
+    fn an_app_past_500_requests_in_a_second_is_stopped() {
+        let state = state(&[("app-1", "ana/chess"), ("app-2", "bob/snake")]);
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        started(&state, "app-1");
+        started(&state, "app-2");
+        // 50 a second for 20 seconds: every one goes on.
+        for id in 0..1_000u64 {
+            let request = json!({"id": id, "type": "context", "args": []});
+            assert!(
+                matches!(
+                    admit(&state, "app-2", &request, at(id * 20)),
+                    Ok(Admitted::Relay(..))
+                ),
+                "{id}"
+            );
+        }
+        let request = |id: u64| json!({"id": 10_000 + id, "type": "context", "args": []});
+        for id in 0..STOP_REQUESTS_PER_SECOND as u64 {
+            let admitted = admit(&state, "app-1", &request(id), at(id));
+            if id < MAX_REQUESTS_PER_SECOND as u64 {
+                assert!(matches!(admitted, Ok(Admitted::Relay(..))), "{id}");
+            } else {
+                assert_eq!(admitted.unwrap_err(), "too-fast", "{id}");
+            }
+        }
+        assert!(matches!(
+            admit(&state, "app-1", &request(500), at(900)),
+            Ok(Admitted::Stop)
+        ));
+        // Stopped: refused at once, long after the flood too, and nothing counted.
+        for (id, ms) in [(501, 901), (502, 5_000), (503, 60_000)] {
+            assert_eq!(
+                admit(&state, "app-1", &request(id), at(ms)).unwrap_err(),
+                "stopped"
+            );
+        }
+        assert!(state
+            .with("app-1", |window| window.recent.is_empty())
+            .unwrap());
+        assert!(matches!(
+            admit(&state, "app-2", &request(504), at(60_000)),
+            Ok(Admitted::Relay(..))
+        ));
+    }
+
+    /// A stopped app's window closes and its state goes, each request still waiting told at once, and the Ghostly
+    /// window's broker hears why, as on the web (`protocol`).
+    #[test]
+    fn a_stopped_app_closes_and_the_ghostly_window_hears_why() {
+        let app = app();
+        let request = OpenRequest {
+            app: "ana/chess".into(),
+            title: "Chess".into(),
+            entry: "<p>chess</p>".into(),
+            internet: false,
+            view: AppView::Chat,
+        };
+        let label = open(app.handle(), request).unwrap();
+        let state = app.state::<AppSandboxState>();
+        state.with(&label, |window| window.ready = true);
+        started(&state, &label);
+        let Admitted::Relay(_, mut waiting) = admitted(
+            &state,
+            &label,
+            json!({"id": 1, "type": "context", "args": []}),
+        )
+        .unwrap() else {
+            panic!("relayed")
+        };
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let into = heard.clone();
+        app.listen_any(CLOSED_EVENT, move |event| {
+            into.lock().unwrap().push(event.payload().to_string());
+        });
+        stop_flooded(app.handle(), &label);
+        assert!(matches!(
+            waiting.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        ));
+        assert_eq!(refused(app.handle(), &label), None);
+        assert_eq!(
+            admitted(
+                &state,
+                &label,
+                json!({"id": 2, "type": "context", "args": []})
+            )
+            .unwrap_err(),
+            "Not an app window"
+        );
+        let heard: Vec<Value> = heard
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|payload| serde_json::from_str(payload).unwrap())
+            .collect();
+        assert_eq!(heard, [json!({"label": label, "reason": "protocol"})]);
     }
 
     /// The app can call `app_broker` itself and say `activity` with no one there: the Ghostly window hears it only
@@ -3074,6 +3297,18 @@ mod tests {
             app_settings(&settings, Guard::parse(guard).unwrap());
             assert!(!settings.enables_fullscreen(), "{guard}");
         }
+    }
+
+    /// An app window's page that calls `print()` gets it back at once, and no print dialog is up: WebKitGTK's own is
+    /// modal to every window of the app. What `webkitgtk::harden` does to the web view, whatever the guard.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "needs a display and a process of its own (print_in)"]
+    fn an_app_window_on_linux_shows_no_print_dialog() {
+        let (returned, dialog) =
+            print_in(|webview| app_webview(webview, Guard::parse("full").unwrap()));
+        assert!(!dialog, "a print dialog was up");
+        assert!(returned, "print() did not return");
     }
 
     /// The same on macOS, where wry turns it on at build: what `webkit::no_element_fullscreen` does to a

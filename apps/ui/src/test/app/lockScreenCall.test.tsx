@@ -17,7 +17,7 @@ vi.mock("../../contexts/LockScreenContext", async (importOriginal) => ({
 }));
 
 function ringing(over: Partial<LockedCall> = {}): LockedCall {
-  return { id: "chat-1", name: "Casper", named: true, peerPubKey: "casper-key", hasVideo: false, onCall: false, answer: vi.fn(), decline: vi.fn(), ...over };
+  return { id: "chat-1", name: "Casper", named: true, peerPubKey: "casper-key", hasVideo: false, onCall: false, answer: vi.fn(), decline: vi.fn(), ringOn: vi.fn(), ...over };
 }
 
 describe("a call ringing while the app is locked", () => {
@@ -92,6 +92,110 @@ describe("a call ringing while the app is locked", () => {
     expect(screen.queryByTestId("lock-call")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unlock" })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Password")).toHaveFocus();
+  });
+
+  it("Answer pressed for an audio call is not carried over to a newer video offer: the card asks again", async () => {
+    const audio = ringing();
+    lock.ringing = [audio];
+    const { user, rerender } = renderApp(<LockScreen />);
+    await user.click(screen.getByRole("button", { name: "Answer" }));
+    await user.type(screen.getByPlaceholderText("Password"), "spooky");
+    // The contact's newer offer, with the camera, takes the ringing call's place before the password goes in.
+    const video = ringing({ hasVideo: true });
+    lock.ringing = [video];
+    await act(async () => rerender(<LockScreen />));
+    expect(screen.getByTestId("lock-call-kind")).toHaveTextContent("Incoming video call...");
+    expect(screen.queryByPlaceholderText("Password")).not.toBeInTheDocument();
+    const answer = screen.getByTestId("lock-call-answer");
+    expect(answer).toHaveAttribute("type", "button");
+    expect(answer).not.toHaveAttribute("data-answering");
+    expect(screen.getByTestId("lock-call")).toHaveFocus();
+    expect(audio.answer).not.toHaveBeenCalled();
+    expect(video.answer).not.toHaveBeenCalled();
+    // Answered again, for the video call: that one answers.
+    await user.click(answer);
+    await user.type(screen.getByPlaceholderText("Password"), "{Enter}");
+    expect(video.answer).toHaveBeenCalledOnce();
+    expect(audio.answer).not.toHaveBeenCalled();
+  });
+
+  it("a newer offer of the other kind while the password is checked: unlocked, it is not answered", async () => {
+    let checked: (right: boolean) => void = () => {};
+    lock.unlock = () => new Promise<boolean>((resolve) => { checked = resolve; });
+    try {
+      const audio = ringing();
+      lock.ringing = [audio];
+      const { user, rerender } = renderApp(<LockScreen />);
+      await user.click(screen.getByRole("button", { name: "Answer" }));
+      await user.type(screen.getByPlaceholderText("Password"), "spooky{Enter}");
+      const video = ringing({ hasVideo: true });
+      lock.ringing = [video];
+      await act(async () => rerender(<LockScreen />));
+      await act(async () => { checked(true); });
+      expect(audio.answer).not.toHaveBeenCalled();
+      expect(video.answer).not.toHaveBeenCalled();
+      // It rings on, in the chat the app opens: the chat that rang before the first unlock goes with the lock. (Its
+      // chat rings on the call it has now, whichever of the two is asked.)
+      expect(audio.ringOn).toHaveBeenCalledOnce();
+    } finally {
+      lock.unlock = async (password: string) => password === "spooky";
+    }
+  });
+
+  it("the other kind while the password is checked, and the chat gone before the check ends (a hash upgraded): not answered", async () => {
+    let checked: (right: boolean) => void = () => {};
+    lock.unlock = () => new Promise<boolean>((resolve) => { checked = resolve; });
+    try {
+      const audio = ringing();
+      lock.ringing = [audio];
+      const { user, rerender } = renderApp(<LockScreen />);
+      await user.click(screen.getByRole("button", { name: "Answer" }));
+      await user.type(screen.getByPlaceholderText("Password"), "spooky{Enter}");
+      const video = ringing({ hasVideo: true });
+      lock.ringing = [video];
+      await act(async () => rerender(<LockScreen />));
+      // Unlocked already: the chat that rang before the first unlock went with the lock, its call off the list.
+      lock.ringing = [];
+      await act(async () => rerender(<LockScreen />));
+      await act(async () => { checked(true); });
+      expect(audio.answer).not.toHaveBeenCalled();
+      expect(video.answer).not.toHaveBeenCalled();
+      expect(audio.ringOn).toHaveBeenCalledOnce();
+    } finally {
+      lock.unlock = async (password: string) => password === "spooky";
+    }
+  });
+
+  it("the chat gone before the check ends, the call of the same kind: answered", async () => {
+    let checked: (right: boolean) => void = () => {};
+    lock.unlock = () => new Promise<boolean>((resolve) => { checked = resolve; });
+    try {
+      const call = ringing();
+      lock.ringing = [call];
+      const { user, rerender } = renderApp(<LockScreen />);
+      await user.click(screen.getByRole("button", { name: "Answer" }));
+      await user.type(screen.getByPlaceholderText("Password"), "spooky{Enter}");
+      lock.ringing = [];
+      await act(async () => rerender(<LockScreen />));
+      await act(async () => { checked(true); });
+      expect(call.answer).toHaveBeenCalledOnce();
+      expect(call.ringOn).not.toHaveBeenCalled();
+    } finally {
+      lock.unlock = async (password: string) => password === "spooky";
+    }
+  });
+
+  it("a newer offer of the same kind keeps Answer and the password: it answers the newer one", async () => {
+    lock.ringing = [ringing()];
+    const { user, rerender } = renderApp(<LockScreen />);
+    await user.click(screen.getByRole("button", { name: "Answer" }));
+    await user.type(screen.getByPlaceholderText("Password"), "spooky");
+    const newer = ringing();
+    lock.ringing = [newer];
+    await act(async () => rerender(<LockScreen />));
+    expect(screen.getByPlaceholderText("Password")).toHaveFocus();
+    await user.type(screen.getByPlaceholderText("Password"), "{Enter}");
+    expect(newer.answer).toHaveBeenCalledOnce();
   });
 
   it("on a call already, Answer says End and answer", () => {

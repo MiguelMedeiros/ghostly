@@ -16,7 +16,8 @@
 // full run is about 14 jobs, 2 of them on macOS, and the free plan runs about 20 jobs at a time, 5 on macOS.
 //
 // A ready pull request that already has `queue` and is behind its base gets the fast tier too (queuedBehind, ci.yml
-// passes --draft=true --queued=true): the merge train's batch, built on the base's tip, runs everything for it.
+// passes --draft=true --queued=true): the merge train's batch, built on the base's tip, runs everything for it. One whose
+// fast tier already passed on its head waits a few minutes for `queue` first.
 
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -76,6 +77,19 @@ export const WEBSITE_INPUTS = [
   "docs/DHT-DELIVERY.md",
   ".github/CONTRIBUTING.md",
   ".github/SECURITY.md",
+  // Linked from a published document: sync-references.mjs stops at a link to one that was renamed or deleted.
+  "docs/APPS.md",
+  "docs/ARCHITECTURE.md",
+  "docs/BROWSER.md",
+  "docs/OIDC-PROVIDERS.md",
+  "docs/RELAYS.md",
+  "docs/SECURITY-REVIEW.md",
+  "docs/TRANSPORTS.md",
+  "docs/WALLETS.md",
+  "docs/WEB.md",
+  "e2e/README.md",
+  "packages/browser/src/engine/paymentAdapters/PROVIDERS.md",
+  "packages/browser/src/proofs/PROOFS.md",
   // Carried in /llms-full.txt by apps/website/scripts/llms.mjs (KEY_DOCS).
   "docs/CLI.md",
   "docs/AI-AGENTS.md",
@@ -132,8 +146,15 @@ export const WEBSITE_INPUTS = [
   // pkarr-ttl.test.mjs checks the site's text against it.
   "packages/core/src/didDht.ts",
   "packages/core/src/pkarr.ts",
-  // The jobs themselves.
+  // group-calls.test.mjs checks the site's text against the group header's call button, the Linux Desktop's refusal
+  // and the CLI's group commands, and the chat guide's group section with it.
+  "apps/ui/src/pages/GroupChat.tsx",
+  "apps/ui/src/desktop/groupCallSupport.ts",
+  "packages/cli/src/commands/groups.ts",
+  "docs/CHAT.md",
+  // The jobs themselves, and the Node setup both install with.
   ".github/workflows/ci.yml",
+  ".github/actions/node-npm/",
 ];
 
 /**
@@ -283,6 +304,42 @@ export async function draftBehind({ sha, run, pull, repo, api, settle = () => ne
 
 /** The label that puts a pull request in the merge train's line (merge-train.mjs's LABEL.queue). */
 export const QUEUE = "queue";
+/** The label that keeps one in line without boarding (merge-train.mjs's HOLD). */
+export const HOLD = "queue:hold";
+/** The gate's name in a draft's run (merge-train.mjs's DRAFT_GATE). */
+export const DRAFT_GATE = "CI Success (draft)";
+/**
+ * How many times, `settle` apart (15 s), a ready pull request whose fast tier is already green asks again for `queue`:
+ * about 3 minutes. The feeder adds it only once that gate is green, on a pass every 60 s that can take as long again
+ * (108 s seen), and the train then cancels a full run started without it (about 19 runner-min, 2-4 of them on macOS).
+ */
+export const QUEUE_POLLS = 12;
+
+/**
+ * The green "CI Success (draft)" of another CI run of this pull request on this head, or null.
+ * @param {{ sha: string, run: number, pull: number, repo: string, api: (path: string) => Promise<any> }} pr
+ * @returns {Promise<string | null>} that run's address
+ */
+export async function draftGreen({ sha, run, pull, repo, api }) {
+  const { workflow_runs: runs } = await api(`actions/workflows/ci.yml/runs?event=pull_request&head_sha=${sha}&per_page=100`);
+  const green = runs
+    .filter(
+      (r) =>
+        r.id !== run &&
+        r.head_sha === sha &&
+        r.path === ".github/workflows/ci.yml" &&
+        r.head_repository?.full_name === repo &&
+        r.pull_requests?.some((p) => p.number === pull) &&
+        r.status === "completed" &&
+        r.conclusion === "success",
+    )
+    .sort((a, b) => b.id - a.id);
+  for (const r of green) {
+    const { jobs } = await api(`actions/runs/${r.id}/jobs?per_page=100`);
+    if (jobs.some((j) => j.name === DRAFT_GATE && j.conclusion === "success")) return r.html_url;
+  }
+  return null;
+}
 
 /**
  * How many commits of its base a ready pull request labelled `queue` lacks, or 0. Behind its base, it runs the fast tier
@@ -290,15 +347,29 @@ export const QUEUE = "queue";
  * whose full run is the gate, and it cancels the pull request's own full run, which it would never land on. At the
  * base's tip it runs everything: the train lands a lone pull request on its own run there, and rebases one that is
  * behind onto the tip first, so that run plans everything. Without `queue` (`queue:priority` alone too) it runs
- * everything, as before: the owner adds `queue` before `gh pr ready`, once the fast tier is green.
- * @param {{ pull: number, sha: string, api: (path: string) => Promise<any> }} pr  `pull` is the pull request's number
+ * everything, as before, but one whose fast tier is already green on this head (it left draft once that passed) first
+ * waits up to QUEUE_POLLS for the feeder's `queue`: it stops waiting, and runs everything, as soon as it gets
+ * `queue:hold`, turns back into a draft or gets another head.
+ * @param {{ pull: number, sha: string, api: (path: string) => Promise<any>, run?: number, repo?: string, settle?: () => Promise<void>, polls?: number }} pr
+ *   `pull` is the pull request's number, `run` this run's id; without `run` it does not wait
  * @returns {Promise<number>}
  */
-export async function queuedBehind({ pull, sha, api }) {
-  const { labels, base } = await api(`pulls/${pull}`);
-  if (!labels?.some((l) => l.name === QUEUE)) return 0;
-  const { behind_by: behind } = await api(`compare/${base.ref}...${sha}`);
-  return Number.isInteger(behind) && behind > 0 ? behind : 0;
+export async function queuedBehind({ pull, sha, api, run, repo, settle = () => new Promise((r) => setTimeout(r, SETTLE_MS)), polls = QUEUE_POLLS }) {
+  let pr = await api(`pulls/${pull}`);
+  const has = (name) => pr.labels?.some((l) => l.name === name);
+  const waits = () => !has(HOLD) && !pr.draft && pr.head?.sha === sha;
+  if (!has(QUEUE) && !(run && waits())) return 0;
+  const { behind_by: behind } = await api(`compare/${pr.base.ref}...${sha}`);
+  if (!(Number.isInteger(behind) && behind > 0)) return 0;
+  if (has(QUEUE)) return behind;
+  if (!(await draftGreen({ sha, run, pull, repo, api }))) return 0;
+  for (let i = 0; i < polls; i++) {
+    await settle();
+    pr = await api(`pulls/${pull}`);
+    if (!waits()) return 0;
+    if (has(QUEUE)) return behind;
+  }
+  return 0;
 }
 
 // A writer's base change, and GitHub's own when the old base branch was deleted (it tried: failed counts too).
@@ -393,11 +464,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     else console.log("This pull request left draft after this run's event, and no run of leaving draft waits behind this one: everything runs");
     process.exit(behind ? 0 : 1);
   }
-  // A ready pull request: exits 0 when it has `queue` and its head is behind its base (see queuedBehind), else 1. Any
-  // doubt is a 1: the run plans everything, as before.
+  // A ready pull request: exits 0 when it has `queue` (or gets it soon after its fast tier passed on this head) and its
+  // head is behind its base (see queuedBehind), else 1. Any doubt is a 1: the run plans everything, as before.
   if (process.argv.includes("--queued-behind")) {
-    const { PR_HEAD_SHA: sha, PR_NUMBER: pull } = process.env;
-    const behind = await queuedBehind({ pull: Number(pull), sha, api }).catch((e) => {
+    const { PR_HEAD_SHA: sha, PR_NUMBER: pull, GITHUB_RUN_ID: run, GITHUB_REPOSITORY: repo } = process.env;
+    const behind = await queuedBehind({ pull: Number(pull), sha, api, run: Number(run), repo }).catch((e) => {
       console.log(`::notice::Could not read whether this pull request is queued behind its base (${e.message}): everything runs`);
       return 0;
     });

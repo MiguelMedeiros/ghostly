@@ -5,11 +5,12 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { MessageInput } from "../../components/MessageInput";
 import { MessageBubble } from "../../components/MessageBubble";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
-import { forgetLinkPreviews } from "../../lib/linkPreviewFetch";
+import { forgetLinkPreviews, makeLinkPreview } from "../../lib/linkPreviewFetch";
 import { PREVIEW_DEBOUNCE_MS } from "../../hooks/useLinkPreviewDraft";
 import { setSessionDraft } from "../../lib/storage";
 import { renderApp } from "../render";
 import { fakeEngine } from "../fakeEngine";
+import { pngHead } from "../pngHead";
 
 // covers: chat.link-preview.compose, chat.link-preview.render, chat.location.card
 
@@ -250,6 +251,26 @@ describe("a link preview in the composer", () => {
     await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
     expect(fetch).toHaveBeenCalledOnce();
   });
+
+  it("draws the page's picture only when its bytes say a size a preview takes: a few bytes can declare gigabytes", async () => {
+    const decode = vi.fn(async () => ({ width: 400, height: 400, close() {} }));
+    vi.stubGlobal("createImageBitmap", decode);
+    const picture = (width: number, height: number) => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input).endsWith(".png")
+        ? new Response(pngHead(width, height), { headers: { "content-type": "image/png" } })
+        : new Response(ogPage.replace("</head>", `<meta property="og:image" content="https://news.example/p.png"></head>`), { headers: { "content-type": "text/html" } }));
+    };
+    picture(20_000, 20_000);
+    const preview = await makeLinkPreview("https://news.example/huge", new AbortController().signal);
+    expect(preview).toMatchObject({ t: "Ghosts are real" });
+    expect(preview!.i).toBeUndefined();
+    expect(decode).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+    picture(1200, 630);
+    await makeLinkPreview("https://news.example/fine", new AbortController().signal);
+    expect(decode).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("a link preview in a message", () => {
@@ -322,8 +343,34 @@ describe("a link preview in a message", () => {
     expect(screen.queryByTestId("link-preview-card")).toBeNull();
   });
 
+  // An older app's card for a struck-through link opened /a~~: another page than the bubble's link above it.
+  it("opens a struck-through link as the bubble does, and is not drawn for the address with its closing ~~", () => {
+    const text = "~~https://news.example/a~~";
+    const older = renderApp(<MessageBubble message={{ id: "m13", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/a~~", t: "Old news" } }} />);
+    expect(screen.queryByTestId("link-preview-card")).toBeNull();
+    older.unmount();
+    renderApp(<MessageBubble message={{ id: "m14", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/a", t: "Old news" } }} />);
+    expect(screen.getByTestId("link-preview-card")).toHaveAttribute("href", "https://news.example/a");
+  });
+
+  // The sender makes a card only for a link the bubble draws, with the address it opens; an older app or another
+  // client sends one for an address in code, or read from a [text](url) link shorter than it opens.
+  it("is not drawn for an address the bubble does not draw as a link with that same address", () => {
+    for (const [text, u] of [
+      ["`https://news.example/x`", "https://news.example/x%60"],
+      ["`see https://news.example/story here`", "https://news.example/story"],
+      ["```\nhttps://news.example/story\n```", "https://news.example/story"],
+      ["[DC](https://en.wikipedia.org/wiki/Washington,_D.C.)", "https://en.wikipedia.org/wiki/Washington,_D.C"],
+      ["||[the ending](https://news.example/ending.)||", "https://news.example/ending"],
+    ]) {
+      const view = renderApp(<MessageBubble message={{ id: "m15", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u, t: "Ghosts are real" } }} />);
+      expect(screen.queryByTestId("link-preview-card"), text).toBeNull();
+      view.unmount();
+    }
+  });
+
   it("is drawn for a link outside a spoiler, even when the spoiler holds it too", () => {
-    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "`https://news.example/story`"]) {
+    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "[the story](https://news.example/story)"]) {
       const view = renderApp(<MessageBubble message={{ id: "m12", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/story", t: "Ghosts are real" } }} />);
       expect(screen.getByTestId("link-preview-card"), text).toHaveTextContent("Ghosts are real");
       view.unmount();

@@ -14,7 +14,8 @@ const MISSING: Record<Essential, TranslationKey> = {
  * to try. Drawn by the web entry instead of the app, before any provider exists: it is handed its translator, and
  * its styles are its own (the app's stylesheet may be what the browser cannot read). With `lockdown` (what is missing
  * looks like Apple's Lockdown Mode, lib/bootCheck lockdownLikely) it says so and how to exclude the site, the steps
- * behind an ⓘ, in place of "try another browser" (on an iPhone every browser is the same WebKit).
+ * behind an ⓘ, in place of "try another browser" (on an iPhone every browser is the same WebKit). The whole width:
+ * `#root` is a flex row, where a box with no width is only as wide as its words, against the left edge.
  */
 export function UnsupportedBrowser({ missing, details, lockdown = false, t }: { missing: readonly Essential[]; details: string; lockdown?: boolean; t: Translate }) {
   const [copied, setCopied] = useState(false);
@@ -33,7 +34,7 @@ export function UnsupportedBrowser({ missing, details, lockdown = false, t }: { 
   const button = { margin: "12px 6px 0", padding: "9px 16px", borderRadius: 8, border: "1px solid #3b4a54", background: "#202c33", color: "#e9edef", font: "inherit", fontWeight: 600, cursor: "pointer" } as const;
   return (
     <div role="alert" data-testid="unsupported-browser"
-      style={{ minHeight: "100vh", display: "grid", placeItems: "center", boxSizing: "border-box", padding: 24, background: "#0b141a", color: "#e9edef", font: "15px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif", textAlign: "center" }}>
+      style={{ width: "100%", minHeight: "100vh", display: "grid", placeItems: "center", boxSizing: "border-box", padding: 24, background: "#0b141a", color: "#e9edef", font: "15px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif", textAlign: "center" }}>
       <div style={{ maxWidth: 420, width: "100%" }}>
         <div style={{ fontSize: 48 }} aria-hidden="true">👻</div>
         <h1 style={{ fontSize: 18, fontWeight: 600, margin: "12px 0 8px" }}>{t("boot.title")}</h1>

@@ -1,3 +1,4 @@
+// covers: calls.group.room, calls.group.screen
 import { act, screen, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -104,6 +105,29 @@ describe("a shared screen", () => {
     expect(within(screen.getByTestId("group-call-side")).getAllByTestId("group-call-tile").map((t) => t.dataset.identity)).toEqual(["me", "ana", "bo"]);
   });
 
+  it("plays a screen's sound beside its sharer's voice, and says on your own screen when it went without its sound", () => {
+    const sound = new FakeTrack("audio") as unknown as MediaStreamTrack;
+    const { rerenderWith } = view(state(0, {
+      local: person("me", { screen: true, screenSound: false, tracks: { screen: video() } }),
+      participants: [person("ana", { tracks: { audio: new FakeTrack("audio") as unknown as MediaStreamTrack, screenAudio: sound } })],
+    }));
+    expect(screen.getAllByTestId("group-call-audio")).toHaveLength(1);
+    expect(screen.getAllByTestId("group-call-screen-audio")).toHaveLength(1);
+    const mine = within(screen.getByTestId("group-call-stage")).getAllByTestId("group-call-tile")[0];
+    expect(within(mine).getByTestId("group-call-screen-sound")).toHaveTextContent("Shared without sound");
+
+    // with its sound, your tile says it goes out too
+    rerenderWith(state(0, { local: person("me", { screen: true, screenSound: true, tracks: { screen: video() } }), participants: [person("ana")] }));
+    expect(screen.getByTestId("group-call-screen-sound")).toHaveTextContent("Sharing its sound");
+    expect(screen.queryByTestId("group-call-screen-audio")).toBeNull();
+  });
+
+  it("says nothing of the sound on someone else's screen: only you are told what you send", () => {
+    view(state(0, { participants: [person("ana", { screen: true, screenSound: false, tracks: { screen: video() } })] }));
+    expect(screen.getByTestId("group-call-stage")).toHaveTextContent("Ana's screen");
+    expect(screen.queryByTestId("group-call-screen-sound")).toBeNull();
+  });
+
   it("two at once: the latest wins and the other is a tile; when it stops, the other is back", () => {
     const sharing = (who: string[]) => state(0, { participants: ["ana", "bo"].map((id) => person(id, who.includes(id) ? { screen: true, tracks: { screen: video() } } : {})) });
     const main = () => within(screen.getByTestId("group-call-stage")).getAllByTestId("group-call-tile")[0];
@@ -122,6 +146,48 @@ describe("a shared screen", () => {
 
     rerenderWith(sharing([]));
     expect(screen.getByTestId("group-call-grid")).toBeInTheDocument();
+  });
+
+  it("two at once: the one picked on the side is shown large, and stays so while others start and stop", async () => {
+    const sharing = (who: string[]) => state(0, { participants: ["ana", "bo", "cy"].map((id) => person(id, who.includes(id) ? { screen: true, tracks: { screen: video() } } : {})) });
+    const main = () => within(screen.getByTestId("group-call-stage")).getAllByTestId("group-call-tile")[0];
+    const show = (id: string) => within(screen.getByTestId("group-call-side")).getAllByTestId("group-call-show-screen").find((b) => b.dataset.identity === id)!;
+    const { user, rerenderWith } = view(sharing(["ana"]));
+    rerenderWith(sharing(["ana", "bo"]));
+    expect(main()).toHaveAttribute("data-identity", "bo");
+
+    // Ana's screen, picked by keyboard: it is large, Bo's is the side's, and the focus is on Bo's to switch back.
+    show("ana").focus();
+    // The name sits in its own direction, between FSI and PDI.
+    expect(show("ana")).toHaveAccessibleName(`Show ${String.fromCodePoint(0x2068)}Ana${String.fromCodePoint(0x2069)}'s screen large`);
+    await user.keyboard("{Enter}");
+    expect(main()).toHaveAttribute("data-identity", "ana");
+    expect(show("bo")).toHaveFocus();
+
+    // Cy starts sharing: Ana's stays large. Bo stops: still Ana's.
+    rerenderWith(sharing(["ana", "bo", "cy"]));
+    expect(main()).toHaveAttribute("data-identity", "ana");
+    rerenderWith(sharing(["ana", "cy"]));
+    expect(main()).toHaveAttribute("data-identity", "ana");
+
+    // Ana stops: the latest left (Cy) is large, and the pick is gone: Ana sharing again, then Bo, each is large in turn.
+    rerenderWith(sharing(["cy"]));
+    expect(main()).toHaveAttribute("data-identity", "cy");
+    rerenderWith(sharing(["cy", "ana"]));
+    expect(main()).toHaveAttribute("data-identity", "ana");
+    rerenderWith(sharing(["cy", "ana", "bo"]));
+    expect(main()).toHaveAttribute("data-identity", "bo");
+
+    await user.click(show("cy"));
+    expect(main()).toHaveAttribute("data-identity", "cy");
+    expect(await axeViolations(screen.getByTestId("group-call"))).toEqual([]);
+  });
+
+  it("names your own screen on the side as yours, not by the word You", () => {
+    const shares = { screen: true, tracks: { screen: video() } };
+    view(state(0, { local: person("me", shares), participants: [person("ana", shares)] }));
+    expect(within(screen.getByTestId("group-call-stage")).getAllByTestId("group-call-tile")[0]).toHaveAttribute("data-identity", "ana");
+    expect(within(screen.getByTestId("group-call-side")).getByTestId("group-call-show-screen")).toHaveAccessibleName("Show your screen large");
   });
 });
 
@@ -180,6 +246,15 @@ describe("the group call window", () => {
     await user.click(screen.getByTestId("group-call-info"));
     expect(screen.getByTestId("group-call-info-text")).toHaveTextContent("It goes through the group's node.");
     expect(await axeViolations(screen.getByTestId("group-call"))).toEqual([]);
+  });
+
+  it("takes a tap on its ⓘ in 40 px, 44 on a phone, as every ⓘ (InfoButton) does, not on the 20 px mark alone", () => {
+    view(state(1));
+    // happy-dom lays nothing out: the hit area is the ::before grown past the mark, on a phone 16 px up and 8 down (the
+    // tiles start 8 px under it); e2e/web/group-call-targets-phone.spec.ts measures it.
+    expect(screen.getByTestId("group-call-info")).toHaveClass("relative", "before:absolute", "before:-inset-2.5", "max-md:before:-inset-3", "max-md:before:-top-4", "max-md:before:-bottom-2");
+    // Its 12 px grown side ends at the Small window button (16 + 44 px) when a long name pushes it to the row's edge.
+    expect(screen.getByTestId("group-call-info").parentElement).toHaveClass("max-md:px-[72px]");
   });
 
   it("rides in a small window away from the group, showing who speaks, and goes back to it", async () => {

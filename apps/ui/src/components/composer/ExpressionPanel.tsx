@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useLockScreen } from "../../contexts/LockScreenContext";
@@ -51,13 +51,14 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
   onEmoji: (emoji: string) => void;
   onGif: (url: string) => void;
   onClose: () => void;
-  /** Opened from the keyboard: the emoji search takes the focus, as it does after a switch from GIFs. */
+  /** Opened from the keyboard: the emoji search takes the focus, as it does after a switch from GIFs; on a phone, the switch. */
   focusOnOpen?: boolean;
 }) {
   const { t } = useI18n();
   const phone = useIsMobile();
   const { isLocked } = useLockScreen();
   const ref = useRef<HTMLDivElement>(null);
+  const ids = useId();
   const [tab, setTab] = useState(lastExpressionTab);
   const [position, setPosition] = useState<CSSProperties>();
   const [switched, setSwitched] = useState(false);
@@ -137,6 +138,15 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
     };
   }, [boundsRef, phone]);
 
+  // On a phone a search taking the focus would bring the on-screen keyboard up: opened from the keyboard, the switch
+  // takes it instead, once it is placed (Tab stays in the sheet from there). Before, it stayed behind the backdrop.
+  const focusedOnOpen = useRef(false);
+  useEffect(() => {
+    if (!phone || !focusOnOpen || position === undefined || focusedOnOpen.current) return;
+    focusedOnOpen.current = true;
+    ref.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
+  }, [phone, focusOnOpen, position]);
+
   const choose = (next: ExpressionTab) => { setTab(next); rememberTab(next); setSwitched(true); };
   const tabKeys = (e: KeyboardEvent) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
@@ -151,17 +161,21 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
   if (isLocked) return null;
   // Hidden until placed, and a browser focuses nothing hidden: a search takes the focus only from then on.
   const placed = position !== undefined;
+  // The switch's tabs name the tab shown as theirs, and it names its tab. Before, "tab 1 of 2" controlled nothing.
+  const tabId = (id: ExpressionTab) => `${ids}-tab-${id}`, panelId = (id: ExpressionTab) => `${ids}-panel-${id}`;
+  const panel = { id: panelId(tab), role: "tabpanel", "aria-labelledby": tabId(tab) } as const;
   return createPortal(<>
     {phone && <div className="sheet-backdrop" />}
     <div ref={ref} role="dialog" aria-label={t("composer.expressions")} data-testid="expression-panel" data-tab={tab}
       className={`expression-panel ${phone ? "sheet expression-sheet" : "expression-popover"}`} data-compact={compact || undefined}
       style={position ?? { visibility: "hidden" }}>
       {tab === "emoji"
-        ? <EmojiTab key="emoji" onPick={onEmoji} autoFocus={(switched || focusOnOpen) && !phone && placed} />
-        : <GifTab key="gif" onSelect={onGif} onEmojiTab={() => choose("emoji")} autoFocus={!phone && placed} />}
+        ? <EmojiTab key="emoji" onPick={onEmoji} autoFocus={(switched || focusOnOpen) && !phone && placed} panel={panel} />
+        : <GifTab key="gif" onSelect={onGif} onEmojiTab={() => choose("emoji")} autoFocus={!phone && placed} panel={panel} />}
       <div role="tablist" aria-label={t("composer.expressions")} className="expression-switch" onKeyDown={tabKeys}>
         {TABS.map((id) => (
-          <button key={id} type="button" role="tab" className="tap-target" data-testid={`expression-tab-${id}`} aria-selected={tab === id} tabIndex={tab === id ? 0 : -1}
+          <button key={id} id={tabId(id)} type="button" role="tab" className="tap-target" data-testid={`expression-tab-${id}`} aria-selected={tab === id} tabIndex={tab === id ? 0 : -1}
+            aria-controls={tab === id ? panelId(id) : undefined}
             aria-label={t(`composer.${id}` as const)} title={t(`composer.${id}` as const)} onClick={() => choose(id)}>
             {id === "emoji" ? <SmileIcon size={20} /> : <GifIcon size={20} />}
           </button>

@@ -17,8 +17,13 @@ describe("how Ghostly Desktop asks a Lightning address service", () => {
     const invoke = rust({ status: 200, contentType: "application/json", bodyB64: b64('{"ok":1}') });
     const fetch = page(() => new Response('{"never":1}'));
     await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(invoke as never, fetch) })).resolves.toEqual({ ok: 1 });
-    expect(invoke).toHaveBeenCalledExactlyOnceWith("hold_fetch", { url: "https://ln.example.com/x", headers: [["accept", "application/json"]] });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("hold_fetch", { url: "https://ln.example.com/x", headers: [["accept", "application/json"]], maxBytes: 64 * 1024, timeoutMs: 15_000 });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses an answer Rust found past a lookup's size as too large", async () => {
+    const invoke = rust("The held item is too large");
+    await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(invoke as never, page(opaque)) })).rejects.toThrow("The server's answer is too large");
   });
 
   it("says a service whose name leads to this machine or its network could not be reached, as Rust refuses it", async () => {
@@ -31,6 +36,12 @@ describe("how Ghostly Desktop asks a Lightning address service", () => {
   it("keeps the service's own status, and a body Rust does not read", async () => {
     const invoke = rust({ status: 404, contentType: "", bodyB64: "" });
     await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(invoke as never, page(opaque)) })).rejects.toThrow(/HTTP 404/);
+  });
+
+  it("says the service's own reason for a refusal it answers with an error status, as the web does", async () => {
+    // Rust keeps a short error body (`MAX_ERROR_BODY`, apps/desktop/src/hold_fetch.rs): a 400 with LUD-06's refusal.
+    const invoke = rust({ status: 400, contentType: "application/json", bodyB64: b64('{"status":"ERROR","reason":"Amount too small"}') });
+    await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(invoke as never, page(opaque)) })).rejects.toThrow("ln.example.com refused: Amount too small");
   });
 
   it("asks a service that redirects again from Rust, which checks each hop, and reads its answer", async () => {
@@ -52,6 +63,16 @@ describe("how Ghostly Desktop asks a Lightning address service", () => {
     const local = rust(moved, "unreachable: error following redirect: Local addresses have no preview");
     await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(local as never, page(opaque)) })).rejects.toThrow(/Could not reach ln.example.com/);
   });
+
+  it("gives up on a service that never answers at the lookup's own time limit, not at Rust's 150 s", async () => {
+    const never = new Promise<never>(() => {});
+    const silent = vi.fn(() => never);
+    await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(silent as never, page(opaque)), timeoutMs: 20 })).rejects.toThrow("The server took too long to answer");
+    // Its redirect, asked again from Rust, too.
+    const moved = vi.fn(async (command: string) => command === "hold_fetch" ? { status: 302, contentType: "", bodyB64: "" } : never);
+    await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(moved as never, page(opaque)), timeoutMs: 20 })).rejects.toThrow("The server took too long to answer");
+    expect(moved).toHaveBeenLastCalledWith("link_preview_fetch", { url: "https://ln.example.com/x", kind: "json" });
+  }, 2_000);
 
   it("asks a test server on this machine from the page, and never asks Rust for its redirect", async () => {
     const invoke = vi.fn();

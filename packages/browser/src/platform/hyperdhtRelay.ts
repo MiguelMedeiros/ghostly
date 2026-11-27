@@ -232,7 +232,8 @@ function attach(socket: SecretSocket, channels: Set<RelayedChannel>, dialledIn?:
   const channel = new RelayedChannel(socket);
   channels.add(channel); dialledIn?.unprefaced.add(channel);
   return new Promise<BoundChannel>((resolve, reject) => {
-    let buffer = new Uint8Array(0);
+    /** The partial frame's parts as they came (copies), their bytes, and how many it needs before it is read on. */
+    let parts: Uint8Array[] = [], partBytes = 0, need = 4;
     let prefaced = false;
     const decoder = new TextDecoder("utf-8", { fatal: true });
     const timer = setTimeout(() => socket.destroy(new Error("HyperDHT handshake timed out")), HANDSHAKE_MS);
@@ -252,20 +253,26 @@ function attach(socket: SecretSocket, channels: Set<RelayedChannel>, dialledIn?:
     if (socket.opened) void socket.opened.then(ok => { if (ok) opened(); else reject(new Error("Noise handshake failed")); });
     else socket.once("open", opened);
     socket.on("data", (chunk: Uint8Array) => {
-      // Frames are read by offset and only the partial one left is kept (a copy, once per chunk), as on the
-      // Desktop: copying the rest of the buffer per frame made a burst of tiny frames cost quadratic time.
+      // Frames are read by offset and only the partial one left is kept, as on the Desktop: copying the rest of the
+      // buffer per frame made a burst of tiny frames cost quadratic time. A frame in many small records likewise: its
+      // parts are kept as they come and joined once there are as many bytes as it needs (4, then all of it).
       let joined = chunk;
-      if (buffer.length) {
-        joined = new Uint8Array(buffer.length + chunk.length);
-        joined.set(buffer); joined.set(chunk, buffer.length);
+      if (parts.length || chunk.length < need) {
+        parts.push(new Uint8Array(chunk)); partBytes += chunk.length;
+        if (partBytes < need) return;
+        joined = new Uint8Array(partBytes);
+        let at = 0;
+        for (const part of parts) { joined.set(part, at); at += part.length; }
+        parts = []; partBytes = 0;
       }
+      need = 4;
       let offset = 0;
       while (joined.length - offset >= 4) {
         const word = new DataView(joined.buffer, joined.byteOffset + offset, 4).getUint32(0);
         const binary = word >= BINARY, length = word % BINARY;
         // A binary frame before the preface is another protocol.
         if (length === 0 || length > MAX_FRAME || (binary && !prefaced)) { fail(new Error("Invalid frame length")); return; }
-        if (joined.length - offset < 4 + length) break;
+        if (joined.length - offset < 4 + length) { need = 4 + length; break; }
         const payload = joined.subarray(offset + 4, offset + 4 + length);
         offset += 4 + length;
         if (binary) {
@@ -287,7 +294,7 @@ function attach(socket: SecretSocket, channels: Set<RelayedChannel>, dialledIn?:
             identities: [hex(socket.publicKey), hex(socket.remotePublicKey)].sort() as [string, string] } });
         } else if (!channel.receive(text)) { fail(new Error("Receive queue exceeded")); return; }
       }
-      buffer = new Uint8Array(joined.subarray(offset));
+      if (offset < joined.length) { parts = [new Uint8Array(joined.subarray(offset))]; partBytes = parts[0].length; }
     });
   });
 }

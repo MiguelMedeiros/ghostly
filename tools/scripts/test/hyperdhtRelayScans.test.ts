@@ -142,19 +142,34 @@ it("matches a reply without looking at the other requests in flight", async () =
   expect(reads).toBeLessThan(tids.length * 4);
 });
 
-/** A request that times out is destroyed, and dht-rpc 6.28.0 found it with indexOf over every request in flight. */
-it("destroys 60,000 requests in flight in any order within 150 ms", async () => {
+/**
+ * A request that times out is destroyed, and dht-rpc 6.28.0 found it with indexOf over every request in flight. The
+ * destroys are held to that walk timed here, not to a fixed budget, so that a loaded host slows both.
+ */
+it("destroys 60,000 requests in flight in any order in a fraction of a walk over them", async () => {
   const { io } = await lone();
   const before = io.inflight.length;
-  const requests = shuffled(Array.from({ length: 60_000 }, () => request(io)));
   // One error for all: dht-rpc's own default is a new one each, its stack taken, which costs more than finding the request.
   const timeout = new Error("timed out");
+  let destroy = Infinity;
+  for (let round = 0; round < 2; round++) {
+    const requests = shuffled(Array.from({ length: 60_000 }, () => request(io)));
+    const started = performance.now();
+    for (const req of requests) req.destroy(timeout);
+    destroy = Math.min(destroy, performance.now() - started);
+    expect(io.inflight.length).toBe(before);
+  }
+  // Each of 60,000 found by indexOf and taken out, in any order.
+  const list = Array.from({ length: 60_000 }, () => ({}));
+  const order = shuffled(list);
   const started = performance.now();
-  for (const req of requests) req.destroy(timeout);
-  const ms = performance.now() - started;
-  expect(io.inflight.length).toBe(before);
-  // About 40 ms found at their slots, over 300 ms by indexOf.
-  expect(ms).toBeLessThan(150);
+  for (const item of order) {
+    list[list.indexOf(item)] = list[list.length - 1];
+    list.pop();
+  }
+  const walk = performance.now() - started;
+  // At their slots, a tenth to a fifth of the walk, loaded or not; by indexOf, the walk or more.
+  expect(destroy).toBeLessThan(walk / 2);
 });
 
 /**

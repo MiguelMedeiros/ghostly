@@ -30,6 +30,11 @@ export class ResumeTurns {
     if (this.running.delete(linkId)) this.next();
   }
 
+  /** Whether the chat waits in line for its turn. */
+  waits(linkId: string): boolean {
+    return this.line.includes(linkId);
+  }
+
   /** Someone wants the chat now: if it waits in line, it starts at once, past the turns. */
   now(linkId: string): void {
     const at = this.line.indexOf(linkId);

@@ -221,28 +221,68 @@ const MAX_LINK_TAIL = 64;
 /** What may stand right before and right after a link of its own in a shared text. */
 const LINK_BEFORE = new RegExp(`[\\s\\p{Ps}\\p{Pi}"'${LINK_STOP_CHARS}]`, "u");
 const LINK_AFTER = new RegExp(`[\\s${LINK_STOP_CHARS}]`);
+/**
+ * A bold, italic, strike or spoiler marker ("*https://a.example/p*", lib/parse/inline.ts) or "<": the bubble draws the
+ * link after them as one of its own only where the run of them opens after `LINK_BEFORE` or the text's start.
+ */
+const LINK_MARKS = /[*_~|<]/;
+
+/** Whether what stands right before `at` lets the link there be one of its own (at most 4 markers looked past). */
+function opensLink(text: string, at: number): boolean {
+  let before = at - 1;
+  while (before >= 0 && at - before <= 4 && LINK_MARKS.test(text[before]!)) before -= 1;
+  return before < 0 || LINK_BEFORE.test(text[before]!);
+}
 
 /**
- * Whether `text` carries `url` as a link of its own: after the text's start, a space, an opening bracket or quote or
- * the CJK or Arabic punctuation a link stops at ("链接：https://a.example/p"), and ending where a bubble's link would
+ * Whether `text` carries `url` as a link of its own: after the text's start, a space, an opening bracket or quote, a
+ * chat's marker or the CJK or Arabic punctuation a link stops at ("链接：https://a.example/p"), and ending where a bubble's link would
  * (`linkEnd`: "https://a.example/p.", "(https://a.example/p)" or "https://a.example/p。見て" carry it).
  * A longer address that starts with it ("https://a.example/p2") or holds it ("…?u=https://a.example/p") does not.
  * Any website can post a share, of megabytes: only the first `MAX_LINK_LOOKS` places it turns up are read, each up to
  * `MAX_LINK_TAIL` characters past it (a word longer than that is not taken for it), so the text is never read once per
  * place. Past those, the link goes in once more, which says nothing wrong.
+ * A web address is the same one read as a URL: a site's root with or without its "/", the scheme and host in any case
+ * ("HTTPS://A.EXAMPLE" carries "https://a.example/"); its path's case is the page's own. Anything else is as typed.
  */
 function carriesLink(text: string, url: string): boolean {
+  const web = webAddress(url) !== null;
+  const stem = web ? url.replace(/^(https?:\/\/[^/?#]+)\/$/i, "$1") : url;
+  // Looked for as a plain string, never a RegExp of the link: a link has any length, and a RegExp's source does not.
+  const within = web ? foldCase(text) : text;
+  const sought = web ? foldCase(stem) : stem;
   const word = new RegExp(`[^\\s${LINK_STOP_CHARS}]{0,${url.length + MAX_LINK_TAIL}}`, "y");
-  const own = linkEnd(url);
-  let looks = 0;
-  for (let at = text.indexOf(url); at >= 0 && looks < MAX_LINK_LOOKS; at = text.indexOf(url, at + 1), looks += 1) {
-    if (at > 0 && !LINK_BEFORE.test(text[at - 1]!)) continue;
+  const address = (link: string) => webAddress(link) ?? link;
+  const own = address(linkEnd(url));
+  for (let at = within.indexOf(sought), looks = 0; at >= 0 && looks < MAX_LINK_LOOKS; at = within.indexOf(sought, at + 1), looks += 1) {
+    if (!opensLink(text, at)) continue;
     word.lastIndex = at;
-    const found = word.exec(text)![0];
-    if (!LINK_AFTER.test(text[at + found.length] ?? " ")) continue;
-    if (linkEnd(found) === own) return true;
+    const link = word.exec(text)![0];
+    if (!LINK_AFTER.test(text[at + link.length] ?? " ")) continue;
+    if (address(linkEnd(link)) === own) return true;
   }
   return false;
+}
+
+/**
+ * `text` in lower case, each character at its place (one whose lower case is longer, as "İ", is kept as it is), with
+ * every sigma as "σ": a capital Σ that ends a word is "ς" when the whole string is lowered but "σ" when it is lowered
+ * alone, so the link and a text with an "İ" ("İzmir https://a.example/ΟΔΟΣ") would differ there. Only finds where to
+ * look: the address found is still compared as the browser reads it.
+ */
+function foldCase(text: string): string {
+  const lower = text.toLowerCase();
+  const folded = lower.length === text.length ? lower : Array.from(text, (char) => {
+    const low = char.toLowerCase();
+    return low.length === char.length ? low : char;
+  }).join("");
+  return folded.replace(/ς/g, "σ");
+}
+
+/** A web address as the browser reads it ("HTTPS://X.EXAMPLE" is "https://x.example/"), or nothing when it is none. */
+function webAddress(link: string): string | null {
+  if (!/^https?:\/\//i.test(link)) return null;
+  try { return new URL(link).href; } catch { return null; }
 }
 
 /**

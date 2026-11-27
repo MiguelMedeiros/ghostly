@@ -43,7 +43,7 @@ const SPECIAL_USE = ['localhost', 'local', 'internal', 'lan', 'home', 'corp', 'i
   'test', 'example', 'invalid', 'onion', 'alt', 'arpa'];
 
 /**
- * Normalizes what a person typed ("Example.COM.", "https://example.com/") into
+ * Normalizes what a person typed ("Example.COM.", "https://example.com/", "_@example.com") into
  * a lowercase ASCII host name, or throws with a message fit for the UI.
  * Internationalized names become punycode (xn--), the form DNS carries.
  */
@@ -54,10 +54,15 @@ export function normalizeDomain(input: string): string {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
     let url: URL;
     try { url = new URL(value); } catch { throw new Error('Enter a domain name, like example.com'); }
-    if (url.protocol !== 'https:' || url.username || url.password || url.port || (url.pathname !== '/' && url.pathname !== '') || url.search || url.hash)
+    if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username || url.password || url.port || (url.pathname !== '/' && url.pathname !== '') || url.search || url.hash)
       throw new Error('Enter only the domain name, without a path or port');
     value = url.hostname;
   } else {
+    // NIP-05's root identifier names the domain itself (`_@example.com`, as Nostr clients write it); a site's address
+    // keeps one trailing slash when copied. A person's NIP-05 name (`alice@example.com`) is not the domain.
+    if (value.startsWith('_@')) value = value.slice(2);
+    if (value.endsWith('/')) value = value.slice(0, -1);
+    if (!value) throw new Error('Enter a domain name, like example.com');
     if (/[/:@?#\s\\]/.test(value)) throw new Error('Enter only the domain name, without a path or port');
     try { value = new URL(`https://${value}`).hostname; } catch { throw new Error('That is not a valid domain name'); }
   }

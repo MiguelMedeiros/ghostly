@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -171,6 +171,27 @@ Ghostly next.
     writeFileSync(join(root, "docs/changelog/unreleased/b-second.md"), "---\nsection: Fixed\n---\n- B.\n");
     writeFileSync(join(root, "docs/changelog/unreleased/a-first.md"), "---\nsection: Fixed\n---\n- A.\n");
     expect(readFragments(root).map((f: { name: string }) => f.name)).toEqual(["docs/changelog/unreleased/a-first.md", "docs/changelog/unreleased/b-second.md"]);
+  });
+
+  it("refuses an entry no release would read: another extension or case, none, a folder, a symbolic link", () => {
+    const root = mkdtempSync(join(tmpdir(), "changes-"));
+    const dir = join(root, "docs/changelog/unreleased");
+    mkdirSync(join(dir, "chat"), { recursive: true });
+    writeFileSync(join(dir, "README.md"), "# How\n");
+    // What a Mac or an empty folder leaves there is not an entry: a local check must not fail on it.
+    writeFileSync(join(dir, ".DS_Store"), "\0");
+    writeFileSync(join(dir, ".gitkeep"), "");
+    for (const name of ["a.md", "b.MD", "c.markdown", "d", "chat/e.md"]) writeFileSync(join(dir, name), "---\nsection: Fixed\n---\n- A.\n");
+    symlinkSync("a.md", join(dir, "f.md"));
+    const fragments = readFragments(root);
+    expect(fragments.find((f: { name: string }) => f.name === "docs/changelog/unreleased/a.md")).toMatchObject({ heading: "Fixed", body: "- A.", problems: [] });
+    expect(fragments.flatMap((f: { problems: string[] }) => f.problems)).toEqual([
+      expect.stringMatching(/^docs\/changelog\/unreleased\/b\.MD: no release reads it: name it <slug>\.md, such as b\.md$/),
+      expect.stringMatching(/^docs\/changelog\/unreleased\/c\.markdown: no release reads it: name it <slug>\.md, such as c\.md$/),
+      expect.stringMatching(/^docs\/changelog\/unreleased\/chat\/: a folder, which no release reads: move its entries into docs\/changelog\/unreleased\/ as <slug>\.md$/),
+      expect.stringMatching(/^docs\/changelog\/unreleased\/d: no release reads it: name it <slug>\.md, such as d\.md$/),
+      expect.stringMatching(/^docs\/changelog\/unreleased\/f\.md: a symbolic link/),
+    ]);
   });
 
   it("reads a release an entry is held for, as <major>.<minor>", () => {

@@ -61,7 +61,7 @@ test("1:1 reactions: add, change, the same one from the contact, take back; who 
 
   // Bob's chat list says it, and counts nothing unread.
   const bobRow = bob.page.getByTestId("chat-row").first();
-  await expect(bobRow.getByTestId("chat-row-note")).toHaveText('Alice reacted 👍 to "lunch at noon?"', { timeout: 60_000 });
+  await expect(bobRow.getByTestId("chat-row-note")).toHaveText('\u2068Alice\u2069 reacted 👍 to "\u2068lunch at noon?\u2069"', { timeout: 60_000 });
   await expect(bobRow.getByTestId("chat-row-unread")).toHaveCount(0);
   await bobRow.click();
   const his = row(bob.page, "lunch at noon?");
@@ -107,7 +107,7 @@ test("1:1 reactions: add, change, the same one from the contact, take back; who 
 
   // Alice edits the message her reaction quotes: Bob's chat list line follows the new text.
   const bobNote = bob.page.getByTestId("chat-row").first().getByTestId("chat-row-note");
-  await expect(bobNote).toHaveText('Alice reacted 🎉 to "see you there"', { timeout: 60_000 });
+  await expect(bobNote).toHaveText('\u2068Alice\u2069 reacted 🎉 to "\u2068see you there\u2069"', { timeout: 60_000 });
   await mine.hover();
   await mine.getByTestId("message-options").click();
   await alice.page.getByTestId("message-edit").click();
@@ -115,7 +115,7 @@ test("1:1 reactions: add, change, the same one from the contact, take back; who 
   await box.fill("see you at one");
   await box.press("Enter");
   await expect(row(bob.page, "see you at one")).toBeVisible({ timeout: 60_000 });
-  await expect(bobNote).toHaveText('Alice reacted 🎉 to "see you at one"', { timeout: 30_000 });
+  await expect(bobNote).toHaveText('\u2068Alice\u2069 reacted 🎉 to "\u2068see you at one\u2069"', { timeout: 30_000 });
 });
 
 test("a message taller than the chat: the bar and the + panel open at the React button, in sight", { tag: ["@feature:chat.reactions"] }, async ({ peer }) => {

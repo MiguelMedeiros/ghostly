@@ -22,6 +22,13 @@ export const FRAME_BYTES = 1024 * 1024;
 const MAX_FRAME_BYTES = 64 * 1024 * 1024;
 /** One piece of JSON, decompressed: past it the backup is refused, not read. */
 const MAX_JSON_BYTES = 256 * 1024 * 1024;
+/**
+ * All the JSON of one backup, decompressed: this much, and this many times the bundle's size. A profile's records
+ * (rows of messages, keys, settings) shrink a few times under gzip, never dozens; one of a few MB that unpacks to
+ * gigabytes was made to, and a restore would spend minutes and as much disk on it. File bytes are never compressed.
+ */
+const MAX_JSON_TOTAL_FLOOR = 64 * 1024 * 1024;
+const MAX_JSON_PER_BUNDLE_BYTE = 64;
 const MAX_HEADER_BYTES = 4096;
 /**
  * JSON shorter than this is written plain: gzip makes a record of a file (a few dozen bytes) larger, and costs a
@@ -95,6 +102,33 @@ async function through(bytes: Uint8Array, stream: CompressionStream | Decompress
 async function keyFrom(passphrase: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
   const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: salt as BufferSource, iterations }, material, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+
+/**
+ * A frame's checks done at once, where the platform can (node:crypto in the CLI): an async WebCrypto call per frame
+ * costs ~30 µs, and a backup of many tiny records took seconds per megabyte to open, far more than its size says.
+ */
+export interface FrameCrypto {
+  sha256(...parts: Uint8Array[]): Uint8Array;
+  /** Opens a frame sealed with AES-256-GCM (its 16 byte tag at the end) under `key`, 32 bytes; throws if it fails. */
+  open(key: Uint8Array, iv: Uint8Array, additionalData: Uint8Array, sealed: Uint8Array): Uint8Array;
+  /**
+   * Inflates a gzip frame of at most `limit` bytes out (a `DecompressionStream` costs ~100 µs per frame, however small).
+   * Throws "This backup is too large to restore" past `limit`, and any other error for a frame that does not inflate.
+   */
+  gunzip(bytes: Uint8Array, limit: number): Uint8Array;
+}
+type Opener = (iv: Uint8Array, additionalData: Uint8Array, sealed: Uint8Array) => Promise<Uint8Array> | Uint8Array;
+
+/** The passphrase's key as a frame opener: through `frames` when given, the same PBKDF2 key as raw bits. */
+async function openerFrom(passphrase: string, salt: Uint8Array, iterations: number, frames?: FrameCrypto): Promise<Opener> {
+  if (!frames) {
+    const key = await keyFrom(passphrase, salt, iterations);
+    return async (iv, additionalData, sealed) => new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource, additionalData: additionalData as BufferSource }, key, sealed as BufferSource));
+  }
+  const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveBits"]);
+  const key = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: salt as BufferSource, iterations }, material, 256));
+  return (iv, additionalData, sealed) => frames.open(key, iv, additionalData, sealed);
 }
 const sha256 = async (...parts: Uint8Array[]) => new Uint8Array(await crypto.subtle.digest("SHA-256", join(parts) as BufferSource));
 function join(parts: Uint8Array[]): Uint8Array {
@@ -214,6 +248,16 @@ export async function backupProtection(source: BackupSource): Promise<"passphras
 
 const DAMAGED = "This backup is damaged: it was changed or cut short";
 
+/**
+ * A reader whose every record is small (the CLI's profile) refuses a larger one before decompressing it all, and a
+ * bundle whose JSON adds up to more than `totalBytes` plus `perByte` times its size (`MAX_JSON_TOTAL_FLOOR`,
+ * `MAX_JSON_PER_BUNDLE_BYTE`).
+ */
+export interface BackupLimits { recordBytes?: number; totalBytes?: number; perByte?: number }
+
+/** `frames`: each frame checked, unsealed and inflated at once rather than through an async call (`FrameCrypto`). */
+export interface ReaderOptions { limits?: BackupLimits; frames?: FrameCrypto }
+
 /** Reads a version 2 backup record by record. Nothing of a frame is handed out before it passed its check. */
 export class BackupReader {
   private frame = 0;
@@ -221,25 +265,34 @@ export class BackupReader {
   private block: Uint8Array = new Uint8Array();
   private blockAt = 0;
   private done = false;
+  /** JSON this backup may still hand out, decompressed (`MAX_JSON_TOTAL_FLOOR`). */
+  private jsonLeft: number;
+  private readonly recordBytes: number;
+  private readonly frames?: FrameCrypto;
 
-  private constructor(private readonly source: BackupSource, private readonly key: CryptoKey | null, private readonly base: Uint8Array, private chain: Uint8Array, start: number, private readonly signal?: AbortSignal) { this.at = start; }
+  private constructor(private readonly source: BackupSource, private readonly key: Opener | null, private readonly base: Uint8Array, private chain: Uint8Array, start: number, private readonly signal?: AbortSignal, options: ReaderOptions = {}) {
+    this.at = start;
+    this.frames = options.frames;
+    this.jsonLeft = (options.limits?.totalBytes ?? MAX_JSON_TOTAL_FLOOR) + (options.limits?.perByte ?? MAX_JSON_PER_BUNDLE_BYTE) * source.size;
+    this.recordBytes = Math.min(MAX_JSON_BYTES, options.limits?.recordBytes ?? MAX_JSON_BYTES);
+  }
 
   get protection(): "passphrase" | "none" { return this.key ? "passphrase" : "none"; }
 
   /** Null when `source` is not a version 2 backup. `passphrase` is needed, and used, only for a sealed one. */
-  static async open(source: BackupSource, passphrase?: string, signal?: AbortSignal): Promise<BackupReader | null> {
+  static async open(source: BackupSource, passphrase?: string, signal?: AbortSignal, options: ReaderOptions = {}): Promise<BackupReader | null> {
     const found = await readBackupHeader(source);
     if (!found) return null;
     check(signal);
     const { header, line } = found;
-    if (header.protection === "none") return new BackupReader(source, null, new Uint8Array(), await sha256(line), line.length, signal);
-    let key: CryptoKey, base: Uint8Array;
+    if (header.protection === "none") return new BackupReader(source, null, new Uint8Array(), await sha256(line), line.length, signal, options);
+    let key: Opener, base: Uint8Array;
     try {
       base = fromBase64Url(header.cipher!.nonce);
       if (base.length !== 7) throw new Error("nonce");
-      key = await keyFrom(passphrase ?? "", fromBase64Url(header.kdf!.salt), header.kdf!.iterations);
+      key = await openerFrom(passphrase ?? "", fromBase64Url(header.kdf!.salt), header.kdf!.iterations, options.frames);
     } catch { throw new Error("Unsupported backup encryption"); }
-    return new BackupReader(source, key, base, await sha256(line), line.length, signal);
+    return new BackupReader(source, key, base, await sha256(line), line.length, signal, options);
   }
 
   /** Bytes of the source read so far (for progress). */
@@ -271,13 +324,13 @@ export class BackupReader {
     let plain: Uint8Array;
     if (this.key) {
       try {
-        plain = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce(this.base, this.frame, kind) as BufferSource, additionalData: this.chain as BufferSource }, this.key, body as BufferSource));
+        plain = await this.key(nonce(this.base, this.frame, kind), this.chain, body);
       } catch { throw new Error(this.frame === 0 ? "Wrong passphrase, or the backup was changed" : DAMAGED); }
     } else if (kind === KIND.final) {
       if (body.length !== 32 || body.some((byte, i) => byte !== this.chain[i])) throw new Error(DAMAGED);
       plain = new Uint8Array();
     } else {
-      this.chain = await sha256(this.chain, headCopy, body);
+      this.chain = this.frames ? this.frames.sha256(this.chain, headCopy, body) : await sha256(this.chain, headCopy, body);
       plain = body.slice();
     }
     this.frame += 1;
@@ -287,7 +340,14 @@ export class BackupReader {
       return null;
     }
     if (kind === KIND.bytes) return { bytes: plain };
-    const text = kind === KIND.gzipJson ? await through(plain, new DecompressionStream("gzip"), MAX_JSON_BYTES).catch((error: unknown) => { throw error instanceof Error && error.message.startsWith("This backup is too large") ? error : new Error(DAMAGED); }) : plain;
+    const limit = Math.min(this.recordBytes, this.jsonLeft);
+    const text = kind === KIND.gzipJson ? await this.inflate(plain, limit).catch((error: unknown) => { throw error instanceof Error && error.message.startsWith("This backup is too large") ? error : new Error(DAMAGED); }) : plain;
+    if (text.length > limit) throw new Error("This backup is too large to restore");
+    this.jsonLeft -= text.length;
     return { json: new TextDecoder().decode(text) };
+  }
+
+  private async inflate(gzip: Uint8Array, limit: number): Promise<Uint8Array> {
+    return this.frames ? this.frames.gunzip(gzip, limit) : through(gzip, new DecompressionStream("gzip"), limit);
   }
 }

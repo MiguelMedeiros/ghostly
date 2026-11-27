@@ -30,12 +30,11 @@ import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
 import { useComputerAwake, useFilesMoving } from "./lib/keepAwake";
 import { useStayConnected } from "./lib/stayConnected";
 import { useCallOnSync } from "./hooks/useCallOnSync";
-import { setChatOnCall } from "./lib/chatsOnCall";
 import { useI18n } from "./contexts/I18nContext";
 import { useAppSessions } from "./lib/apps/running";
 import { useGroupDownloadsSync } from "./lib/groupDownloads";
 import { NowPlayingBar } from "./components/NowPlayingBar";
-import { stopHeld } from "./lib/nowPlaying";
+import { stopHeld, stopPlayingMessages } from "./lib/nowPlaying";
 import { groupRouteId } from "./lib/groups";
 import { sessionPeerKey } from "./lib/storage";
 import { useEngineValue } from "./lib/engineState";
@@ -44,7 +43,8 @@ import { usePresence } from "./hooks/useOwnStatus";
 import { useIsLocked } from "./contexts/LockScreenContext";
 import { StatusPickerHost } from "./components/StatusPicker";
 import { ReconnectedSaid } from "./components/ReconnectedSaid";
-import { focusLost } from "./lib/focus";
+import { focusLost, focusOffScreen } from "./lib/focus";
+import { focusPassing } from "./components/GroupInvitation";
 
 /**
  * Which chats stay loaded: the one the address points at, and the one on a
@@ -113,6 +113,59 @@ function useOnScreenLink(): string | null {
   return onScreen;
 }
 
+/** How long a phone's page change waits for the page's title to be drawn (a file asked for on a slow network). */
+const PAGE_TITLE_WAIT_MS = 10_000;
+
+/**
+ * A phone's page change took the focused control away (`pressed`: a chat's Back, Profile's Identities, with whether it
+ * was in the page left): back on the chat list from a chat's or a group's Back, the row of the conversation just left
+ * takes the focus (New chat when it has none), as a Settings section's Back gives it to the section's row; so does the
+ * browser's or the system's Back (Android's back gesture), which presses nothing: the focus was last somewhere in the
+ * conversation, gone with it. From another page, New chat. Any other page, its title (layout/Page.tsx), as a Settings
+ * section's opening does. A conversation's other ways home (Leave, Delete, Cancel joining) hand the focus on themselves,
+ * past its row that is going (GroupInvitation.tsx `focusPastRow`, waiting for the list to show), and one whose row is
+ * gone went by one of them; a chat or a group opened puts it where it wants it (hooks/useOpenedHeading.ts). A page of
+ * the menu opened for the first time draws its title once its file is there (components/MenuPage.tsx): watched for
+ * until then, unless something took the focus meanwhile. Returns what stops the watch.
+ */
+function focusOnPhonePage(left: string, shown: string, pressed: LastFocused | null): (() => void) | undefined {
+  if (chatRouteSession(shown) || groupRouteId(shown)) return;
+  const visible = (el: HTMLElement | null | undefined) => (el && !el.closest("[hidden], [inert]") && (el.checkVisibility?.() ?? true) ? el : null);
+  if (shown !== "/") {
+    // Not the first one: a chat kept loaded (a call, a mini-app) draws its own, hidden, before the page.
+    const title = () => [...document.querySelectorAll<HTMLElement>("main h1[tabindex='-1']")].find((h) => visible(h)) ?? null;
+    const now = title();
+    if (now) { now.focus({ preventScroll: true }); return; }
+    const main = document.querySelector("main");
+    if (!main) return;
+    const stop = () => { watch.disconnect(); clearTimeout(timer); };
+    const watch = new MutationObserver(() => {
+      const drawn = title();
+      if (!drawn) return;
+      stop();
+      if (focusOffScreen()) drawn.focus({ preventScroll: true });
+    });
+    const timer = setTimeout(stop, PAGE_TITLE_WAIT_MS);
+    watch.observe(main, { childList: true, subtree: true });
+    return stop;
+  }
+  const chat = chatRouteSession(left), group = groupRouteId(left);
+  const row = chat
+    ? [...document.querySelectorAll<HTMLElement>("[data-testid='chat-row']")].find(r => r.dataset.chat === chat)?.querySelector<HTMLElement>("[data-testid='chat-row-open']")
+    : group ? [...document.querySelectorAll<HTMLElement>("[data-testid='group-row']")].find(r => r.dataset.group === group)?.querySelector<HTMLElement>("[data-testid='group-row-open']") : null;
+  const back = pressed?.control.matches("[data-testid='chat-back']") || (pressed?.inPage && row && !focusPassing());
+  if ((chat || group) && !back) return;
+  const next = visible(row) ?? [...document.querySelectorAll<HTMLElement>("[data-testid='sidebar-new-chat']")].find(n => visible(n));
+  next?.focus({ preventScroll: true });
+  next?.scrollIntoView?.({ block: "nearest" });
+}
+
+/** The control that had the focus last, and whether it was in the open page (`<main>`) then: it may be gone since. */
+interface LastFocused {
+  control: Element;
+  inPage: boolean;
+}
+
 function useLoadedChats() {
   const routeSession = chatRouteSession(useLocation().pathname);
   // Every chat on a call or ringing: a second call ringing (or declined) while one is on must not unload the first.
@@ -148,8 +201,6 @@ function useLoadedChats() {
   }, []);
 
   const onCallChange = useCallback((sessionId: string, onCall: boolean) => {
-    // Said to the pages that delete chats, too: none is deleted under its call (lib/chatsOnCall.ts).
-    setChatOnCall(sessionId, onCall);
     setCallSessions((current) =>
       onCall ? (current.includes(sessionId) ? current : [...current, sessionId]) : current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current);
     if (onCall) setRingSessions((current) => (current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current));
@@ -226,15 +277,32 @@ export function App() {
   // document: the next Tab would start again at the top. The open page takes it, as the skip link gives it. After the
   // pages' own effects (children first), so a page that puts the focus somewhere keeps it there. Not at the start: the
   // first Tab goes to the skip link.
+  // On a phone, where the chat or page left stays mounted but hidden a moment with the focus: see `focusOnPhonePage`,
+  // which reads the control that had the focus last (the page gone, the focus is on the document).
   const shownPath = useRef(pathname);
+  const lastFocused = useRef<LastFocused | null>(null);
   useEffect(() => {
-    if (shownPath.current === pathname) return;
+    const focused = (e: FocusEvent) => { lastFocused.current = e.target instanceof Element ? { control: e.target, inPage: !!e.target.closest("main") } : null; };
+    document.addEventListener("focusin", focused);
+    return () => document.removeEventListener("focusin", focused);
+  }, []);
+  useEffect(() => {
+    const left = shownPath.current;
+    if (left === pathname) return;
     shownPath.current = pathname;
-    if (!isMobile && focusLost()) mainRef.current?.focus({ preventScroll: true });
+    if (!isMobile) { if (focusLost()) mainRef.current?.focus({ preventScroll: true }); }
+    else if (focusOffScreen()) return focusOnPhonePage(left, pathname, lastFocused.current);
   }, [pathname, isMobile]);
   // A voice message or audio file playing on away from its chat (lib/nowPlaying.ts) stops with the app itself (the
   // profile closing): after the bubbles' layout cleanups have handed it over.
   useEffect(() => () => stopHeld(), []);
+  // And with its message, when that goes from this device (deleted here, or by its sender for everyone), whatever page
+  // is open: the engine names the rows that went, of a chat or a group.
+  // What a change names, or the ids a whole list says the engine deleted (a removal no page heard), as the chats' mirror reads them.
+  useEffect(() => engine.onMessages((linkId, _messages, changes) => {
+    const gone = changes ? changes.deleted : engine.deletedIds.get(linkId) ?? [];
+    if (gone.length) stopPlayingMessages(gone);
+  }), []);
 
   const inChat = pathname.startsWith("/chat");
   // A group is a conversation too: on a phone it takes the whole screen, without the tab bar.

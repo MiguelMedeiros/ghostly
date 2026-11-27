@@ -116,9 +116,10 @@ function shorten(name: string): string {
 export function sanitizeFileName(name: string): string {
   const visible = name.replace(INVISIBLE, "").replace(BLANK, "").replace(/[/\\:]/g, "")
     .replace(IGNORABLE_RUN, dropIgnorable).replace(SPACE_RUN, " ");
-  // Whitespace before the dots must not hide them: " .bashrc" is a dotfile too.
-  const clean = shorten(visible.replace(/^[\s.]+/, "").trim());
-  if (WINDOWS_DEVICE.test(clean)) return shorten("_" + clean);
+  // Whitespace before the dots must not hide them: " .bashrc" is a dotfile too. Dots and spaces at the end go as
+  // Windows drops them when it names the file: "a.exe." is saved there as "a.exe", and its mark must name that file.
+  const clean = shorten(visible.replace(/^[\s.]+/, "").trim()).replace(/[\s.]+$/, "");
+  if (WINDOWS_DEVICE.test(clean)) return shorten("_" + clean).replace(/[\s.]+$/, "");
   return clean || "file";
 }
 
@@ -131,7 +132,8 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let value = bytes / 1024, unit = 0;
-  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  // The unit is picked on the shown (rounded) value: 1023.97 KB is "1.0 MB", never "1024.0 KB".
+  while (Math.round(value * 10) / 10 >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 

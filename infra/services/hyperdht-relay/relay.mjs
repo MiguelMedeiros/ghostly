@@ -30,7 +30,10 @@ export const DEFAULT_LIMITS = Object.freeze({
   clientsPerAddress: 16,
   /** Largest relay protocol message a client may send. */
   payloadBytes: 256 * 1024,
-  /** Bytes a client may send per second, on average, and in one burst. The relay pauses its socket past that. */
+  /**
+   * Bytes one address may send per second, on average, and in one burst, over all its clients, the ones it has closed
+   * too (see sendable). The relay pauses the address's sockets past that.
+   */
   bytesPerSecond: 512 * 1024,
   burstBytes: 4 * 1024 * 1024,
   /** Keys one client may listen on at once. */
@@ -287,9 +290,10 @@ const listensOn = (dht, keyPair) => keyPair?.publicKey?.byteLength === 32 && hol
  * the key, and the asking client's other listens, go on. The asking client is told: dht-relay has no message for a
  * refusal and its client drops a `closed` for a server that has had no `listening`, so the server says `listening` at
  * no address (0.0.0.0:0, the browser's sign of a refusal), then `closed`. A listen by a client that does not sign for
- * the key (holdsKey) is refused the same way, before the node holds the key.
+ * the key (holdsKey) is refused the same way, before the node holds the key. Each listen and dial is also counted for
+ * the client's address (`fromAddress`, see startRelay), over all its clients, closed ones too.
  */
-function clientDht(dht, limits, drop, gone, log, wrote) {
+function clientDht(dht, limits, drop, gone, log, wrote, fromAddress) {
   let listening = 0
   let listens = []
   let dials = []
@@ -341,6 +345,7 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
         const now = monotonicNow()
         listens = listens.filter(at => now - at < 60_000)
         if (listens.push(now) > limits.listensPerMinute) { drop('listen rate'); throw new Error('Listen rate reached') }
+        if (!fromAddress('listens', now)) { drop('address listen rate'); throw new Error('Listen rate reached') }
         if (++listening > limits.listens) { drop('listen limit'); throw new Error('Listen limit reached') }
         watchIdle()
         const server = target.createServer({ ...options, createHandshake: untracked(options?.createHandshake) }, onconnection)
@@ -368,6 +373,7 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
         const now = monotonicNow()
         dials = dials.filter(at => now - at < 60_000)
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
+        if (!fromAddress('dials', now)) { drop('address dial limit'); throw new Error('Dial limit reached') }
         if (streams.size >= limits.streams) { drop('stream limit'); throw new Error('Stream limit reached') }
         watchIdle()
         return hold(target.connect(publicKey, { ...options, createHandshake: reachedOnly(untracked(options?.createHandshake) ?? noiseWrap) }))
@@ -731,8 +737,9 @@ HandshakeProxy.prototype.recv = function (payload) {
  */
 const { FirewallProxy } = require(join(dirname(require.resolve('@hyperswarm/dht-relay')), 'lib', 'firewall-proxy.js'))
 function firewallCrowded(firewall, limits) {
-  const quarter = Math.max(1, Math.floor(limits.handshakes / 4))
-  if (firewall._requests.size >= quarter) return 'listen share'
+  // As crowded: a server gets at least one, and the dials keep a whole quarter only (none of 1 to 3, so one comes in).
+  const quarter = Math.floor(limits.handshakes / 4)
+  if (firewall._requests.size >= Math.max(1, quarter)) return 'listen share'
   let waiting = 0
   for (const server of firewall._node._servers.values()) waiting += server._firewall?._requests.size ?? 0
   return waiting >= limits.handshakes - quarter ? 'incoming' : null
@@ -868,7 +875,8 @@ const mebibytes = bytes => bytes % (1024 * 1024) ? `${bytes} bytes` : `${bytes /
  * whose users cannot connect reads the setting to change there, not in this file.
  */
 export function limitReasons (limits) {
-  const quarter = Math.max(1, Math.floor(limits.handshakes / 4))
+  // As crowded counts them: a key's share at least one, the dials' a whole quarter only.
+  const quarter = Math.floor(limits.handshakes / 4)
   return new Map([
     ['refused full', `${counted(limits.clients, 'client')} (${limitVariable('clients')})`],
     ['refused address', `${counted(limits.clientsPerAddress, 'client')} from one address (${limitVariable('clientsPerAddress')})`],
@@ -878,12 +886,14 @@ export function limitReasons (limits) {
     ['dropped listen rate', `${counted(limits.listensPerMinute, 'listen')} a minute (${limitVariable('listensPerMinute')})`],
     ['dropped listen limit', `${counted(limits.listens, 'key')} listened on at once (${limitVariable('listens')})`],
     ['dropped dial limit', `${counted(limits.connectsPerMinute, 'dial')} a minute (${limitVariable('connectsPerMinute')})`],
+    ['dropped address listen rate', `${counted(limits.listensPerMinute * limits.clientsPerAddress, 'listen')} a minute from one address (${limitVariable('listensPerMinute')} × ${limitVariable('clientsPerAddress')})`],
+    ['dropped address dial limit', `${counted(limits.connectsPerMinute * limits.clientsPerAddress, 'dial')} a minute from one address (${limitVariable('connectsPerMinute')} × ${limitVariable('clientsPerAddress')})`],
     ['dropped stream limit', `${counted(limits.streams, 'stream')} open at once (${limitVariable('streams')})`],
     ['dropped queue', `${mebibytes(limits.queuedBytes)} waiting for the client and its far peers (${limitVariable('queuedBytes')})`],
     ['closed far queue', `a far peer leaving half of ${mebibytes(limits.queuedBytes)} untaken on one stream (${limitVariable('queuedBytes')})`],
     ['dropped queue total', `${mebibytes(limits.queuedTotalBytes)} waiting over all clients, the one holding the most dropped (${limitVariable('queuedTotalBytes')})`],
     ['refused handshake limit', `${counted(limits.handshakes, 'handshake')} waiting on one client (${limitVariable('handshakes')})`],
-    ['refused handshake listen share', `${counted(quarter, 'incoming handshake')} waiting on one key, a quarter of ${limitVariable('handshakes')}`],
+    ['refused handshake listen share', `${counted(Math.max(1, quarter), 'incoming handshake')} waiting on one key, a quarter of ${limitVariable('handshakes')}`],
     ['refused handshake incoming', `${counted(limits.handshakes - quarter, 'incoming handshake')} waiting on one client, the rest of ${limitVariable('handshakes')} kept for its dials`],
   ])
 }
@@ -1002,8 +1012,41 @@ export async function startRelay(options = {}) {
     const [[, evict]] = most
     return () => { madeRoom.set(address, monotonicNow()); evict() }
   }
+  /**
+   * The listens and dials each address has started in the last minute, over all its clients, the ones it has closed too:
+   * a client's own budgets start over with each WebSocket, so an address that closes each one and opens another would
+   * have the relay's node announce as fast as it reconnects. An address gets its clients' budgets times
+   * `clientsPerAddress`, what it could start with all of them open; one past that is refused and not counted.
+   */
+  const spent = new Map()
+  const perMinute = { listens: limits.listensPerMinute * limits.clientsPerAddress, dials: limits.connectsPerMinute * limits.clientsPerAddress }
+  const fromAddress = address => (kind, now) => {
+    let entry = spent.get(address)
+    if (!entry) spent.set(address, entry = { listens: [], dials: [] })
+    entry[kind] = entry[kind].filter(at => now - at < 60_000)
+    if (entry[kind].length >= perMinute[kind]) return false
+    entry[kind].push(now)
+    return true
+  }
+  /**
+   * The byte budget each address has left (a token bucket of `bytesPerSecond` and `burstBytes`), shared by all its
+   * clients: the relay's work grows with each message it reads, so a budget per WebSocket let one address cost the relay
+   * `clientsPerAddress` times what one client may, and one that closed each WebSocket and opened another start each
+   * with a full burst. An address's next client starts from what is left; it is forgotten once full again and unused.
+   */
+  const sendable = new Map()
+  const budgetOf = (address, now) => {
+    let budget = sendable.get(address)
+    if (!budget) sendable.set(address, budget = { tokens: limits.burstBytes, last: now })
+    budget.tokens = Math.min(limits.burstBytes, budget.tokens + (now - budget.last) * limits.bytesPerSecond / 1000)
+    budget.last = now
+    return budget
+  }
   const forgetRoom = setInterval(() => {
     for (const [address, at] of madeRoom) if (monotonicNow() - at >= ROOM_MS) madeRoom.delete(address)
+    const now = monotonicNow()
+    for (const [address, entry] of spent) if ([...entry.listens, ...entry.dials].every(at => now - at >= 60_000)) spent.delete(address)
+    for (const address of sendable.keys()) if (!perAddress.has(address) && budgetOf(address, now).tokens >= limits.burstBytes) sendable.delete(address)
   }, 60_000)
   forgetRoom.unref?.()
 
@@ -1125,24 +1168,33 @@ export async function startRelay(options = {}) {
       if (over()) drop('queue')
       else holdQueued(ws)
     }
-    // A token bucket on what the client sends, its pings and pongs too: past it, the relay stops reading its socket for a while.
-    let tokens = limits.burstBytes
-    let last = monotonicNow()
+    // What the client sends, its pings and pongs too, spends its address's budget: past it, the relay stops reading its
+    // socket until the budget is back above zero (each of the address's sockets as it next sends). The wait is weighed
+    // again as it ends: the rest of the read that went past zero, and the address's other sockets, spend meanwhile.
     let paused = false
+    // Paused since the relay last pinged the client (see ping below).
+    let throttled = false
+    const hold = () => {
+      if (dropped) return
+      const { tokens } = budgetOf(address, monotonicNow())
+      if (tokens < 0) return setTimeout(hold, Math.ceil(-tokens / limits.bytesPerSecond * 1000))
+      paused = false
+      ws._socket?.resume()
+    }
     const spend = bytes => {
-      const now = monotonicNow()
-      tokens = Math.min(limits.burstBytes, tokens + (now - last) * limits.bytesPerSecond / 1000)
-      last = now
-      tokens -= bytes
-      if (tokens < 0 && !paused && ws._socket) {
+      const budget = budgetOf(address, monotonicNow())
+      budget.tokens -= bytes
+      if (budget.tokens < 0 && !paused && ws._socket) {
         paused = true
+        throttled = true
         ws._socket.pause()
-        setTimeout(() => { paused = false; ws._socket?.resume() }, Math.ceil(-tokens / limits.bytesPerSecond * 1000))
+        hold()
       }
     }
-    ws.on('message', data => spend(data.length ?? data.byteLength ?? 0))
-    // A control frame from a client is its payload and 6 bytes (header and mask), so an empty one still costs.
-    const CONTROL_FRAME_BYTES = 6
+    // Each frame from a client costs its payload and 64 bytes: the relay's work on a frame (parsing it, and for a message
+    // the protocol's decode and answer) does not shrink with its payload, so tiny ones are bounded as bytes are.
+    const FRAME_BYTES = 64
+    ws.on('message', data => spend((data.length ?? data.byteLength ?? 0) + FRAME_BYTES))
     // At most one pong waits to be written: a ping that comes meanwhile is kept, the last one only, and answered once
     // it is (RFC 6455 5.5.3 lets a pong answer only the most recent ping). Each pong waiting cost the process about
     // 700 bytes, and one client sent a million pings a second. The payload is copied: it is a view into the chunk the
@@ -1159,18 +1211,20 @@ export async function startRelay(options = {}) {
       })
     }
     ws.on('ping', data => {
-      spend(data.length + CONTROL_FRAME_BYTES)
+      spend(data.length + FRAME_BYTES)
       if (dropped) return
       if (ponging) nextPing = Buffer.from(data)
       else pong(Buffer.from(data))
     })
     // A peer that has gone without closing (a sleeping laptop, a dead route) still holds its slot: one that has not
-    // answered the last ping by the next is dropped.
+    // answered the last ping by the next is dropped. One the relay has stopped reading since (its byte budget) is not:
+    // its pong waits unread behind what it sent before, seconds late at a low `bytesPerSecond` behind a proxy.
     let answered = true
-    ws.on('pong', data => { spend(data.length + CONTROL_FRAME_BYTES); answered = true })
+    ws.on('pong', data => { spend(data.length + FRAME_BYTES); answered = true })
     const ping = setInterval(() => {
-      if (!answered) return drop('no pong')
+      if (!answered && !throttled) return drop('no pong')
       answered = false
+      throttled = paused
       ws.ping()
     }, limits.pingMs)
     let leave
@@ -1206,7 +1260,7 @@ export async function startRelay(options = {}) {
     // protomux keeps itself on a stream whose userData is null (a WsStream has none), and relay() makes the client's
     // mux at once: guardMux gets it there.
     stream.userData = null
-    const session = relay(clientDht(dht, limits, drop, gone, refusals.line, wrote), stream)
+    const session = relay(clientDht(dht, limits, drop, gone, refusals.line, wrote, fromAddress(address)), stream)
     guardMux(stream.userData, drop)
     void session.then(node => {
       guardProtocol(node._protocol, drop)

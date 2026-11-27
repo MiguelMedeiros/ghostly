@@ -493,6 +493,22 @@ describe("the Forward to… picker", () => {
     expect(fakeEngine.callsTo("forwardMessages")).toHaveLength(1);
   });
 
+  it("asks before forwarding a file whose name or type looks like a key, as sending it from the composer would", async () => {
+    const NSEC = "nsec1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqstywftw";
+    expect(forwardSecret([message({ text: "", file: { ...PICTURE, name: `${NSEC}.txt`, mime: "text/plain" } })])).toMatchObject({ kind: "nsec" });
+    expect(forwardSecret([message({ text: "", file: { ...PICTURE, name: `nsec1:${NSEC.slice(5)}.txt` } })])).toMatchObject({ kind: "nsec" });
+    expect(forwardSecret([message({ text: "", file: { ...PICTURE, mime: `text/${NSEC}` } })])).toMatchObject({ kind: "nsec" });
+    expect(forwardSecret([message({ text: SEED, file: PICTURE })])).toMatchObject({ kind: "mnemonic" });
+    expect(forwardSecret([message({ text: "", file: PICTURE })])).toBeNull();
+    fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: [], error: null })) }));
+    const { user } = open([message({ text: "", file: { ...PICTURE, name: `${NSEC}.txt` } })]);
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("secret-guard")).toHaveAttribute("data-kind", "nsec");
+    await user.click(screen.getByTestId("secret-guard-cancel"));
+    expect(fakeEngine.callsTo("forwardMessages")).toEqual([]);
+  });
+
   // The guard is the picker's child in React's tree (portalled out of it): React handed the guard's cancel to the
   // picker's too, and one Escape closed both, the chosen chats with them.
   it("Escape on the seed question closes only the question: the picker stays with its chats chosen", async () => {
@@ -607,6 +623,22 @@ describe("choosing several", () => {
     expect(screen.getByTestId("select-bar")).toBeInTheDocument();
     dialog.remove();
     act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true })); });
+    expect(screen.queryByTestId("select-bar")).toBeNull();
+  });
+
+  // A field that leaves Escape alone while an input method composes in it (the chat's search): the key only dropped a
+  // candidate, and the choice ended under it.
+  it("an Escape that only drops an input method's candidate in a field leaves the choice", async () => {
+    const { user } = renderApp(<><Timeline messages={messages} /><input aria-label="Search" /></>);
+    await user.click(screen.getAllByTestId("message-options")[0]!);
+    await user.click(screen.getByTestId("message-select-start"));
+    const field = screen.getByRole("textbox", { name: "Search" });
+    act(() => field.focus());
+    const composing = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, isComposing: true, keyCode: 229 });
+    act(() => { field.dispatchEvent(composing); });
+    expect(screen.getByTestId("select-bar")).toBeInTheDocument();
+    expect(composing.defaultPrevented).toBe(false);
+    act(() => { field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
     expect(screen.queryByTestId("select-bar")).toBeNull();
   });
 

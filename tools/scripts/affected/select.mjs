@@ -109,12 +109,15 @@ export const UNIT_PROJECTS = [
       "docs/RELEASING.md": ["chromeWebStore", "npmPublish", "webLatest"],
       "{CHANGELOG.md,apps/desktop/Cargo.toml,apps/website/lib/release.ts,apps/extension/public/manifest.json,packages/browser/src/shared/features.ts}": ["bumpVersion"],
       "packages/cli/package.json": ["npmPublish", "cliShrinkwrap"],
+      "apps/website/package.json": ["websiteSteps"],
       ".gitignore": ["cliShrinkwrap"],
       "apps/desktop/src/{translate,translate_models}.rs": ["translationRuntimes"],
       "e2e/playwright.config.ts": ["e2eWorkflow"],
       ".github/security-allowlist.json": ["securityScanAllowlist"],
       "rust-toolchain.toml": ["rustToolchain"],
+      ".github/actions/node-npm/action.yml": ["npmCacheWorkflow"],
       "Cargo.toml": ["androidNativeWorkflow"],
+      "{apps/desktop/tauri.e2e.conf.json,tsconfig.json}": ["desktopMacBuild"],
       // Its postinstall: matched even when its "scripts" alone changed (a change elsewhere in it runs everything).
       "package.json": ["releaseInstallScripts", "webAppsTestFlag"],      "{native/transports/Cargo.toml,native/transports/iroh-web/**,packages/iroh-web/pkg/**}": ["irohWebBuild"],
       "{packages/cli/vite.config.ts,packages/cli/vitest.config.ts,packages/cli/test/support/cli.ts}": ["affected"],
@@ -151,13 +154,16 @@ export const UNIT_PROJECTS = [
     tests: [],
   },
   {
-    // CI's path gates (tools/scripts/ci-changes.mjs) must cover every file the website's scripts, the packages' and the
-    // extension's code and the crates' Rust name. Its test reads those from disk for the paths they name, which no import
-    // graph shows, so a change to one runs it (whole: that one file, about 150 ms). A draft's tier is all the merge train
-    // waits for: without this, a website script naming an uncovered file went red only in batches (2026-11-03).
+    // CI's path gates (tools/scripts/ci-changes.mjs) must cover every file the website's scripts and code (browser
+    // checks, lib, app, components), the packages' and the extension's code and the crates' Rust name, every local
+    // action CI's workflows use, and every file a document the site publishes links to. Its test reads those from disk
+    // for the paths they name, which no import graph shows, so a change to one runs it (whole: that one file, about
+    // 150 ms). A draft's tier is all the merge train waits for: without this, a website script naming an uncovered file
+    // went red only in batches (2026-11-03). A workflow change runs it through the scripts project, which holds it and
+    // runs whole.
     name: "ci gates", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts", "test/ci-changes.test.ts"],
     sources: [],
-    whole: ["apps/website/scripts/**", "packages/**/*.{ts,tsx,mts,js,mjs}", "apps/extension/**/*.{ts,tsx,mts,js,mjs}", "apps/desktop/**/*.rs", "native/transports/**/*.rs"],
+    whole: ["apps/website/scripts/**", "apps/website/**/*.{ts,tsx,mts,js,mjs}", "docs/wisps/**", "docs/{PROTOCOL,SDK,USDT-INTEGRATION,DHT-DELIVERY}.md", "packages/**/*.{ts,tsx,mts,js,mjs}", "apps/extension/**/*.{ts,tsx,mts,js,mjs}", "apps/desktop/**/*.rs", "native/transports/**/*.rs", ".github/actions/**"],
     tests: [],
   },
   {
@@ -193,6 +199,9 @@ export function parseUnitGroup(text) {
   return index >= 1 && index <= count ? { index, count } : null;
 }
 
+/** ci.yml's name for the draft tier's job that runs `group` ({ index, count }): the name the run page shows. */
+export const draftUnitJob = (group) => `Affected unit tests (draft ${group.index}/${group.count})`;
+
 /** The group (1-based, of `count`) a unit project runs in: the one of its first half for a project of UNIT_HALVED. */
 export function unitGroupOf(name, count) {
   const alone = UNIT_ALONE.indexOf(name);
@@ -218,19 +227,23 @@ export const LINT = {
 };
 
 /**
- * Type checks, one per tsconfig `npm run typecheck` checks. `sources`: this package and the ones it imports, so a
- * change to @ghostly/core rechecks its importers too (an API change breaks them, not core).
+ * Type checks: every tsc program `npm run typecheck` runs (tools/scripts/typecheck.mjs), one per tsconfig.
+ * `sources`: every file the program reaches from its tsconfig's `include` (its package and what that imports), so a
+ * change to @ghostly/core rechecks its importers too (an API change breaks them, not core); affected.test.ts walks the
+ * imports and names a file left out. `seconds`: about what each took alone on a 4-core machine, so
+ * `npm run typecheck` starts the longest first.
  */
 export const TYPECHECKS = [
-  { name: "core", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/core/tsconfig.json"], sources: ["packages/core/**"] },
-  { name: "browser", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/browser/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/**"] },
-  { name: "sdk", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/sdk/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/sdk/**"] },
-  { name: "ui (root tsconfig)", cmd: ["npx", "tsc", "--noEmit"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "apps/ui/src/**", "tsconfig.json", "apps/ui/vite-env.d.ts"] },
-  { name: "extension", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "apps/extension/src/**", "apps/extension/tsconfig.json"] },
-  { name: "extension tests", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.test.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "apps/ui/src/**", "apps/extension/**"] },
-  { name: "web", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/web/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "apps/web/**"] },
-  { name: "e2e", cmd: ["npx", "tsc", "--noEmit", "-p", "e2e"], sources: ["e2e/**", "packages/core/src/**"] },
-  { name: "chess", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/mini/chess/tsconfig.json"], sources: ["packages/core/src/**", "apps/mini/chess/**"] },
+  { name: "core", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/core/tsconfig.json"], sources: ["packages/core/**", "apps/website/lib/invite.ts"], seconds: 24 },
+  { name: "browser", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/browser/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/**", "apps/ui/src/{contexts,hooks,lib,locales}/**", "packages/iroh-web/pkg/**"], seconds: 18 },
+  { name: "sdk", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/sdk/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/sdk/**"], seconds: 8 },
+  { name: "ui (root tsconfig)", cmd: ["npx", "tsc", "--noEmit"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "apps/ui/src/**", "apps/ui/scripts/built-in-apps.mjs", "apps/web/**", "packages/iroh-web/pkg/**", "tsconfig.json", "apps/ui/vite-env.d.ts"], seconds: 76 },
+  { name: "extension", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "packages/iroh-web/pkg/**", "apps/extension/src/**", "apps/extension/tsconfig.json"], seconds: 40 },
+  { name: "extension tests", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.test.json"], sources: ["packages/core/src/**", "packages/browser/**", "packages/react/src/**", "apps/ui/src/**", "packages/iroh-web/pkg/**", "tools/vitest.shared.ts", "apps/extension/**"], seconds: 63 },
+  { name: "web", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/web/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "packages/iroh-web/pkg/**", "apps/web/**"], seconds: 55 },
+  { name: "cli", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/cli/tsconfig.json"], sources: ["packages/core/{src,test/support}/**", "packages/browser/{src,test/helpers}/**", "apps/ui/src/**", "apps/web/appsTestFlag.ts", "packages/iroh-web/pkg/**", "native/transports/hyperdht/**", "native/translation/package.json", "tools/vitest.{shared,shards}.ts", "packages/cli/**"], seconds: 28 },
+  { name: "e2e", cmd: ["npx", "tsc", "--noEmit", "-p", "e2e"], sources: ["e2e/**", "packages/core/src/**", "packages/browser/{src,test/helpers}/**", "packages/cli/test/support/**", "apps/extension/test/atlas.mjs", "apps/ui/src/lib/mp3Encode.ts", "apps/ui/src/test/**", "apps/web/{appsTestFlag,runnerPolicy}.ts", "tools/vitest.shared.ts"], seconds: 21 },
+  { name: "chess", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/mini/chess/tsconfig.json"], sources: ["packages/core/src/**", "apps/mini/chess/**", "tools/vitest.shared.ts"], seconds: 3 },
 ];
 export const TYPECHECK_WHOLE = ["tsconfig.json", "packages/*/tsconfig*.json"];
 
@@ -403,6 +416,25 @@ export function testsReaching(changed, files, tests, packages) {
   return [...out].sort();
 }
 
+/**
+ * The integration test files (tools/scripts/integration-tests.json, repository paths) a unit project's plan reaches:
+ * all of the project's when it runs whole, those among its related files or importing one of them otherwise. As
+ * `vitest related` would pick them; `test:affected` leaves them out unless --integration is given.
+ *
+ * @param {{ mode: string, tests: string[], files?: string[] }} unit  a unit project of `plan`
+ * @param {string[]} list  the integration files
+ * @param {Record<string, string>} [files]  path → text of the files to follow
+ * @param {Record<string, [string, string][]>} [packages]  the workspaces' exports (workspaceExports)
+ * @returns {string[]}
+ */
+export function integrationReached(unit, list, files, packages) {
+  const mine = list.filter((f) => unit.tests.some((g) => globToRegExp(g).test(f)));
+  if (unit.mode === "skip" || !mine.length) return [];
+  if (unit.mode === "whole" || !files) return mine;
+  const hit = new Set([...unit.files.filter((f) => mine.includes(f)), ...testsReaching(unit.files, files, mine, packages)]);
+  return mine.filter((f) => hit.has(f));
+}
+
 // ---------- tests that read a file from disk ----------
 
 /**
@@ -521,7 +553,7 @@ export function usingStrings(changed, files, strings) {
  * through a workspace package (packageImports: `@ghostly/core` is core's barrel, `@ghostly/browser/x` is
  * packages/browser/src/x). A module not in `files` (a .json, a deleted file) is kept but not followed.
  *
- * @param {string} entry  the bundle's entry file
+ * @param {string | string[]} entry  the bundle's entry file, or several (a tsc program's included files)
  * @param {Record<string, string>} files  path → text of the files to follow
  * @param {Record<string, [string, string][]>} [packages]  the workspaces' exports (workspaceExports)
  * @returns {Set<string>}
@@ -529,7 +561,7 @@ export function usingStrings(changed, files, strings) {
 export function bundleReaches(entry, files, packages) {
   const byModule = new Map(Object.keys(files).map((p) => [stripExt(p), p]));
   const out = new Set();
-  const queue = [stripExt(entry)];
+  const queue = [entry].flat().map(stripExt);
   while (queue.length) {
     const mod = queue.pop();
     const path = byModule.get(mod) ?? byModule.get(`${mod}/index`);

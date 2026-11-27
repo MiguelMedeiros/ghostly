@@ -21,6 +21,13 @@ import { RUNNER_CSP } from "../../apps/web/runnerPolicy";
  */
 
 const MAIN_CSP = /Content-Security-Policy "([^"]+)"/.exec(readFileSync(join(import.meta.dirname, "../../apps/web/nginx-headers.conf"), "utf8"))![1]!;
+/**
+ * How often the page's watchdog asks a running app whether it answers (`PING_EVERY_MS`, apps/ui/src/lib/apps/broker.ts).
+ * The page "runs on" when its timers never miss one of those ticks: an app on the page's own thread holds them for its
+ * whole loop instead (3001 ms for a 3 s loop; an endless one never gives the thread back). The page's 10 ms timer waits
+ * 5 to 40 ms on a quiet host, and up to about 520 ms on one running the whole suite.
+ */
+const PING_EVERY_MS = Number(/export const PING_EVERY_MS = ([\d_]+);/.exec(readFileSync(join(import.meta.dirname, "../../apps/ui/src/lib/apps/broker.ts"), "utf8"))![1]!.replaceAll("_", ""));
 const EVIL = "evilpublisherkey/not-a-game";
 const VICTIM = "honestpublisherkey/notes";
 
@@ -273,7 +280,7 @@ test("an app that keeps sending far past the request rate is stopped, and the pa
       if (now - started > 2_000) { clearInterval(timer); done(longest); }
     }, 10);
   }));
-  expect(gap).toBeLessThan(500);
+  expect(gap).toBeLessThan(PING_EVERY_MS);
 });
 
 test("an app that reads its own 16 MiB file 50 times a second gets one a second, and the page stays smooth", {
@@ -339,7 +346,7 @@ test("an app that stops answering for longer than the watchdog's bound is closed
   testInfo.annotations.push({ type: "closed after", description: `${Date.now() - started} ms` });
   expect(Date.now() - started).toBeLessThan(25_000);
   await expect(page.locator(`iframe[data-app="${ref}"]`)).toHaveCount(0);
-  expect(await longestGap(page, 2_000)).toBeLessThan(500);
+  expect(await longestGap(page, 2_000)).toBeLessThan(PING_EVERY_MS);
 });
 
 test("an app in an endless loop, in a frame with a thread of its own, is closed at the bound while the page runs on", {
@@ -356,8 +363,11 @@ test("an app in an endless loop, in a frame with a thread of its own, is closed 
     const handle = await open(page, ref, appEntry("hang", { ms: 0 }));
     await expect.poll(() => stored(page, ref), { timeout: 30_000 }).toHaveProperty("ready");
     const started = Date.now();
-    const gap = longestGap(page, 8_000);
-    expect(await gap).toBeLessThan(500);
+    // The page keeps every tick of its watchdog while the app loops in its own process. On the page's thread it would
+    // not tick at all: the endless loop never gives it back, and this test runs out of time here.
+    const gap = await longestGap(page, 8_000);
+    testInfo.annotations.push({ type: "longest gap", description: `${Math.round(gap)} ms` });
+    expect(gap).toBeLessThan(PING_EVERY_MS);
     await expect.poll(() => status(page, handle), { timeout: 30_000 }).toEqual({ phase: "stopped", stopped: "unresponsive" });
     testInfo.annotations.push({ type: "closed after", description: `${Date.now() - started} ms` });
     await expect(page.locator(`iframe[data-app="${ref}"]`)).toHaveCount(0);

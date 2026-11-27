@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AWAITING_PEER_MS, OwnInviteError, type PairingProgress } from "@ghostly/core";
+import { AWAITING_PEER_MS, createIdentity, OwnInviteError, type PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import { chatOrGroup, findChatOrGroup, findOwnNamedChat } from "../src/apiKit";
@@ -1389,6 +1389,25 @@ describe("the engine passthrough", () => {
     expect(await call("lnurlResolve", { text: "a@b.c" })).toMatchObject({ code: "engine", message: "fetch failed" });
   });
 
+  it("refuses setContactBlocked given a word for blocked or what is not a contact's key, before the engine", async () => {
+    const { ctx, node } = fake();
+    const setContactBlocked = vi.fn(async () => {});
+    Object.assign(node, { setContactBlocked });
+    const call = (params: unknown) => callApi(ctx, "engine.call", { method: "setContactBlocked", params }).then(() => null, asCliError);
+    const takes = (why: string) => ({ code: "bad_request", message: `setContactBlocked takes ${ENGINE_PARAMS.setContactBlocked}: ${why} (ghostly engine --list --verbose)` });
+    const key = createIdentity().pubKeyZ32;
+    for (const blocked of ["false", "yes", 1, null]) expect(await call({ peerPubKeyZ32: key, blocked }), String(blocked)).toMatchObject(takes("blocked must be true or false"));
+    for (const peerPubKeyZ32 of ["__proto__", "z".repeat(2_000_000), key.slice(0, 51), `${key.slice(0, 51)}b`, 5]) {
+      const refused = await call({ peerPubKeyZ32, blocked: true });
+      expect(refused, String(peerPubKeyZ32).slice(0, 60)).toMatchObject(takes("peerPubKeyZ32 must be a contact's key"));
+      // A long word is not said back.
+      expect(refused!.message.length).toBeLessThan(200);
+    }
+    expect(setContactBlocked).not.toHaveBeenCalled();
+    expect(await call({ peerPubKeyZ32: key, blocked: false })).toBeNull();
+    expect(setContactBlocked).toHaveBeenCalledWith({ peerPubKeyZ32: key, blocked: false });
+  });
+
   it("runs send's secret guard on the calls that send a text: a seed, a key or ecash goes only with force", async () => {
     const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
     const { ctx, node } = fake([msg("m_seed", 5, { text: seed }), msg("m_hi", 6, { text: "hi" })]);
@@ -1451,6 +1470,31 @@ describe("the engine passthrough", () => {
     expect(engine.editMessage).toHaveBeenCalledOnce();
     expect(engine.forwardMessages).toHaveBeenCalledTimes(3);
     expect(engine.sendFile).toHaveBeenCalledOnce();
+  });
+
+  it("reads a forwarded file's name and type, which the engine sends again, as file send reads them", async () => {
+    const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    const file = (name: string, mime: string) => ({ file: { id: "f", name, size: 1, mime } });
+    const { ctx, node } = fake([
+      msg("m_named", 5, { text: "", ...file(seed, "text/plain") }),
+      msg("m_typed", 6, { text: "", ...file("a.bin", "application/nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5") }),
+      msg("m_file", 7, { text: "", ...file("a.txt", "text/plain") }),
+    ]);
+    Object.assign(node, { forwardMessages: vi.fn(async () => ({ results: [{ messageIds: ["me:1:0"], sent: [], error: null }] })) });
+    const engine = node as unknown as Record<"forwardMessages", ReturnType<typeof vi.fn>>;
+    for (const id of ["m_named", "m_typed"]) {
+      await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: [id], to: ["Bob"] }), id).rejects.toMatchObject({ code: "confirm", details: { messageId: id } });
+      await expect(callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: [id], to: ["chat-two"] } }), id).rejects.toMatchObject({ code: "confirm" });
+    }
+    expect(engine.forwardMessages).not.toHaveBeenCalled();
+    // A plain file goes as it did; with force, the others go too.
+    await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m_file"], to: ["Bob"] });
+    await callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: ["m_file"], to: ["chat-two"] } });
+    for (const id of ["m_named", "m_typed"]) {
+      await callApi(ctx, "chat.forward", { chat: "Alice", messages: [id], to: ["Bob"], force: true });
+      await callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: [id], to: ["chat-two"] }, force: true });
+    }
+    expect(engine.forwardMessages).toHaveBeenCalledTimes(6);
   });
 });
 
@@ -1600,6 +1644,15 @@ describe("settings", () => {
       [{ hyperdhtRelay: "ftp://x" }, "Use a wss:// relay address", "hyperdhtRelay: use a wss:// relay address"],
       // One past what a contact reads (pairedTransports.ts relayUrlTooLong).
       [{ irohRelays: ["https://x.example/long"] }, "Use a shorter relay address: https://x.example/long", "irohRelays: use a shorter relay address: https://x.example/long"],
+      // A relay's user:password@ and ?query are not said back.
+      [{ irohRelays: ["https://alice:s3cret@iroh.lan/?token=t0k"] }, "Not a relay address: https://alice:s3cret@iroh.lan/?token=t0k", "irohRelays: not a relay address: https://iroh.lan/"],
+      [{ hyperdhtRelay: "wss://alice:s3cret@relay.lan/#t0k" }, "Not a relay address: wss://alice:s3cret@relay.lan/#t0k", "hyperdhtRelay: not a relay address: wss://relay.lan/"],
+      // No scheme at all: the user and password still go unsaid.
+      [{ irohRelays: ["user:pw@relay.example"] }, "Not a relay address: user:pw@relay.example", "irohRelays: not a relay address: relay.example"],
+      // A ? or # before the last @: that @ may be in the password or in the query, so neither is said, only the scheme.
+      [{ irohRelays: ["https://alice:s3cr#et@relay.example"] }, "Not a relay address: https://alice:s3cr#et@relay.example", "irohRelays: not a relay address: https://…"],
+      [{ irohRelays: ["https://relay.example.org/?user=me@example.org&token=s3cr3t"] }, "Not a relay address: https://relay.example.org/?user=me@example.org&token=s3cr3t", "irohRelays: not a relay address: https://…"],
+      [{ hyperdhtRelay: "wss://relay.example.org/#a@s3cr3t" }, "Not a relay address: wss://relay.example.org/#a@s3cr3t", "hyperdhtRelay: not a relay address: wss://…"],
     ];
     for (const [patch, engine, said] of refusals) {
       node.updateSettings.mockRejectedValueOnce(new Error(engine));
@@ -1614,14 +1667,27 @@ describe("settings", () => {
       [["ftp://x"], "relays: not a relay address: ftp://x"],
       [["ftp://relay.example.org"], "relays: use an https:// relay address: ftp://relay.example.org"],
       [["wss://relay.example.org", "notaurl"], "relays: use an https:// relay address: wss://relay.example.org"],
+      [["wss://alice:s3cret@relay.example.org/?token=t0k"], "relays: not a relay address: wss://relay.example.org/"],
+      [["https://alice:s3cr?et@relay.example"], "relays: not a relay address: https://…"],
     ];
     for (const [relays, said] of refusals) {
       await expect(callApi(ctx, "settings.set", { relays })).rejects.toMatchObject({ code: "bad_request", message: said });
     }
+    // A usable one next to a bad one: the engine kept the usable one and dropped the rest unsaid (exit 0), while
+    // irohRelays and the app's Settings refuse the list. A blank entry is no relay, as a blank line in the app.
+    await expect(callApi(ctx, "settings.set", { relays: ["https://relay.example.org", "garbage"] })).rejects.toMatchObject({ code: "bad_request", message: "relays: not a relay address: garbage" });
     expect(node.updateSettings).not.toHaveBeenCalled();
-    // A usable one next to them is the engine's to keep (it drops the rest), as before.
-    await callApi(ctx, "settings.set", { relays: ["https://relay.example.org", "ftp://x"] });
-    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { relays: ["https://relay.example.org", "ftp://x"] } });
+    await callApi(ctx, "settings.set", { relays: ["https://relay.example.org", " "] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { relays: ["https://relay.example.org", " "] } });
+  });
+
+  it("count an Iroh relay given twice once, and say more than the engine keeps as a wrong value", async () => {
+    // Six were `engine` (exit 1), and a relay given twice counted twice toward the five.
+    const { ctx, node } = fake();
+    await callApi(ctx, "settings.set", { irohRelays: ["https://a.example", "https://b.example", "https://a.example"] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { irohRelays: ["https://a.example", "https://b.example"] } });
+    node.updateSettings.mockRejectedValueOnce(new Error("Use at most five Iroh relays"));
+    await expect(callApi(ctx, "settings.set", { irohRelays: ["1", "2", "3", "4", "5", "6"].map((n) => `https://${n}.example`) })).rejects.toMatchObject({ code: "bad_request", message: "irohRelays: use at most five Iroh relays" });
   });
 
   it("take TCP and TLS TURN servers for the apps, and say the CLI does not use them", async () => {
@@ -1632,6 +1698,9 @@ describe("settings", () => {
     const tcp = await callApi(ctx, "settings.set", { iceServers: [turn("turn:t.example.org:3478, turn:t.example.org:3478?transport=tcp"), turn("turns:t.example.org:443?transport=tcp")] }) as Record<string, unknown>;
     expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { iceServers: [turn("turn:t.example.org:3478, turn:t.example.org:3478?transport=tcp"), turn("turns:t.example.org:443?transport=tcp")] } });
     expect(tcp.warning).toBe("The CLI reaches TURN over UDP only: it does not use turn:t.example.org:3478?transport=tcp, turns:t.example.org:443?transport=tcp (the apps do). Add a turn: server over UDP for the CLI");
+    // A user and password in the address, which the check takes, are not said.
+    const login = await callApi(ctx, "settings.set", { iceServers: [turn("turn:u:s3cr3t@t.example.org:3478?transport=tcp, turns:u:s3cr3t@t.example.org:443")] }) as Record<string, unknown>;
+    expect(login.warning).toBe("The CLI reaches TURN over UDP only: it does not use turn:t.example.org:3478?transport=tcp, turns:t.example.org:443 (the apps do). Add a turn: server over UDP for the CLI");
   });
 });
 
@@ -1721,5 +1790,22 @@ describe("chat transport", () => {
     const unknown = withChat({ availableTransports: ["webrtc/1", "hyperdht/1"], peerTransports: [] });
     for (const transport of ["webrtc", "auto", "dht"]) await callApi(unknown.ctx, "chat.transport", { chat: "Alice", transport });
     expect(unknown.node.setChatTransport).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("settings set relays or irohRelays while a variable pins them", () => {
+  // runtime/engine.ts pins only on a non-empty entry: unset, blank or commas alone leave the setting in use.
+  it("says so only when the variable names a relay", async () => {
+    const { ctx } = fake();
+    try {
+      for (const [key, variable, value] of [["relays", "GHOSTLY_PKARR_RELAYS", ["https://relay.example"]], ["irohRelays", "GHOSTLY_IROH_RELAYS", ["https://iroh.example/"]]] as const) {
+        for (const unpinned of ["", "  ", ",", " , ", ",,"]) {
+          vi.stubEnv(variable, unpinned);
+          expect(await callApi(ctx, "settings.set", { [key]: value }), JSON.stringify(unpinned)).not.toHaveProperty("warning");
+        }
+        vi.stubEnv(variable, " , http://127.0.0.1:9");
+        expect(await callApi(ctx, "settings.set", { [key]: value })).toHaveProperty("warning", `${variable} is set where this profile runs, and only its relays are used: ${key} is kept for when the profile runs without it`);
+      }
+    } finally { vi.unstubAllEnvs(); }
   });
 });

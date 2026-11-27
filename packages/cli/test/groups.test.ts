@@ -554,16 +554,19 @@ describe("group call", () => {
       ["wss://call.example.com", "\"wss://call.example.com\" is not an https origin: a call node is like https://call.example.com"],
       ["call.example.com", "\"call.example.com\" is not an https origin: a call node is like https://call.example.com"],
       // Before: told "not an https origin" (no word of the limit), and capitals or :443 of a path, query or trailing /.
-      [`https://${"a".repeat(200)}.com`, `"https://${"a".repeat(200)}.com" is too long: a call node is an https origin of at most 200 characters`],
-      [longOrigin, `"${longOrigin}" is too long: a call node is an https origin of at most 200 characters`],
+      // A word that long is described, not said back (agents#8585).
+      [`https://${"a".repeat(200)}.com`, "(a 212-character word) is too long: a call node is an https origin of at most 200 characters"],
+      [longOrigin, "(a 202-character word) is too long: a call node is an https origin of at most 200 characters"],
       ["HTTPS://Call.Example.com", "\"HTTPS://Call.Example.com\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
       ["https://call.example.com:443", "\"https://call.example.com:443\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
       // A short origin under a long path is told that origin, not the limit.
-      [`https://call.example.com/${"p".repeat(200)}`, `"https://call.example.com/${"p".repeat(200)}" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com`],
+      [`https://call.example.com/${"p".repeat(200)}`, "(a 225-character word) is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
       ["https://call.example.com/sfu", "\"https://call.example.com/sfu\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
       ["https://call.example.com/", "\"https://call.example.com/\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
       ["https://Call.Example.com:443", "\"https://Call.Example.com:443\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
-      ["https://call.example.com?x=1", "\"https://call.example.com?x=1\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      // A query or a user:password@ (a node's token or credentials) is not said back (agents#8585).
+      ["https://call.example.com?x=1", "\"https://call.example.com\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      ["https://alice:hunter2@call.example.com", "\"https://call.example.com\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
     ] as const) await expect(callApi(ctx, "group.call", { group: "Thursday", sfu }), sfu).rejects.toMatchObject({ code: "bad_request", message });
     expect(setGroupCall).not.toHaveBeenCalled();
     // A port that is not the default one is part of the origin.
@@ -672,6 +675,25 @@ describe("a group not joined yet, said the same by every command", () => {
       await expect(callApi(ctx, "group.typing", { group: ref }), ref).rejects.toMatchObject({ code: "refused", message });
       await expect(callApi(ctx, "group.rotate", { group: ref }), ref).rejects.toMatchObject({ code: "refused", message });
       await expect(callApi(ctx, "group.leave", { group: ref, yes: true }), ref).rejects.toMatchObject({ code: "engine", message: out });
+    }
+  });
+
+  it("edit and delete --everyone say it too, not that the message is not there", async () => {
+    // Found in a bug hunt: an invitation holds no message, so both answered "No message … in group" (not_found, exit 3),
+    // as if the id were mistyped, where send, react and pin named the way in.
+    for (const [held, ref, message] of [
+      [invited, "Lab group", "You are not in Lab group yet: ghostly group accept 'Lab group' joins it"],
+      [knocking, knocking.id, "You are not in this group yet: you opened its link, and no member's app has let you in"],
+      [takenBack, "Lab group", "Its invitation to Lab group was taken back: ghostly group decline 'Lab group' drops it"],
+    ] as const) {
+      const ctx = notIn(held);
+      const node = (ctx as unknown as { runtime: { server: { node: Record<string, unknown> } } }).runtime.server.node;
+      const removeMessage = vi.fn(async () => ({ error: null, e: 1 }));
+      Object.assign(node, { getMessage: vi.fn(async () => undefined), editMessage: vi.fn(async () => ({ error: "You are not in this group", refused: true })), removeMessage });
+      // Same code as before (not_found, exit 3): only the words change.
+      await expect(callApi(ctx, "group.edit", { group: ref, message: "m1", text: "fixed" }), ref).rejects.toMatchObject({ code: "not_found", message });
+      await expect(callApi(ctx, "chat.delete", { chat: `group:${held.id}`, message: "m1", everyone: true }), ref).rejects.toMatchObject({ code: "not_found", message: message.replace(`'${ref}'`, `group:${held.id}`) });
+      expect(removeMessage).not.toHaveBeenCalled();
     }
   });
 

@@ -1,16 +1,17 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { connect } from "node:net";
-import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { dirname, sep } from "node:path";
 import packageJson from "../package.json" with { type: "json" };
 import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, shownWord, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaemon, notTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
-import { here, inRange, INPUT_BYTES, listAtMost, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
+import { callRef } from "./commands/calls";
+import { fileHere, here, inRange,INPUT_BYTES, listAtMost, localStat, noteTerminalRead, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
-import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
+import { asCliError, CliError, type ErrorCode, EXIT, localFileError, secretFileError, SINGLE_DEVICE } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { identityWaitLines } from "./identityWait";
@@ -174,7 +175,16 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
   // A usage report to every 1:1 chat (`--all`) needs no group.
   if (method === "usage.send") return params.all === true;
   if (chatOrGroup(method, params)) return false;
-  return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
+  return method.startsWith("chat.") || chatFileOnly(method, params) || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
+}
+
+/**
+ * A 1:1 chat's file named by its id alone (`file save <file>`, `file wait`, `file accept`…): the id starts with its chat's
+ * (`<chat>-in-`, `<chat>-out-`), so the call is about that chat, as with `<chat>` given, and `startNamedChats` starts it.
+ * Read as about none, a one-shot started every saved chat and group: with 20 chats, 20 relay requests and 0.6-2 s more.
+ */
+function chatFileOnly(method: string, params: Record<string, unknown>): boolean {
+  return method.startsWith("file.") && params.chat === undefined && typeof params.file === "string" && !params.file.startsWith("group-");
 }
 
 /** A command whose `chat` may name a group as well: a one-shot for it starts the groups' sessions. */
@@ -211,7 +221,7 @@ export function newChatOnly(method: string): boolean {
  * whose chat may name a group (`chatOrGroup`: a bot's `task send`): the groups start for it, the other 1:1 chats do not.
  */
 export function oneChatOnly(method: string, params: Record<string, unknown>): boolean {
-  return newChatOnly(method) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
+  return newChatOnly(method) || chatFileOnly(method, params) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
 }
 
 /**
@@ -263,6 +273,14 @@ const NO_HISTORY_WRITES: ReadonlySet<string> = new Set([
   "status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add", "identity.cancel",
   "app.serve", "app.unserve", "call.answer", "call.flush", "wallet.address", "lightning.rename", "lightning.default", "wallet.remove",
 ]);
+
+/**
+ * Calls that name their thing by an id of no chat (a proof, a service, a payment, a call) and need the chats once it is
+ * found (a proof is withdrawn from each; a call may ring in any): a one-shot for one leaves every saved chat and group
+ * unstarted, looks the id up, and starts them only when it names something (api.ts `startOnceFound`). Each started every
+ * saved chat first, then said not_found for a typo: with 20 chats, 20 relay requests and 0.4-0.7 s more.
+ */
+const LOOKED_UP_FIRST: ReadonlySet<string> = new Set(["identity.remove", "service.enable", "service.remove", "payment.reclaim", "call.hangup"]);
 
 /** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`, `NO_HISTORY_WRITES`). */
 export function readsNoHistory(method: string, params: Record<string, unknown> = {}): boolean {
@@ -341,16 +359,30 @@ export function offlineCall(method: string, params: Record<string, unknown>): bo
 }
 
 /** How long a daemon gets to answer before a command gives up: a read is in memory (15 s); a call that waits for the
- *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin; anything else may take as long
- *  as it takes, once the daemon has answered the version check sent ahead of it (session()). */
+ *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin (a file send, plus the time to
+ *  copy the file in); anything else may take as long as it takes, once the daemon has answered the version check sent
+ *  ahead of it (session()). */
 const ANSWER_MS = 15_000;
 export function answerWithin(method: string, params: Record<string, unknown>): number | undefined {
   // A `--timeout` outside the daemon's range (1 to 3600 s, 86 400 for `chat wait` and `file wait`) is refused by the
   // daemon at once (bad_request); the deadline only has to be a timer Node takes (-10 s fired at once, 1e12 after 1 ms).
   const waits = typeof params.timeout === "number" ? Math.min(Math.max(params.timeout, 1), 86_400) : waitsFor(method, params);
-  if (waits !== undefined) return (waits + 10) * 1000;
+  if (waits !== undefined) return (waits + 10 + stagingSeconds(method, params)) * 1000;
   if (readOnly(method, params)) return ANSWER_MS;
   return undefined;
+}
+
+/**
+ * A `file send` copies the file into the profile before its wait starts (files.ts `stageWhileAsked`), 6-30 s for 1 GiB:
+ * its deadline adds a second per `STAGED_BYTES_PER_SECOND` of the file, well past that. Counted against the wait's
+ * own, a large file with a short `--timeout` failed as "The daemon did not answer" (exit 4) while it was still copied
+ * in, and the copy then stopped with the command gone: nothing was sent. A file it cannot read adds nothing (the
+ * daemon refuses it at once).
+ */
+const STAGED_BYTES_PER_SECOND = 8 * 1024 * 1024;
+function stagingSeconds(method: string, params: Record<string, unknown>): number {
+  if (method !== "file.send" || typeof params.path !== "string") return 0;
+  try { return Math.ceil(statSync(params.path).size / STAGED_BYTES_PER_SECOND); } catch { return 0; }
 }
 
 /**
@@ -363,12 +395,15 @@ async function session(g: Globals, options: RuntimeOptions, again = true, first?
   const anew = again ? () => session(g, options, false) : undefined;
   const client = await connectDaemon(g.paths);
   if (client) return throughDaemon(client, anew);
-  const [, { callApi, refuseBeforeStart, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
+  const [, { callApi, refuseBeforeStart, startNamedChats, startOnceFound }] = await Promise.all([engineHost(), engineApi()]);
   if (first) await refuseBeforeStart(first.method, first.params);
-  const host = await openOneShot(g, options);
+  const lookup = first && LOOKED_UP_FIRST.has(first.method) ? first.method : undefined;
+  const host = await openOneShot(g, lookup ? { ...options, deferChats: true } : options);
   if (host instanceof DaemonClient) return throughDaemon(host, anew);
+  let looked = false;
   const call = async (m: string, p?: unknown) => {
-    if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, p as Record<string, unknown>);
+    if (m === lookup && !looked && p && typeof p === "object") { await startOnceFound(host.ctx, m, p as Record<string, unknown>); looked = true; }
+    else if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, m, p as Record<string, unknown>, READS.has(m));
     return callApi(host.ctx, m, p ?? {});
   };
   return { mode: "one-shot", call, close: () => host.close(), abort: () => host.close() };
@@ -440,8 +475,11 @@ function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Se
   };
 }
 
-/** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
-const HOLDER_WAIT_MS = 5_000;
+/**
+ * How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second.
+ * GHOSTLY_TEST_HOLDER_WAIT_MS: a test of one-shots at once, whose holders on a loaded CI runner kept it past 5 s.
+ */
+const HOLDER_WAIT_MS = Number(process.env.GHOSTLY_TEST_HOLDER_WAIT_MS) || 5_000;
 /** How long it waits for the profile's daemon that is starting (`startingDaemon`): its engine takes seconds on a large profile. */
 const STARTING_WAIT_MS = 30_000;
 /**
@@ -591,6 +629,8 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
  * answered "The daemon went away".
  */
 async function readStdin(onData?: () => void): Promise<string> {
+  // A reader that refuses a terminal says so before it gets here; the others say how to end what is typed.
+  noteTerminalRead();
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of process.stdin) {
@@ -614,7 +654,9 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
   ["profile show", "The name contacts see, and whether it is shared"],
   ["profile set [--name <name>] [--share-profile | --no-share-profile] [--force]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
   ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out; any other space or line break at an end is refused"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
-  ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out"), use: o("boolean", "Make it the current profile") }],
+  ["profile restore <file> <new profile> [--passphrase-file f] [--use] [--copy]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out"), use: o("boolean", "Make it the current profile"), copy: o("boolean", "Restore it even when a profile here is the same person (both would act as one to contacts)") }],
+  // No device commands: `ghostly device …` says why (usage, exit 2), and the engine's device calls are refused alike.
+  ["device", SINGLE_DEVICE],
   ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds it waits for a command that holds the profile, and --detach for it to start (default 60)") }],
   ["daemon status [--timeout s]", "Whether a daemon runs the profile, its version, and its socket (for the socket API)", { timeout: o("number", "Seconds to wait for its answer (default 15)") }],
   ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
@@ -844,7 +886,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
   const specs: Record<string, Record<string, OptionSpec>> = {
     create: { use: { type: "boolean", description: "" }, name: { type: "string", description: "" }, force: { type: "boolean", description: "" } },
     backup: { out: { type: "string", description: "" }, "passphrase-file": { type: "string", description: "" }, passphrase: { type: "boolean", description: "" }, light: { type: "boolean", description: "" } },
-    restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" } },
+    restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" }, copy: { type: "boolean", description: "" } },
     set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "", eitherWay: true }, force: { type: "boolean", description: "" } },
   };
   let parsed: Parsed;
@@ -932,18 +974,21 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       // A separator at its end names a folder: kept for the backup to refuse, as resolving the path drops it. Before,
       // "--out backups/" with no backups folder wrote the backup as a file named backups.
       const resolved = here(out) as string, path = (out.endsWith("/") || out.endsWith(sep)) && !resolved.endsWith(sep) ? `${resolved}${sep}` : resolved;
-      // The folder it goes in, as the backup checks it (backup.ts): a missing one is named before the profile opens.
-      if (!path.endsWith(sep) && !localStat(dirname(path)).isDirectory()) throw new CliError("not_found", `No such file or folder: ${dirname(path)}`);
-      const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: cleanEnds(await backupPassphrase(parsed.options["passphrase-file"]), parsed.options["passphrase-file"]), ...light };
+      // The folder it goes in, as the backup checks it (backup.ts): a missing one, or a file in its place, is named before the profile opens.
+      if (!path.endsWith(sep) && !localStat(dirname(path)).isDirectory()) throw new CliError("not_found", `${dirname(path)} is a file, not a folder`);
+      const passphrase = unsealed ? undefined : cleanEnds(await backupPassphrase(parsed.options["passphrase-file"]), parsed.options["passphrase-file"]);
+      const params = passphrase === undefined ? { path, noPassphrase: true, ...light } : { path, passphrase, ...light };
       const made = await withSession(g, (s) => s.call("profile.backup", params), { offline: true });
       if (unsealed) process.stderr.write("ghostly: Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
+      const lines = passphrase === undefined ? undefined : passphraseLines(passphrase, parsed.options["passphrase-file"]);
+      if (lines) process.stderr.write(`ghostly: ${lines}\n`);
       print(made);
       return;
     }
     case "restore": {
       const [given, name] = parsed.positionals;
-      if (!given || !name) throw new CliError("usage", `Missing <${given ? "new profile" : "file"}>: ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]`);
-      noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use]");
+      if (!given || !name) throw new CliError("usage", `Missing <${given ? "new profile" : "file"}>: ghostly profile restore <file> <new profile> [--passphrase-file f] [--use] [--copy]`);
+      noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use] [--copy]");
       // A backup made without a passphrase says so in its header: none is asked for, and the answer says it was not protected.
       const file = here(given) as string;
       const { backupFileProtection, restoreProfile } = await import("./backup");
@@ -962,7 +1007,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
       for (const signal of signals) process.on(signal, onSignal);
       let paths: Awaited<ReturnType<typeof restoreProfile>>;
-      try { paths = await restoreProfile(g.home, checkProfileName(name), file, passphrase, stop.signal); } catch (error) {
+      try { paths = await restoreProfile(g.home, checkProfileName(name), file, passphrase, stop.signal, parsed.options.copy === true); } catch (error) {
         // Said only when the stop is what ended it: one that came after the profile took its name restored it all the same.
         if (error === stop.signal.reason) process.stderr.write(`ghostly: ${words}\n`);
         throw error;
@@ -1027,7 +1072,7 @@ async function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): Pro
   if (file === "-" && process.stdin.isTTY) throw new CliError("usage", "--passphrase-file - reads stdin: pipe the passphrase in (… | ghostly profile …), or name a file");
   let value: string;
   if (file === "-") value = (await readStdin()).replace(/\r?\n$/, "");
-  else try { value = readFileSync(here(file) as string, "utf8").replace(/\r?\n$/, ""); } catch (error) { throw localFileError(error, file) ?? error; }
+  else try { value = readFileSync(here(file) as string, "utf8").replace(/\r?\n$/, ""); } catch (error) { throw secretFileError(error, file, "--passphrase-file", "the passphrase") ?? error; }
   if (!value) throw new CliError("bad_request", `${file === "-" ? "Stdin" : file} is empty: it holds the backup's passphrase`);
   return value;
 }
@@ -1049,6 +1094,20 @@ function cleanEnds(passphrase: string, file: unknown): string {
   const char = at === "ends" ? passphrase.at(-1)! : passphrase[0]!;
   const fileRule = typeof file === "string" ? " (one line break at its end is left out already)" : "";
   throw new CliError("bad_request", `The passphrase in ${source} ${at} with ${endName(char)}${fileRule}: the same passphrase typed or pasted would not open the backup. Take it out`);
+}
+
+/**
+ * A new backup's passphrase with a line break inside (`pass show x | ...`: the password, then notes on the next lines):
+ * every line seals the backup, so the first alone would not open it ("Wrong passphrase"). Said on stderr, the backup
+ * still made.
+ */
+function passphraseLines(passphrase: string, file: unknown): string | undefined {
+  const lines = passphrase.split(/\r\n|\r|\n/).length;
+  if (lines < 2) return undefined;
+  const [source, fix] = typeof file !== "string" ? ["GHOSTLY_BACKUP_PASSPHRASE", "Set it to one line."]
+    : file === "-" ? ["the passphrase on stdin", "Pipe in one line (e.g. pass show x | head -1)."]
+    : [`the passphrase file ${file}`, "Use a one-line file (e.g. pass show x | head -1)."];
+  return `${source} has ${lines} lines; all ${lines} are the passphrase. A restore needs all of them. ${fix}`;
 }
 
 /** Set on `startDetached`'s child: its parent waits for the profile and starts it again, so the child does not wait too. */
@@ -1200,11 +1259,16 @@ async function startedDaemon(g: Globals, seconds: number): Promise<DaemonClient 
   }
 }
 
-/** `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all). */
+/**
+ * `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all), at most a day, as the
+ * socket calls' waits (`answerWithin`): past about 24.8 days a Node timer fires after 1 ms, and `daemon stop` sent a
+ * healthy daemon SIGTERM at once.
+ */
 function seconds(parsed: Parsed, fallback: number): number {
   const value = parsed.options.timeout;
   if (value === undefined) return fallback;
   if (typeof value !== "number" || !(value > 0)) throw new CliError("usage", "--timeout takes a number of seconds above 0");
+  if (value > 86_400) throw new CliError("usage", `--timeout takes at most 86400 seconds (a day), not ${value}`);
   return value;
 }
 
@@ -1417,7 +1481,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
   checkTypes(types, (line) => process.stderr.write(line + "\n"));
   const from = (parsed.options.from as string[] | undefined) ?? [], groups = (parsed.options.group as string[] | undefined) ?? [];
-  const cursor = here(parsed.options.cursor);
+  const cursor = fileHere(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
   const starting = startAt(sinceOf(parsed.options), cursor, (line) => process.stderr.write(line + "\n")), since = starting.from;
@@ -1715,7 +1779,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     // terminal) as a join or a redeem says it, a usage error.
     try { params.credential = params.file === "-" ? await credentialFromStdin(readStdin, process.stdin.isTTY === true) : readInput(params.file as string); }
     // A file not there, a folder, one not allowed: said as every other file the CLI reads.
-    catch (error) { throw (error instanceof CliError && error) || localFileError(error, params.file as string) || new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { throw (error instanceof CliError && error) || secretFileError(error, params.file as string, "<file>", "the SD-JWT VC the issuer sent, or - to read it from stdin") || new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
     if (!params.credential) throw new CliError("bad_request", `${params.file as string} is empty: it holds the SD-JWT VC the issuer sent`);
     delete params.file;
   }
@@ -1756,7 +1820,7 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   failures = process.stderr;
   const parsed = parseArgs(argv, {}, idSlot({ args: ["call...?"] }), { command: "call pipe" });
   const g = globals(parsed);
-  const ref = parsed.positionals.join(" ") || undefined;
+  const ref = callRef(parsed.positionals.length ? parsed.positionals.join(" ") : undefined, "call pipe [<chat|call>]");
   const client = await connectDaemon(g.paths);
   if (!client) throw new CliError("unavailable", `No daemon runs profile ${g.profile}: calls need one (ghostly daemon --detach)`);
   let call: { call: string; audio: { socket: string; token: string; rate: number } | null };
@@ -1778,7 +1842,13 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   }
   const audio = call.audio;
   const socket = connect(audio.socket);
-  await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+  // The call ended between `call.get` and here: its socket is gone, or a file stays where nothing listens. It said
+  // "No such file or folder: the path", or Node's raw "connect ECONNREFUSED …".
+  await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); }).catch((error: unknown) => {
+    client.close();
+    const code = (error as { code?: unknown }).code;
+    throw code === "ENOENT" || code === "ECONNREFUSED" ? new CliError("not_found", `No call ${call.call}: it ended (ghostly call list)`) : error;
+  });
   // The call's token first: until it comes, the socket is nobody's (WISP 1100 § Calls).
   socket.write(`${audio.token}\n`);
   process.stderr.write(`ghostly: call ${call.call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);
@@ -1793,8 +1863,21 @@ async function callPipeCommand(argv: string[]): Promise<void> {
     process.stderr.write(`ghostly: call ${call.call}: nothing reads its audio any more; the call goes on\n`);
     socket.destroy();
   });
+  // Ctrl-C stops the pipe, not the call: it says so, with how to end the call, and leaves with 130 as a command stopped
+  // with Ctrl-C does. It died by the signal with no word, and the contact went on hearing silence.
+  let stopped = false;
+  process.once("SIGINT", () => {
+    stopped = true;
+    const words = `stopped (Ctrl-C); the call goes on (ghostly call hangup ${call.call} ends it)`;
+    process.stderr.write(`ghostly: call ${call.call}: ${words}\n`);
+    failures.write(jsonOut({ error: new CliError("interrupted", words[0].toUpperCase() + words.slice(1)).toJSON() }, pretty ? 2 : undefined) + "\n");
+    socket.destroy();
+    client.close();
+    exit(EXIT.interrupted);
+  });
   socket.pipe(process.stdout);
   socket.on("close", () => void (async () => {
+    if (stopped) return;
     if (!readerGone) process.stderr.write(`ghostly: call ${call.call}: ${await whyClosed()}\n`);
     client.close();
     exit(0);
@@ -1880,6 +1963,8 @@ export async function main(input: string[]): Promise<number> {
   if (first === "daemon") { await daemonCommand(argv.slice(1)); return -1; }
   if (first === "listen") { await listenCommand(argv.slice(1)); return -1; }
   if (first === "engine") { await engineCommand(argv.slice(1)); return 0; }
+  // A CLI profile is on this one device only: whatever follows `device`, the answer is why, and what to do instead.
+  if (first === "device") throw new CliError("usage", `${SINGLE_DEVICE} (ghostly help device)`);
   if (first === "settings") { await settingsCommand(second, argv.slice(2)); return 0; }
   if (two === "identity add") { await identityAddCommand(argv.slice(2)); return 0; }
   if (two === "call pipe") { await callPipeCommand(argv.slice(2)); return -1; }

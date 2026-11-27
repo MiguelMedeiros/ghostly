@@ -69,7 +69,7 @@ export const BLOCKS: Block[] = [
 
   // Transports
   b("webrtc", "transport", "WebRTC", ["100-transports", "101-webrtc"], "A data channel in the browser, the extension and the desktop app, except on Linux, whose webview has no WebRTC."),
-  b("iroh", "transport", "Iroh", ["100-transports", "102-iroh"], "QUIC bound to Ghostly authentication: direct between desktop apps, and relay only in the web app, extension and CLI, through n0's public relays unless you set others. A web chat reaches a desktop app this way."),
+  b("iroh", "transport", "Iroh", ["100-transports", "102-iroh"], "QUIC bound to Ghostly authentication: direct between desktop apps, and relay only in the web app, extension and CLI, through n0's public relays and Ghostly's own unless you set others. A web chat reaches a desktop app this way."),
   b("hyperdht", "transport", "HyperDHT", ["100-transports", "103-hyperdht"], "An authenticated Noise stream found through HyperDHT, between desktop apps and the CLI. The web app and extension reach it only through a relay you set: none runs by default."),
   b("dhttext", "transport", "DHT text", ["403-dht-text"], "The floor of every chat: very short text in DHT records when no live link is up. Bounded, not a mailbox."),
   b("tor", "transport", "Tor", [], "Reaching peers over Tor. Being considered, not planned.", ["adapter-roadmap"], "candidate-tor"),
@@ -124,7 +124,7 @@ export const BLOCKS: Block[] = [
   b("storage", "keep", `Storage: file${D}S3`, ["1000-storage", "1001-local-storage", "1002-s3-storage"], "Where sealed bundles wait: a file you keep or an S3-compatible bucket, which also holds messages for an away contact."),
 
   // Groups
-  b("groups", "groups", "Groups", ["900-group-sessions", "902-group-mesh", "903-group-community", "503-group-files"], "Two kinds: a private group of up to 32, and a community of up to 256 whose link anyone can open, let in by any member through hubs the members elect. Text, a picture, payments between members, and files and voice messages fetched from a member who has them; no calls. Keys change whenever someone leaves, so whoever is out reads nothing after. Web, extension, desktop and CLI."),
+  b("groups", "groups", "Groups", ["900-group-sessions", "902-group-mesh", "903-group-community", "503-group-files", "602-group-calls"], "Two kinds: a private group of up to 32, and a community of up to 256 whose link anyone can open, let in by any member through hubs the members elect. Text, a picture, payments between members, and files and voice messages fetched from a member who has them. Group calls in communities, through the node their admin names, not from the Linux desktop app or the CLI yet. Keys change whenever someone leaves, so whoever is out reads nothing after. Web, extension, desktop and CLI."),
   b("gossipsub", "groups", "GossipSub", ["901-gossipsub"], "A candidate distribution layer for larger groups, off the DHT."),
   b("mls", "groups", "MLS", [], "Group encryption by the MLS standard, for groups larger than the mesh or members who renew their own keys. Being considered, not planned.", ["adapter-roadmap"], "candidate-mls-group-encryption"),
 

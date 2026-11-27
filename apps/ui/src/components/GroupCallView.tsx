@@ -15,6 +15,7 @@ import { errorText } from "../lib/errorText";
 import { callWindowShown } from "../lib/serviceWindows";
 import { mediaProblemKeys } from "../lib/mediaProblemText";
 import { ownDirection } from "../lib/ownDirection";
+import { isolate } from "../lib/ownStatus";
 import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { DeviceMenu, DeviceNoticeBar } from "./CallOverlay";
 import { InfoButton } from "./layout/Section";
@@ -28,11 +29,13 @@ export interface GroupCallParticipant {
   mic: boolean;
   camera: boolean;
   screen: boolean;
+  /** Their shared screen carries its sound (a tab's or the system's); false while sharing a screen without it. */
+  screenSound?: boolean;
   speaking: boolean;
   /** What the group's admin took away from them in this call (WISP 602 § Moderation): off until the admin allows it. */
   byAdmin?: { mic: boolean; camera: boolean; screen: boolean };
   /** Played and shown here: the hook attaches none of them to the page itself. */
-  tracks: { audio?: MediaStreamTrack | null; camera?: MediaStreamTrack | null; screen?: MediaStreamTrack | null };
+  tracks: { audio?: MediaStreamTrack | null; camera?: MediaStreamTrack | null; screen?: MediaStreamTrack | null; screenAudio?: MediaStreamTrack | null };
 }
 
 /** The `useGroupCall` state the view draws. `local` is you; `participants` are everyone else. */
@@ -151,8 +154,8 @@ function TrackVideo({ track, fit, mirror }: { track: MediaStreamTrack; fit: "cov
   return <video ref={ref} autoPlay playsInline muted className={`absolute inset-0 w-full h-full bg-black ${fit === "contain" ? "object-contain" : "object-cover"}`} style={mirror ? { transform: "scaleX(-1)" } : undefined} />;
 }
 
-/** Someone's sound, on the chosen speaker. */
-function TrackAudio({ track, speaker }: { track: MediaStreamTrack; speaker?: string }) {
+/** Someone's sound (their voice, or their shared screen's), on the chosen speaker. */
+function TrackAudio({ track, speaker, testId = "group-call-audio" }: { track: MediaStreamTrack; speaker?: string; testId?: string }) {
   const ref = useRef<HTMLAudioElement>(null);
   useEffect(() => {
     if (!ref.current || typeof MediaStream !== "function") return;
@@ -165,7 +168,7 @@ function TrackAudio({ track, speaker }: { track: MediaStreamTrack; speaker?: str
   useEffect(() => {
     void applySpeaker(ref.current, speaker).catch(() => {});
   }, [speaker, track]);
-  return <audio ref={ref} autoPlay className="hidden" data-testid="group-call-audio" />;
+  return <audio ref={ref} autoPlay className="hidden" data-testid={testId} />;
 }
 
 /** Muted, or muted by the admin (`byAdmin`): ringed, and named so, on the tile and to a screen reader. */
@@ -205,6 +208,13 @@ function Tile({ person, you, kind, speaking, name, face, menu }: { person: Group
       <div className="absolute bottom-1.5 inset-x-1.5 flex items-center gap-1.5">
         {kind === "face" && (person.byAdmin?.mic ? <MutedMark label={t("calls.group.mutedByAdmin")} byAdmin /> : !person.mic && <MutedMark label={t("calls.group.muted")} />)}
         <span dir="auto" className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">{name}</span>
+        {/* What the others get of your screen's sound: all the system plays (but this page), or nothing when the
+            browser gave the picture alone (or the sound was left unticked). */}
+        {kind === "screen" && you && person.screenSound !== undefined && (
+          <span data-testid="group-call-screen-sound" data-sound={person.screenSound} className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">
+            {t(person.screenSound ? "calls.sharing.withSound" : "calls.sharing.noSound")}
+          </span>
+        )}
       </div>
       {menu}
     </div>
@@ -254,8 +264,10 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
     () => (phone
       ? touch ? { x: window.innerWidth - 280, y: window.innerHeight - 272, w: 264, h: 168 } : { x: window.innerWidth - 206, y: window.innerHeight - 240, w: 190, h: 136 }
       : { x: window.innerWidth - 364, y: window.innerHeight - 316, w: 340, h: 220 }),
-    { enabled: mini, minWidth: touch ? 264 : 190, minHeight: touch ? 168 : 128 },
+    // And with a phone's keyboard up, as there: above the message field, or a one-line bar over the chat's header.
+    { enabled: mini, minWidth: touch ? 264 : 190, minHeight: touch ? 168 : 128, keyboard: touch },
   );
+  const compact = mini && miniWindow.compact;
   const box = miniWindow.boxProps.ref;
   useEffect(callWindowShown, []);
   useTabTrap(box, !mini);
@@ -285,18 +297,39 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   const shown = (p: GroupCallParticipant) => (p === local || !groupNameOf ? p.name : groupNameOf(p.identity));
   const nameOf = (p: GroupCallParticipant) => (p === local ? t("calls.you") : shown(p));
   const order = useShareOrder(everyone.filter((p) => p.screen && p.tracks.screen).map((p) => p.identity));
-  const presenter = everyone.find((p) => p.identity === order[order.length - 1]) ?? null;
-  // The other screens are tiles beside the faces.
-  const otherScreens = order.slice(0, -1).map((id) => everyone.find((p) => p.identity === id)!);
+  // The screen picked from the side stays large while others start and stop; once it stops, the latest is again.
+  const [picked, setPicked] = useState<string | null>(null);
+  if (picked && !order.includes(picked)) setPicked(null);
+  const large = picked && order.includes(picked) ? picked : order[order.length - 1];
+  const presenter = everyone.find((p) => p.identity === large) ?? null;
+  // The other screens are tiles beside the faces, each a button that shows it large.
+  const otherScreens = order.filter((id) => id !== large).map((id) => everyone.find((p) => p.identity === id)!);
+  // The picked tile goes from the side: the focus goes to the one that took its place there, to switch back.
+  const swapped = useRef<string | null>(null);
+  useEffect(() => {
+    const id = swapped.current;
+    swapped.current = null;
+    if (!id) return;
+    [...(box.current?.querySelectorAll<HTMLElement>("[data-testid=group-call-show-screen]") ?? [])].find((b) => b.dataset.identity === id)?.focus({ preventScroll: true });
+  }, [large, box]);
+  const show = (id: string) => {
+    swapped.current = large ?? null;
+    setPicked(id);
+  };
   // The admin's menu, on the others' faces in the whole window: the small one has no room for it.
   const menuOf = (p: GroupCallParticipant) => moderation && !mini && p !== local
     ? <TileModerationMenu identity={p.identity} name={shown(p)} moderation={moderation} host={box} /> : undefined;
   const faces = everyone.map((p) => (
     <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} face={shown(p)} menu={menuOf(p)} />
   ));
-  const screenTiles = otherScreens.map((p) => (
-    <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(p) })} face={shown(p)} />
-  ));
+  const screenTiles = otherScreens.map((p) => {
+    const label = p === local ? t("calls.group.showYourScreen") : t("calls.group.showScreen", { name: isolate(nameOf(p)) });
+    const button = (
+      <button type="button" onClick={() => show(p.identity)} data-testid="group-call-show-screen" data-identity={p.identity} aria-label={label} title={label}
+        className="absolute inset-0 z-10 cursor-pointer rounded-xl hover:bg-white/10 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-accent" />
+    );
+    return <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(p) })} face={shown(p)} menu={button} />;
+  });
   // The small window shows one tile: the screen being shared, or else whoever speaks.
   const focus = presenter ?? everyone.find((p) => p.identity === activeSpeaker) ?? participants[0] ?? local;
   const columns = gridColumns(faces.length + screenTiles.length);
@@ -312,6 +345,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       {...miniWindow.boxProps}
       data-testid="group-call"
       data-mini={mini}
+      data-compact={compact || undefined}
       data-count={everyone.length}
       {...(mini ? {} : { role: "dialog", "aria-modal": true, "aria-label": groupName, tabIndex: -1 })}
       className={
@@ -320,7 +354,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
           : "fixed inset-0 max-md:top-6 max-md:rounded-t-2xl max-md:border-t max-md:border-border z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col focus:outline-none"
       }
     >
-      {mini && CORNERS.map((corner) => <div key={corner} className={`float-grip float-grip-${corner}`} {...miniWindow.handleProps(corner)} />)}
+      {mini && !compact && CORNERS.map((corner) => <div key={corner} className={`float-grip float-grip-${corner}`} {...miniWindow.handleProps(corner)} />)}
+      {compact && <p dir="auto" className="call-compact-name min-w-0 truncate text-text-primary text-sm font-medium">{groupName}</p>}
       <button
         onClick={() => (pinned ? onReturnToChat?.() : setMini(!mini))}
         className="call-resize absolute top-4 left-4 z-20 w-11 h-11 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center cursor-pointer transition-colors"
@@ -335,9 +370,10 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       <div role="status" className="sr-only" data-testid="group-call-news">{news.map((line) => <p key={line}>{line}</p>)}</div>
 
       {participants.map((p) => p.tracks.audio && <TrackAudio key={p.identity} track={p.tracks.audio} speaker={devices?.speaker} />)}
+      {participants.map((p) => p.tracks.screenAudio && <TrackAudio key={`${p.identity}-screen`} track={p.tracks.screenAudio} speaker={devices?.speaker} testId="group-call-screen-audio" />)}
 
       {mini ? (
-        <div className="absolute inset-0 grid">
+        <div className="call-mini-tile absolute inset-0 grid">
           {focus === presenter ? (
             <Tile person={focus} you={focus === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(focus) })} face={shown(focus)} />
           ) : (
@@ -346,13 +382,11 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         </div>
       ) : (
         <>
-          <div className="call-top flex items-center justify-center gap-1.5 px-16 pt-6 pb-2">
+          {/* On a phone the row keeps 12 px (the ⓘ's grown side) from the Small window button and from the "N removed" chip. */}
+          <div className="call-top flex items-center justify-center gap-1.5 max-md:gap-3 px-16 max-md:px-[72px] pt-6 pb-2">
             <p dir="auto" className="min-w-0 truncate text-text-primary font-medium">{groupName}</p>
-            <button type="button" data-testid="group-call-info" aria-expanded={info} aria-controls={infoId} aria-label={t("common.moreInfo")} title={t("common.moreInfo")}
-              onClick={() => setInfo(!info)}
-              className="grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted transition-colors hover:text-accent aria-expanded:text-accent">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
-            </button>
+            {/* Its phone hit area reaches up into the window's top, not down onto the tiles drawn over it 8 px below. */}
+            <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="group-call-info" className="max-md:before:-top-4 max-md:before:-bottom-2" />
             {moderation && <RemovedFromCall moderation={moderation} nameOf={(identity) => (groupNameOf ? groupNameOf(identity) : identity)} host={box} />}
           </div>
           {info && <p id={infoId} data-testid="group-call-info-text" className="mx-auto max-w-md px-4 pb-2 text-center text-xs text-text-secondary break-words">{t("calls.group.info")}</p>}
@@ -403,7 +437,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       <div className="call-controls absolute bottom-12 max-md:bottom-[calc(2rem+env(safe-area-inset-bottom))] left-0 right-0 flex items-center justify-center gap-6 max-md:gap-8 z-10">
         <button onClick={held?.mic ? undefined : onToggleMic} {...(held?.mic && { "aria-disabled": true })} data-testid="group-call-mic"
           title={held?.mic ? t("calls.group.mutedByAdmin") : local.mic ? t("calls.mute") : t("calls.unmute")}
-          className={`${roundButton} ${heldLook} ${local.mic ? "bg-white/10 text-white hover:bg-white/20" : "bg-danger/30 text-danger"}`}>
+          className={`call-compact-keep ${roundButton} ${heldLook} ${local.mic ? "bg-white/10 text-white hover:bg-white/20" : "bg-danger/30 text-danger"}`}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             {local.mic
               ? <><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" /></>
@@ -432,7 +466,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         )}
         {anyHeld && !mini && <InfoButton open={heldInfo} onToggle={() => setHeldInfo(!heldInfo)} controls={heldInfoId} testId="group-call-by-admin-info" className="text-white/80" />}
         <button onClick={onLeave} data-testid="group-call-leave" title={t("calls.group.leave")}
-          className="w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer">
+          className="call-compact-keep w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
             <line x1="23" y1="1" x2="1" y2="23" />

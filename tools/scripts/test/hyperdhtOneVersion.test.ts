@@ -16,6 +16,8 @@ const json = (path: string) => JSON.parse(readFileSync(join(root, path), "utf8")
 /** The folders that depend on hyperdht, each with the lockfile that resolves it. */
 const COPIES = [
   { folder: "packages/browser", lock: "package-lock.json" },
+  // The root's own tests and scripts (tools/scripts/test) import it too.
+  { folder: ".", lock: "package-lock.json" },
   { folder: "packages/cli", lock: "package-lock.json" },
   { folder: "native/transports/hyperdht", lock: "native/transports/hyperdht/package-lock.json" },
   { folder: "infra/services/hyperdht-relay", lock: "infra/services/hyperdht-relay/package-lock.json" },
@@ -38,7 +40,7 @@ it("every lockfile resolves that version, and records it as the packages pin it"
   for (const { folder, lock } of COPIES) {
     const packages = json(lock).packages;
     expect(`${lock} ${packages["node_modules/hyperdht"].version}`).toBe(`${lock} ${version}`);
-    const own = packages[lock === "package-lock.json" ? folder : ""];
+    const own = packages[lock === "package-lock.json" && folder !== "." ? folder : ""];
     expect(`${folder} ${own.dependencies?.hyperdht ?? own.devDependencies?.hyperdht}`).toBe(`${folder} ${version}`);
   }
 });

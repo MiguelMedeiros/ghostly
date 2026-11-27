@@ -28,7 +28,7 @@ export function CopyButton({ text, label, testId, className = "" }: { text: stri
       aria-label={said === "copied" ? t("chat.rich.copied") : said === "failed" ? refused : name}
       title={said === "failed" ? refused : undefined}
       onClick={() => { void copyMessageText(text).then(() => say("copied"), () => say("failed")); }}
-      className={`rich-action ${className}`}
+      className={`rich-action tap-target ${className}`}
     >
       {said === "copied" ? t("chat.rich.copied") : said === "failed" ? t("chat.rich.notCopied") : t("chat.rich.copy")}
     </button>

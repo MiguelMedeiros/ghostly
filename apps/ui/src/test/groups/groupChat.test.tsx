@@ -224,6 +224,19 @@ describe("GroupChat: what the header says", () => {
     expect(screen.queryByText("Chat list")).not.toBeInTheDocument();
   });
 
+  // The band goes with the button: Accept there hands the focus to the ⋮, a Decline left it on the page's body.
+  it.each([["Decline", "group-decline", false], ["Delete of a taken-back invitation", "group-taken-back-delete", true]] as const)(
+    "%s by keyboard on the band over a member's kept history gives the focus to the group's ⋮", async (_, button, takenBack) => {
+      const { user, engine } = openGroup(groupView({ status: "removed", canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false, takenBack } }),
+        [stored({ id: "old", text: "from before", member: ALICE })]);
+      engine.on("declineGroupInvitation", () => { fakeEngine.update({ groups: [groupView({ status: "removed", canSend: false })] }); });
+      await screen.findByText("from before");
+      act(() => within(screen.getByTestId("group-invitation")).getByTestId(button).focus());
+      await user.keyboard("{Enter}");
+      await vi.waitFor(() => expect(screen.queryByTestId("group-invitation")).not.toBeInTheDocument());
+      expect(screen.getByTestId("group-options")).toHaveFocus();
+    });
+
   it("says the group is gone when this device does not have it, with a way back to the chat list", async () => {
     // Deleted on another device, say: the group page has no tabs, and an installed iPhone web app no system back.
     const { user } = openGroup(null);
@@ -690,12 +703,60 @@ describe("GroupChat: out of the group", () => {
     expect(screen.getByTestId("group-rejoin-cancel")).toHaveFocus();
   });
 
+  // On a phone, beside both buttons, the line was squeezed to what they left: 78 px in Spanish on a 375 px screen, 23 px
+  // on a 320 px one (Chromium, the app's CSS). The row wraps, the line keeps a 12rem basis, and the buttons go under it together.
+  it("removed from a community and knocking again: on a phone the line nobody answered keeps its width, Try again and Cancel joining go under it together", () => {
+    openGroup({ ...knockingAgain(), invitation: { ...knockingAgain().invitation!, unanswered: true } });
+    const notice = screen.getByTestId("group-notice"), line = within(notice).getByTestId("group-rejoin-line");
+    expect(line).toHaveTextContent("This link did not answer");
+    const row = line.parentElement!;
+    expect(row).toHaveClass("flex", "flex-wrap");
+    expect(line).toHaveClass("flex-[1_1_12rem]");
+    const buttons = within(notice).getByTestId("group-link-retry").parentElement!;
+    expect(buttons.parentElement).toBe(row);
+    expect(buttons).toHaveClass("flex", "flex-wrap");
+    expect(within(buttons).getByTestId("group-rejoin-cancel")).toBeInTheDocument();
+  });
+
   it("removed from a community and knocking again: a cancel the engine refuses is said, and the knock goes on", async () => {
     const { user, engine } = openGroup(knockingAgain());
     engine.on("declineGroupInvitation", () => { throw new Error("No invitation to decline"); });
     await user.click(within(screen.getByTestId("group-notice")).getByRole("button", { name: "Cancel joining" }));
     expect(await within(screen.getByTestId("group-notice")).findByRole("alert")).toBeInTheDocument();
     expect(within(screen.getByTestId("group-notice")).getByTestId("group-rejoin-cancel")).toBeInTheDocument();
+  });
+
+  // The whole notice was the live region: each step read its title, its body and Cancel joining again.
+  it("removed from a community and knocking again: one hidden line says each step, not the notice and its button", () => {
+    // Knocking since now: not yet the two-minute line.
+    const at = (stage: GroupJoinStage) => ({ ...knockingAgain(stage), invitation: { ...knockingAgain(stage).invitation!, since: Date.now() } });
+    const view = openGroup(at("knocking"));
+    const notice = screen.getByTestId("group-notice");
+    expect(notice).not.toHaveAttribute("role");
+    const live = within(notice).getByTestId("group-rejoin-live");
+    expect(live).toHaveAttribute("role", "status");
+    expect(live).toHaveTextContent("Waiting to be let in");
+    for (const [stage, said] of [["knocked", "Knock sent to the group"], ["answered", "A member's app is answering"]] as const) {
+      act(() => view.engine.update({ groups: [at(stage)] }));
+      expect(screen.getByTestId("group-rejoin-live")).toBe(live);
+      expect(live.textContent).toBe(said);
+    }
+    for (const region of document.querySelectorAll("[role=status], [role=alert], [aria-live]")) expect(region.querySelector("button")).toBeNull();
+  });
+
+  // The timeline's "You are now the admin" is an event, which the message announcer leaves out.
+  it("says once that I am now the admin when the role comes to me while the group is open", () => {
+    const view = openGroup(active());
+    expect(screen.getByTestId("group-role-live")).toBeEmptyDOMElement();
+    const mine = active({ isAdmin: true, members: members.map(m => ({ ...m, role: m.me ? "admin" as const : "member" as const })) });
+    act(() => view.engine.update({ groups: [mine] }));
+    expect(screen.getByTestId("group-role-live")).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("group-role-live")).toHaveTextContent("You are now the admin");
+  });
+
+  it("says nothing of the admin role for a group opened with it already mine", () => {
+    openGroup(active({ isAdmin: true }));
+    expect(screen.getByTestId("group-role-live")).toBeEmptyDOMElement();
   });
 
   it("names the status when the engine gave no reason, in the notice too", () => {
@@ -785,12 +846,47 @@ describe("GroupChat: the options menu", () => {
       expect(engine.callsTo("rotateGroup")).toHaveLength(2);
     });
 
+    // The menu closes at the press: a polite line says it started and, once done, that it is (the timeline's event line is
+    // not read out); the busy row says why it does nothing.
+    it("says it is rotating, on the busy row and in a live line, then that it is done", async () => {
+      const { user, engine } = openGroup(active({ isAdmin: true }));
+      const calls = pending(engine);
+      // There before the press, and silent, so its words are read when they come.
+      expect(screen.getByTestId("group-rotate-live")).toBeEmptyDOMElement();
+      await user.click(await rotateRow(user));
+      expect(screen.getByTestId("group-rotate-live")).toHaveAttribute("role", "status");
+      expect(screen.getByTestId("group-rotate-live")).toHaveTextContent("Rotating keys…");
+      // Seen while it goes: the row saying so is in a closed menu.
+      expect(screen.getByTestId("group-rotate-live")).not.toHaveClass("sr-only");
+      expect(await rotateRow(user)).toHaveTextContent("Rotating keys…");
+      await user.keyboard("{Escape}");
+      await act(async () => calls[0]!.resolve());
+      expect(screen.getByTestId("group-rotate-live")).toHaveTextContent("Keys rotated: members get the new keys");
+      // Once done, the timeline's event line shows it.
+      expect(screen.getByTestId("group-rotate-live")).toHaveClass("sr-only");
+      expect(await rotateRow(user)).toHaveTextContent(/^Rotate keys$/);
+    });
+
+    it("a refused second rotation does not leave the first one's done line", async () => {
+      const { user, engine } = openGroup(active({ isAdmin: true }));
+      const calls = pending(engine);
+      await user.click(await rotateRow(user));
+      await act(async () => calls[0]!.resolve());
+      expect(screen.getByTestId("group-rotate-live")).toHaveTextContent("Keys rotated: members get the new keys");
+      await user.click(await rotateRow(user));
+      await act(async () => calls[1]!.reject(new Error("Bob is not reachable")));
+      expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
+      expect(screen.getByTestId("group-rotate-live")).toBeEmptyDOMElement();
+    });
+
     it("a refused rotation says why and lets it be pressed again", async () => {
       const { user, engine } = openGroup(active({ isAdmin: true }));
       const calls = pending(engine);
       await user.click(await rotateRow(user));
       await act(async () => calls[0]!.reject(new Error("Bob is not reachable")));
       expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
+      // Said once, by the notice: not "rotated" too.
+      expect(screen.getByTestId("group-rotate-live")).toBeEmptyDOMElement();
       const again = await rotateRow(user);
       expect(again).not.toHaveAttribute("aria-disabled");
       await user.click(again);
@@ -853,6 +949,18 @@ describe("GroupChat: the options menu", () => {
       await act(async () => refuse(new Error("Bob is not reachable")));
       expect(screen.getByTestId("group-name")).toHaveTextContent("Others");
       expect(screen.queryByTestId("group-notice")).not.toBeInTheDocument();
+    });
+
+    it("a rotation done while another group was open is not said on coming back", async () => {
+      const { user, engine } = open(other());
+      let done = () => {};
+      engine.on("rotateGroup", () => new Promise<void>(resolve => { done = resolve; }));
+      await rotate(user);
+      await act(async () => screen.getByRole("button", { name: "two" }).click());
+      await act(async () => done());
+      expect(screen.getByTestId("group-rotate-live")).toBeEmptyDOMElement();
+      await act(async () => screen.getByRole("button", { name: "one" }).click());
+      expect(screen.getByTestId("group-rotate-live")).toBeEmptyDOMElement();
     });
 
     it("a rotation still going in one group leaves Rotate keys free in the next", async () => {

@@ -224,21 +224,27 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const canShareScreen = typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getDisplayMedia === "function";
   return (
     <div className="relative flex shrink-0 items-center">
+      {/* A phone with its label, in the call's colour (as Answer): a camera alone read as "start a video call". The label
+          folds away in a header under 640 px, the phone in its pill staying: under it, beside Share link's label, it
+          left a long group name 35 px in Portuguese at 540. In forced colors the tint is dropped: its border, see-through until then, keeps the pill, in the room it always
+          took, so nothing beside it moves. */}
       <button ref={button} type="button" onClick={press} {...working(asking)} {...(blocked && { "aria-disabled": true })} data-testid="group-call-join"
         title={t("calls.group.join")} aria-label={t("calls.group.join")} aria-describedby={problem ? `${id}-problem` : undefined}
-        className={`flex cursor-pointer items-center justify-center rounded-full p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-accent aria-disabled:opacity-40 max-md:h-[44px] max-md:w-[44px] max-md:p-0 ${focus}`}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+        className={`inline-flex min-h-9 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-transparent bg-accent/15 px-[11px] text-sm font-semibold text-accent transition-colors hover:bg-accent/20 hover:text-accent-hover aria-disabled:opacity-40 forced-colors:border-[color:ButtonText] forced-colors:aria-disabled:border-[color:GrayText] max-md:min-h-[44px] max-md:min-w-[44px] max-md:px-[9px] ${focus}`}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
         </svg>
+        <span className="whitespace-nowrap @max-[640px]/group-head:hidden">{t("calls.group.join")}</span>
       </button>
       {unsupported && <InfoButton open={!!problem} onToggle={press} controls={`${id}-problem`} testId="group-call-unsupported-info" />}
       {/* On a phone Join call is not the header's last button: from its edge the box ran past the screen's side. It
           lies across the width under the header there, as the connection panels do. */}
       {problem && <div id={`${id}-problem`} data-testid="group-call-problem" className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(18rem,calc(100vw-1rem))] rounded-xl border border-border bg-panel-header p-3 shadow-xl">
         <Notice problem={problem} testId="group-call-problem-notice" />
-        <div className="mt-2 flex justify-end gap-2 text-xs">
+        <div className="mt-2 flex flex-wrap justify-end gap-2 text-xs">
           <button type="button" onClick={() => { setProblem(null); button.current?.focus(); }} className={`min-h-8 rounded-md px-2 text-text-secondary hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("common.close")}</button>
-          {!blocked && <button type="button" onClick={() => void join()} data-testid="group-call-retry" className={`min-h-8 rounded-md px-2 font-semibold text-accent hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("calls.group.retry")}</button>}
+          {/* It goes with the box as it asks again: the focus on Join call first, as Close's, or it fell to the page. */}
+          {!blocked && <button type="button" onClick={() => { button.current?.focus(); void join(); }} data-testid="group-call-retry" className={`min-h-8 rounded-md px-2 font-semibold text-accent hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("calls.group.retry")}</button>}
         </div>
       </div>}
       {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf} raised={raised} moderator={moderator} connected={call.status === "connected"} devices={devices}
@@ -266,7 +272,7 @@ function HideIpDialog({ onClose, onConfirm }: { onClose(): void; onConfirm(): vo
       <InfoButton open={info} onToggle={() => setInfo(!info)} controls={`${id}-info`} testId="group-call-hide-ip-info" className="mt-0.5" />
     </div>
     {info && <p id={`${id}-info`} data-testid="group-call-hide-ip-info-text" className="mt-2 border-s-2 border-border ps-2 text-xs text-text-secondary">{t("calls.group.hideIpInfo")}</p>}
-    <div className="mt-5 flex justify-end gap-2">
+    <div className="mt-5 flex flex-wrap justify-end gap-2">
       <button ref={cancel} onClick={onClose} data-testid="group-call-hide-ip-cancel" className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button onClick={onConfirm} data-testid="group-call-hide-ip-confirm"
         className="min-h-11 rounded-lg px-4 text-sm font-semibold text-accent hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("calls.group.joinAnyway")}</button>
@@ -286,7 +292,7 @@ function EndOtherCallDialog({ onClose, onConfirm }: { onClose(): void; onConfirm
     data-testid="group-call-end-other" className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <h2 id={`${id}-title`} className="text-base font-semibold">{t("calls.group.endOtherTitle")}</h2>
     <p id={`${id}-body`} className="mt-2 text-sm text-text-muted">{t("calls.group.endOtherBody")}</p>
-    <div className="mt-5 flex justify-end gap-2">
+    <div className="mt-5 flex flex-wrap justify-end gap-2">
       <button ref={cancel} onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button onClick={onConfirm} data-testid="group-call-end-other-confirm"
         className="min-h-11 rounded-lg px-4 text-sm bg-danger/15 text-danger-ink hover:bg-danger/25 forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:ring-2 focus-visible:ring-danger">{t("calls.group.endAndJoin")}</button>

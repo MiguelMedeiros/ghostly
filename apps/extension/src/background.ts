@@ -1,4 +1,4 @@
-import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, concatBytes, fromBase64, guardViewerAnswer, toBase64, utf8Encode, viewerResponseHeaders, withViewerPolicy } from "@ghostly/core";
 import { VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerPage, type ViewerReply, type ViewerTaken } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { isViewerOrigin, parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
@@ -30,7 +30,10 @@ function ensureEngine(): Promise<void> {
 }
 
 async function startEngine(): Promise<void> {
-  if (!(await chrome.offscreen.hasDocument())) await createEngineDocument();
+  if (!(await chrome.offscreen.hasDocument())) {
+    await clearRings();
+    await createEngineDocument();
+  }
   const status = await waitForEngine();
   if (status.profile === status.active && !status.stopped) return await sweepAfterPeer(status);
   // A page made another profile the one in use. The running peer stops and its document closes before
@@ -273,6 +276,21 @@ async function clearNoticesNow(next?: string): Promise<void> {
 }
 
 /**
+ * The document went away (its renderer crashed, it was ended from Chrome's task manager): a call's notification it showed
+ * is taken back by that document alone (`unnotify`, at hang-up or after its ring), and the next one never knew of it, so
+ * it goes before that one opens. Taken before, so none the next one shows is among them.
+ */
+function clearRings(): Promise<void> {
+  return inNoticeOrder(async () => {
+    const kept = await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>);
+    const ids = Object.keys(kept).filter((key) => key.startsWith("ring:")).map((key) => key.slice("ring:".length));
+    if (!ids.length) return;
+    await chrome.storage.session.remove(ids.flatMap((id) => [`notice:${id}`, `ring:${id}`])).catch(() => {});
+    await Promise.all(ids.map((id) => chrome.notifications?.clear(id).catch(() => false)));
+  });
+}
+
+/**
  * The worker's reads and writes of the `notice:<id>` keys, one after another: each reads the keys, then writes, and two
  * running at once would both read before either wrote (a burst's messages, asked for in the same moment, each made a
  * notification of its own). Session storage stays what says which notification is a chat's: this order lives only as long
@@ -451,7 +469,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
 // - DevTools attaches only to the tab `openViewer` itself just created, and
 //   every command goes to a tab with a viewer binding, which only `openViewer`
 //   writes and which is forgotten once the debugger leaves the tab;
-// - only the four commands the viewer needs are ever sent.
+// - only the five commands the viewer needs are ever sent.
 
 const PROTOCOL_VERSION = "1.3";
 
@@ -459,7 +477,7 @@ const PROTOCOL_VERSION = "1.3";
 const RELAY_ONLY_REFUSED = "A contact's app does not open in the browser extension while Hide my IP from contacts is on";
 
 /** The DevTools commands a viewer tab needs. Nothing else is ever sent. */
-const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRequest", "Fetch.failRequest"]);
+const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Fetch.fulfillRequest", "Fetch.failRequest"]);
 
 /**
  * Added to Ghostly's policy on every page a viewer serves: the app opens no window or tab of its own, which would run
@@ -467,6 +485,52 @@ const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRe
  * view's frame has the same flags (apps/web/src/svc/opener.ts); Desktop's viewer opens no window either.
  */
 const sandboxed = (policy: string) => `${policy}; sandbox allow-scripts allow-same-origin allow-forms`;
+
+/**
+ * The policy of Ghostly's own page in the tab (`answerFailed`): nothing loads or frames, its style its own, and an
+ * origin of its own (an empty `sandbox`: no script, form or popup either; the page is static). The guards never run in
+ * it, and the app can frame it and read its window by index from the moment it commits, so on the app's origin its
+ * `execCommand` would copy on a timer, as no page of the app's may (`OWN_ORIGIN_CSP` in packages/core/src/viewerGuard.ts).
+ * Desktop's `OWN_ANSWER_CSP` and the web runner's `ownPolicy` (apps/web/src/svc/worker.ts) load nothing either.
+ */
+const OWN_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; base-uri 'none'; sandbox";
+
+/**
+ * What each page of the app runs first, as on the web (apps/web/src/svc/worker.ts): the clipboard guard. No policy or
+ * sandbox flag keeps a page off `execCommand("copy")`, which Chromium lets write for seconds after a tap. The WebRTC
+ * guard is not needed: no tab opens while Hide my IP from contacts is on. DevTools also runs it in each new document of
+ * the tab as that document is made (`openViewer`); the copy in the page then finds the window guarded and does nothing.
+ */
+const PAGE_GUARDS = [{ script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH }];
+
+/**
+ * The `destination` `guardViewerAnswer` reads, from the kind DevTools gives a request (it hands over no
+ * `Sec-Fetch-Dest`): `Document` is the tab's page or a frame's. `Other` is an `<object>` or `<embed>`, a worker's own
+ * script, a favicon: a page, unless its one type is a script's, which a browser never shows as one (a worker's, then).
+ * Null when DevTools said nothing: a page.
+ */
+function destinationOf(resourceType: string | undefined, headers: [string, string][]): string | null {
+  if (resourceType === undefined || resourceType === "Document") return null;
+  if (resourceType !== "Other") return resourceType.toLowerCase();
+  const types = headers.filter(([name]) => name.toLowerCase() === "content-type").map(([, value]) => value);
+  const script = types.length === 1 && /^(text|application)\/(x-)?(java|ecma)script$/i.test(types[0].split(";")[0].trim());
+  return script ? "worker" : null;
+}
+
+/** A contact's answer as the tab gets it: each page with the guards first (`guardViewerAnswer`), Ghostly's policy last. */
+async function viewerAnswer(headers: [string, string][], bodyB64: string, resourceType: string | undefined): Promise<{ headers: { name: string; value: string }[]; body: string }> {
+  const own = viewerResponseHeaders(headers);
+  const body = (async function* () { yield fromBase64(bodyB64); })();
+  const answer = await guardViewerAnswer(own, body, destinationOf(resourceType, own), PAGE_GUARDS);
+  // Ghostly's policy is the header's last one, after the contact's.
+  const policed = withViewerPolicy(answer.headers).map(([name, value]) => ({ name, value: name === "content-security-policy" ? sandboxed(value) : value }));
+  // What passes as it was (no page, or one that runs no script) goes on as it came: a video of up to 32 MiB is not
+  // decoded, copied and encoded again here.
+  if (answer.body === body) return { headers: policed, body: bodyB64 };
+  const parts: Uint8Array[] = [];
+  for await (const part of answer.body) parts.push(part);
+  return { headers: policed, body: toBase64(concatBytes(...parts)) };
+}
 
 /**
  * Least time between two links a viewer tab opens outside, and the most it opens (counted while this worker runs): as
@@ -676,6 +740,7 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
       patterns: [{ urlPattern: VIEWER_URL_PATTERN, requestStage: "Request" }],
     });
     await devtools(tab.id, "Page.enable");
+    await devtools(tab.id, "Page.addScriptToEvaluateOnNewDocument", { source: CLIPBOARD_GUARD_SCRIPT });
   } catch (error) {
     await chrome.tabs.remove(tab.id).catch(() => {});
     // `closeViewers` took the tab while DevTools attached to it.
@@ -805,12 +870,12 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   }
 
   if (reply.ok) {
+    const answer = await viewerAnswer(reply.headers, reply.bodyB64, paused.resourceType);
     await devtools(tabId, "Fetch.fulfillRequest", {
       requestId: paused.requestId,
       responseCode: reply.status,
-      // Ghostly's policy is the header's last one, after the contact's.
-      responseHeaders: withViewerPolicy(viewerResponseHeaders(reply.headers)).map(([name, value]) => ({ name, value: name === "content-security-policy" ? sandboxed(value) : value })),
-      body: reply.bodyB64,
+      responseHeaders: answer.headers,
+      body: answer.body,
     }, binding);
     return;
   }
@@ -832,7 +897,7 @@ async function answerFailed(tabId: number, requestId: string, binding: ViewerBin
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
-      { name: "content-security-policy", value: sandboxed(viewerServicePolicy(false)) },
+      { name: "content-security-policy", value: OWN_PAGE_CSP },
     ],
     body: toBase64(utf8Encode(html)),
   }, binding);

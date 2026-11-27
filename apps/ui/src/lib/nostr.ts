@@ -30,5 +30,3 @@ export async function signNostrDraft(draft: NostrDraft, options: { signer: Nostr
     return signer.signEvent(draft.template);
   });
 }
-
-export { ago } from "./time";

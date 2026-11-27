@@ -34,7 +34,7 @@ describe("the clipboard guard of a contact's app on the web", () => {
     expect(CLIPBOARD_GUARD_SCRIPT).not.toMatch(/[\\`]|\$\{|<\/script/i);
     // It finds the WebRTC guard's srcdoc copy by its start, when both run.
     expect(`<script>${VIEWER_GUARD_SCRIPT}`.startsWith("<script>(function noWebRtc(")).toBe(true);
-    for (const name of ["execCommand", "paste", "eventPhase", "isTrusted", "contentWindow", "contentDocument", "getSVGDocument", "attachShadow", "setHTMLUnsafe", "parseHTMLUnsafe", "writeln", "shadowrootmode"]) expect(CLIPBOARD_GUARD_SCRIPT).toContain(name);
+    for (const name of ["execCommand", "paste", "eventPhase", "isTrusted", "contentWindow", "contentDocument", "getSVGDocument", "attachShadow", "setHTMLUnsafe", "parseHTMLUnsafe", "writeln", "shadowrootmode", "appendChild", "insertAdjacentHTML", "outerHTML", "insertNode", "surroundContents"]) expect(CLIPBOARD_GUARD_SCRIPT).toContain(name);
   });
 
   it("goes first in a page with the WebRTC guard after it, and the contact's policy takes both hashes", async () => {
@@ -106,11 +106,47 @@ describe("the clipboard guard's rule", () => {
  * back at 0), and the tasks the guard queues to close a tap's window run only when the test ends the task. Time
  * passes only when the test says so (`spin`); an event's own `timeStamp` is the time it was dispatched unless given.
  */
-function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boolean } = { channel: true }) {
+function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boolean } = { channel: true }, guarded = true) {
   const tasks: (() => void)[] = [];
   const urgent: (() => void)[] = [];
   const frames: (() => void)[] = [];
-  class Doc { execCommand(command: string) { return command !== ""; } }
+  const listeners = new Map<string, ((event: Ev) => void)[]>();
+  /** The `load` listeners of the window's document (the guard's sweep of its frames). */
+  const sweeps: unknown[] = [];
+  /** Whether `document.open()` takes the listeners away (a browser ignores it in some states: then nothing goes). */
+  let clears = true;
+  /** Whether the document has an insertion point (opened, not closed yet): a write then only adds to what is parsed. */
+  let parsing = false;
+  /** What a write gives, as the browser parses it: the scripts the page wrote run here. */
+  let parse: (() => void) | null = null;
+  /** Each write the browser was given, by its name. */
+  const written: [string, string][] = [];
+  /** How many listeners were asked for on the window, the ones already there too. */
+  let asked = 0;
+  // HTML's document open steps: every listener of the document and, for its window's own document, of the window.
+  const openSteps = (doc: unknown) => {
+    if (!clears || doc !== w.document) return;
+    listeners.clear();
+    sweeps.length = 0;
+    parsing = true;
+  };
+  // As a browser's, a method of one window works on another window's document too, with that document's window:
+  // `opened`, `parsed` and `own` are each document's own here, so another window's method reaches them.
+  class Doc {
+    execCommand(command: string) { return command !== ""; }
+    open() { this.opened(); return this; }
+    opened() { openSteps(this); }
+    own() { return this === w.document ? w : null; }
+    close() { parsing = false; }
+    // A write with no insertion point (the page has loaded) runs those same open steps itself, not `open()`.
+    write(html: string) { this.parsed("write", html); }
+    writeln(html: string) { this.parsed("writeln", html); }
+    parsed(name: string, html: string) {
+      if (!parsing) openSteps(this);
+      written.push([name, html]);
+      if (html !== "") parse?.();
+    }
+  }
   let now = 10_000;
   class Ev { phase = 0; stamp = now; get eventPhase() { return this.phase; } get timeStamp() { return this.stamp; } }
   class Port {
@@ -123,13 +159,17 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
     port2 = new Port();
     constructor() { this.port1.other = this.port2; this.port2.other = this.port1; }
   }
-  const listeners = new Map<string, ((event: Ev) => void)[]>();
   const w: Record<string, unknown> = {
     Reflect, Object, String, TypeError,
     Document: Doc,
     Event: Ev,
+    // As a browser's: a listener already there for that type is not added twice (the guard's are all capturing).
     EventTarget: { prototype: { addEventListener(this: unknown, type: string, listener: (event: Ev) => void) {
-      if (this === w) listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+      if (this === w.document && type === "load" && !sweeps.includes(listener)) sweeps.push(listener);
+      if (this !== w) return;
+      asked++;
+      const there = listeners.get(type) ?? [];
+      if (!there.includes(listener)) listeners.set(type, [...there, listener]);
     } } },
     Element: { prototype: {} },
     DocumentFragment: { prototype: {} },
@@ -142,9 +182,10 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
   if (closers.channel) Object.assign(w, { MessageChannel: Channel, MessagePort: Port });
   if (closers.postTask) w.scheduler = { postTask(task: () => void, options: { priority?: string }) { if (options.priority === "user-blocking") urgent.push(task); return Promise.resolve(); } };
   if (closers.frame) w.requestAnimationFrame = (frame: () => void) => { frames.push(frame); return frames.length; };
-  Object.defineProperty(Doc.prototype, "defaultView", { get() { return w; } });
+  // A document of the window's own realm that is not its page (`createHTMLDocument`) has no window.
+  Object.defineProperty(Doc.prototype, "defaultView", { get(this: Doc) { return this.own(); } });
   w.document = new Doc();
-  new Function("window", CLIPBOARD_GUARD_SCRIPT)(w);
+  if (guarded) new Function("window", CLIPBOARD_GUARD_SCRIPT)(w);
   const doc = w.document as Doc;
   const copy = () => doc.execCommand("copy");
   /** Dispatches one event; `copied` holds what a copy in the page's own listener (or in its default action) got. */
@@ -162,6 +203,27 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
   const run = (queue: (() => void)[]) => { for (const task of queue.splice(0)) task(); };
   return {
     copy, dispatch, listeners,
+    /** The window's document and its `Document` (what another window reads as `frame.contentWindow.Document`). */
+    document: doc,
+    Document: Doc,
+    /** The page rewrites itself: `document.open()` as it calls it (the guard's, if it wrapped it), on `on`. */
+    rewrite: (on: object = doc, clearing = true) => { clears = clearing; (Doc.prototype.open as (this: object) => unknown).call(on); clears = true; },
+    sweeps,
+    written,
+    /**
+     * The page rewrites itself with `document.write()` or `writeln()` (the guard's, if it wrapped them) after it loaded,
+     * then `document.close()`; `during` runs as a script it wrote; `clearing` false: the browser ignores the write.
+     */
+    write: (name: "write" | "writeln" = "write", on: object = doc, during: (() => void) | null = null, clearing = true) => {
+      parse = during;
+      clears = clearing;
+      (Doc.prototype[name] as (this: object, html: string) => unknown).call(on, "<p>new</p>");
+      clears = true;
+      parse = null;
+      (on as Doc).close();
+    },
+    asked: () => asked,
+    newDocument: () => new Doc(),
     /** The page keeps the thread for `ms` (a busy loop): time passes, no task runs. */
     spin: (ms: number) => { now += ms; },
     now: () => now,
@@ -325,6 +387,125 @@ describe("the clipboard guard's taps and what a tap sets off", () => {
     page.dispatch("click", true, undefined, () => page.dispatch("submit", true, () => { got = page.copy(); }));
     expect(got).toBe(false);
   });
+
+  it("listens for the person's inputs again once the page rewrites itself with document.open()", () => {
+    // document.open() takes every listener of the document and of its window away: a copy button of the rewritten page
+    // copies on a tap again, a form of it on the submit a tap fires, and still nothing outside a tap.
+    const page = tapWindow();
+    const inputs = [...page.listeners.keys()].sort();
+    page.rewrite();
+    expect([...page.listeners.keys()].sort()).toEqual(inputs);
+    expect(page.sweeps).toHaveLength(1);
+    const got: Record<string, boolean> = {};
+    page.dispatch("click", true, () => { got.click = page.copy(); });
+    page.endTask();
+    page.dispatch("click", true, undefined, () => page.dispatch("submit", true, () => { got.submit = page.copy(); }));
+    page.endTask();
+    page.dispatch("submit", true, () => { got.load = page.copy(); });
+    page.dispatch("click", false, () => { got.untrusted = page.copy(); });
+    expect(got).toEqual({ click: true, submit: true, load: false, untrusted: false });
+  });
+
+  it("adds its listeners back once for each document.open(), and none twice where that took none away", () => {
+    const page = tapWindow();
+    const each = page.asked();
+    expect(each).toBe(15);
+    page.rewrite();
+    page.rewrite();
+    expect(page.asked()).toBe(3 * each);
+    for (const [type, kept] of page.listeners) expect(kept, type).toHaveLength(1);
+    // One the browser ignores (called while the page is still parsed) takes nothing away: the guard asks for its own
+    // again, and the browser keeps a listener already there once.
+    page.rewrite(undefined, false);
+    expect(page.listeners.size).toBe(15);
+    for (const [type, kept] of page.listeners) expect(kept, type).toHaveLength(1);
+    // A document of the window's realm that is not its page (no window of its own): nothing of the window's.
+    const asked = page.asked();
+    page.rewrite(page.newDocument());
+    expect(page.asked()).toBe(asked);
+    expect(page.listeners.size).toBe(15);
+  });
+
+  it("listens for the person's inputs again once the page rewrites itself with document.write() after it loaded", () => {
+    // A write with no insertion point runs the document open steps without calling `document.open()`: the rewritten
+    // page's copy button copies on a tap again, and still nothing outside one.
+    for (const name of ["write", "writeln"] as const) {
+      const page = tapWindow();
+      const inputs = [...page.listeners.keys()].sort();
+      expect(page.sweeps, name).toHaveLength(1);
+      const sweep = page.sweeps[0];
+      // A script the page wrote runs inside the write: the inputs and the document's sweep of its frames (which reaches
+      // a frame it wrote as that frame's first load fires) are listened for already.
+      let during: unknown[] = [];
+      page.write(name, undefined, () => { during = [[...page.listeners.keys()].sort(), [...page.sweeps]]; });
+      expect(during, name).toEqual([inputs, [sweep]]);
+      expect([...page.listeners.keys()].sort(), name).toEqual(inputs);
+      expect(page.sweeps, name).toEqual([sweep]);
+      // The page's own text goes to the browser once, by the page's own call (`writeln` adds its newline to it only).
+      expect(page.written, name).toEqual([["write", ""], [name, "<p>new</p>"]]);
+      const got: Record<string, boolean> = {};
+      page.dispatch("click", true, () => { got.click = page.copy(); });
+      page.endTask();
+      page.dispatch("submit", true, () => { got.load = page.copy(); });
+      expect(got, name).toEqual({ click: true, load: false });
+      for (const [type, kept] of page.listeners) expect(kept, type).toHaveLength(1);
+      // One the browser ignores (a deferred script's, after the page was parsed) takes nothing away and adds nothing twice.
+      page.write(name, undefined, null, false);
+      expect(page.listeners.size, name).toBe(15);
+      for (const [type, kept] of page.listeners) expect(kept, type).toHaveLength(1);
+      expect(page.sweeps, name).toEqual([sweep]);
+      // A document of the window's realm that is not its page: nothing of the window's.
+      const asked = page.asked();
+      page.write(name, page.newDocument());
+      expect(page.asked(), name).toBe(asked);
+    }
+  });
+
+  it("listens again in a frame's own window when the page writes that frame with document.open()", () => {
+    // A frame's window runs a guard of its own, whose `document.open()` is the one `frame.contentDocument.open()`
+    // calls: the frame's taps count again there, and the page's own window is left as it was.
+    const page = tapWindow();
+    const frame = tapWindow();
+    const asked = page.asked();
+    frame.rewrite();
+    let got: boolean | undefined;
+    frame.dispatch("click", true, () => { got = frame.copy(); });
+    expect(got).toBe(true);
+    expect(page.asked()).toBe(asked);
+    expect(page.listeners.size).toBe(15);
+  });
+
+  it("listens again in a frame's own window when the page opens or writes that frame's document with its own method", () => {
+    // `Document.prototype.write.call(frame.contentDocument, …)` in the page runs the frame's open steps: the page's guard
+    // hands the call to the frame's own method, so the frame's guard listens there again; the page's window is left as is.
+    for (const call of ["open", "write", "writeln"] as const) {
+      const page = tapWindow();
+      const frame = tapWindow();
+      const asked = page.asked();
+      const sweep = frame.sweeps[0];
+      if (call === "open") page.rewrite(frame.document);
+      else page.write(call, frame.document);
+      expect(frame.listeners.size, call).toBe(15);
+      expect(frame.sweeps, call).toEqual([sweep]);
+      if (call !== "open") expect(frame.written, call).toEqual([["write", ""], [call, "<p>new</p>"]]);
+      let got: boolean | undefined;
+      frame.dispatch("click", true, () => { got = frame.copy(); });
+      expect(got, call).toBe(true);
+      expect(page.asked(), call).toBe(asked);
+      expect(page.written, call).toEqual([]);
+    }
+    // A frame whose own method the page made the page's: the call never reaches the browser.
+    const page = tapWindow();
+    const frame = tapWindow();
+    frame.Document.prototype.write = page.Document.prototype.write;
+    expect(() => page.write("write", frame.document)).toThrow(RangeError);
+    expect(frame.written).toEqual([]);
+    expect(frame.listeners.size).toBe(15);
+    // A frame with no guard in it: the browser's own method, as before.
+    const bare = tapWindow(undefined, false);
+    page.write("write", bare.document);
+    expect(bare.written).toEqual([["write", "<p>new</p>"]]);
+  });
 });
 
 describe("the clipboard guard's Trusted Types default policy", () => {
@@ -390,11 +571,178 @@ describe("the clipboard guard's Trusted Types default policy", () => {
     expect(page.script("1 + 1")).toBe("1 + 1");
     // The app's policy would pass it: the guard's refusal comes first.
     expect(page.navigate("javascript:alert(1)")).toBeNull();
-    // A rule the app did not give refuses the string, as its own default policy would.
-    expect(page.types.defaultPolicy!.rules.createScriptURL!("/a.js", "createScriptURL", "HTMLScriptElement src")).toBeNull();
     // Once, as in a browser; other names go to the browser's own.
     expect(() => page.types.createPolicy("default", {})).toThrow(/already exists/);
     expect(page.types.createPolicy("mine", {}).name).toBe("mine");
     expect(() => guarded().types.createPolicy("default", { createHTML: "no" as never })).toThrow(TypeError);
+  });
+
+  it("passes a string on as it is where the app's own policy has no rule for it, but a javascript: URL", () => {
+    // The app sends no Trusted Types policy of its own: only Ghostly's asks its default policy at all, so a script
+    // URL it never gave a rule for must load as it does outside the view.
+    const page = guarded();
+    page.types.createPolicy("default", { createHTML: (input) => input.replace("<b>", "") });
+    expect(page.html("<b>hi")).toBe("hi");
+    expect(page.types.defaultPolicy!.rules.createScriptURL!("/lib.js", "createScriptURL", "HTMLScriptElement src")).toBe("/lib.js");
+    expect(page.script("1 + 1")).toBe("1 + 1");
+    expect(page.navigate("javascript:alert(1)")).toBeNull();
+  });
+});
+
+/**
+ * The apps' origins under a services host share its site: a cookie one sets for the whole host would be read by every
+ * other contact's app open at once. The guard keeps each one the page's script sets to the page's own host.
+ */
+describe("the clipboard guard's cookies", () => {
+  /** A window whose `document.cookie` and `cookieStore` record every write, the guard run in it. */
+  function guarded() {
+    const writes: string[] = [];
+    const changes: [string, unknown][] = [];
+    class Doc { execCommand() { return true; } }
+    Object.defineProperty(Doc.prototype, "cookie", {
+      configurable: true,
+      enumerable: true,
+      get() { return writes.join("; "); },
+      set(value: string) { writes.push(value); },
+    });
+    class Store {
+      set(...args: unknown[]) { changes.push(["set", args.length > 1 ? args : { ...(args[0] as object) }]); return Promise.resolve(); }
+      delete(options: unknown) { changes.push(["delete", typeof options === "object" ? { ...(options as object) } : options]); return Promise.resolve(); }
+    }
+    const w = {
+      Reflect, Object, String, TypeError,
+      Document: Doc,
+      CookieStore: Store,
+      cookieStore: new Store(),
+      Event: class { get eventPhase() { return 0; } },
+      EventTarget: { prototype: { addEventListener() {} } },
+      Element: { prototype: {} },
+      DocumentFragment: { prototype: {} },
+      NodeList: { prototype: { get length() { return 0; } } },
+      MutationObserver: class { observe() {} },
+      get length() { return 0; },
+      document: null as unknown,
+    };
+    Object.defineProperty(Doc.prototype, "defaultView", { get() { return w; } });
+    w.document = new Doc();
+    new Function("window", CLIPBOARD_GUARD_SCRIPT)(w);
+    return { doc: w.document as { cookie: string }, store: w.cookieStore, writes, changes, Doc, Store };
+  }
+
+  it("leaves a Domain attribute out of a document.cookie write, whatever its case or spacing, and keeps the rest", () => {
+    const { doc, writes } = guarded();
+    doc.cookie = "a=1; Domain=svc.example; Path=/";
+    doc.cookie = "b=2;domain=.svc.example;Secure;SameSite=None;Partitioned";
+    doc.cookie = "c=3; \tDOMAIN = svc.example ";
+    doc.cookie = "domain=4; Path=/x";
+    doc.cookie = { toString: () => "e=5; Domain=svc.example" } as unknown as string;
+    doc.cookie = "f=6;; Domain";
+    expect(writes).toEqual(["a=1; Path=/", "b=2;Secure;SameSite=None;Partitioned", "c=3", "domain=4; Path=/x", "e=5", "f=6;"]);
+  });
+
+  it("does not split the cookie with a method the page can change after it ran", () => {
+    const { doc, writes } = guarded();
+    const real = String.prototype.split;
+    const symbol = Object.getOwnPropertyDescriptor(String.prototype, Symbol.split);
+    String.prototype.split = () => ["x"];
+    Object.defineProperty(String.prototype, Symbol.split, { value: () => ["x"], configurable: true, writable: true });
+    try {
+      doc.cookie = "a=1; Domain=svc.example";
+    } finally {
+      String.prototype.split = real;
+      if (symbol) Object.defineProperty(String.prototype, Symbol.split, symbol);
+      else delete (String.prototype as unknown as Record<symbol, unknown>)[Symbol.split];
+    }
+    expect(writes).toEqual(["a=1"]);
+  });
+
+  it("leaves a domain out of cookieStore.set and cookieStore.delete, and passes the rest on", async () => {
+    const { store, changes } = guarded();
+    await store.set({ name: "a", value: "1", domain: "svc.example", path: "/", sameSite: "none", partitioned: true } as never);
+    await store.set("b", "2");
+    await store.delete({ name: "a", domain: "svc.example", path: "/" } as never);
+    await store.delete("b");
+    // A function is a dictionary too, to the browser.
+    const callable = Object.defineProperties(() => {}, { name: { value: "c" }, value: { value: "3" }, domain: { value: "svc.example" } });
+    await store.set(callable as never);
+    expect(changes).toEqual([
+      ["set", { name: "a", value: "1", path: "/", sameSite: "none", partitioned: true }],
+      ["set", ["b", "2"]],
+      ["delete", { name: "a", path: "/" }],
+      ["delete", "b"],
+      ["set", { name: "c", value: "3" }],
+    ]);
+  });
+
+  it("reads each member of the options once, so a getter cannot hand the domain on after the guard looked", async () => {
+    const { store, changes } = guarded();
+    let reads = 0;
+    const options = { name: "a", get value() { reads++; return "1"; }, domain: "svc.example" };
+    await store.set(options as never);
+    expect(reads).toBe(1);
+    expect(changes).toEqual([["set", { name: "a", value: "1" }]]);
+  });
+
+  it("is fixed in place: the page cannot put the browser's setter or methods back", () => {
+    const { Doc, Store } = guarded();
+    const cookie = Object.getOwnPropertyDescriptor(Doc.prototype, "cookie")!;
+    expect(cookie.configurable).toBe(false);
+    for (const name of ["set", "delete"]) {
+      expect(Object.getOwnPropertyDescriptor(Store.prototype, name)).toMatchObject({ writable: false, configurable: false });
+    }
+  });
+});
+
+/**
+ * The guard looks over the page's frames as each insertion returns: what that costs must not grow with the frames it
+ * cannot go into (another origin's, where each try threw a SecurityError) or has already guarded for good.
+ */
+describe("the clipboard guard's look over the frames", () => {
+  /** A window of the page's own origin; `reads` counts the guard's runs in it (each reads its `Reflect` first). */
+  function realm(frames: unknown[] = []) {
+    class Doc { execCommand() { return true; } }
+    class Node { appendChild<T>(child: T) { return child; } }
+    const counted = { reads: 0 };
+    const w: Record<string, unknown> = {
+      Object, String, TypeError, WeakSet,
+      Document: Doc,
+      Node,
+      Event: class { get eventPhase() { return 0; } },
+      EventTarget: { prototype: { addEventListener() {} } },
+      Element: { prototype: {} },
+      DocumentFragment: { prototype: {} },
+      NodeList: { prototype: { get length() { return 0; } } },
+      MutationObserver: class { observe() {} },
+      document: null,
+    };
+    Object.defineProperty(w, "Reflect", { get() { counted.reads++; return Reflect; } });
+    Object.defineProperty(w, "length", { get() { return frames.length; } });
+    frames.forEach((frame, i) => { w[i] = frame; });
+    Object.defineProperty(Doc.prototype, "defaultView", { get() { return w; } });
+    w.document = new Doc();
+    return { w, Doc, Node, counted };
+  }
+
+  it("leaves a frame of another origin untouched, and runs once more only in a frame whose document is new", () => {
+    let touched = 0;
+    const other = new Proxy(Object.create(null) as object, {
+      getPrototypeOf: () => null,
+      get() { touched++; throw new Error("SecurityError"); },
+    });
+    const frame = realm();
+    const page = realm([other, frame.w]);
+    new Function("window", CLIPBOARD_GUARD_SCRIPT)(page.w);
+    const insert = () => new page.Node().appendChild({});
+    for (let i = 0; i < 20; i++) insert();
+    expect(touched).toBe(0);
+    // Its first run guarded it, the next found it so: no more after that, however many insertions.
+    expect(frame.counted.reads).toBe(2);
+    expect(Object.getOwnPropertyDescriptor(frame.Doc.prototype, "execCommand")?.configurable).toBe(false);
+    // The frame loads another document in the same window: the next insertion's look watches it.
+    frame.w.document = new frame.Doc();
+    insert();
+    expect(Object.getOwnPropertyDescriptor(frame.w.document as object, "ghostlyClipboardGuard")?.value).toBe(true);
+    for (let i = 0; i < 20; i++) insert();
+    expect(frame.counted.reads).toBe(4);
   });
 });

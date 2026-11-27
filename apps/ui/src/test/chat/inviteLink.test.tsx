@@ -1,9 +1,10 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
-import { createChatInvite, createDeviceInvite } from "@ghostly/core";
+import { createChatInvite, createDeviceInvite, createIdentity, createLink, encodeInviteCode } from "@ghostly/core";
 import { afterEach, expect, it, describe } from "vitest";
 import { Root } from "../../Root";
 import { deleteSession, ensureSession, listSessions, LINK_CHATS_WAITING, linkChatsWaiting, saveSession } from "../../lib/storage";
 import { readInvite, inviteRouteCode } from "../../lib/url";
+import { problemText } from "../../lib/problemText";
 import { takeDeviceLink, takeDeviceLinkFromAddress } from "../../lib/devices";
 import { fakeEngine } from "../fakeEngine";
 
@@ -36,6 +37,19 @@ describe("the address of a chat no longer on this device", () => {
     expect(notice).toHaveTextContent("This chat is gone from this device.");
     expect(notice).not.toHaveTextContent("This is not a Ghostly invite.");
     await waitFor(() => expect(window.location.hash).toBe("#/"));
+  });
+
+  it("a stored chat's address with a trailing slash opens the chat, as the address without it does", async () => {
+    const reading = readInvite(createChatInvite().inviteCode);
+    if (!reading.ok) throw new Error("a fresh invite reads");
+    const id = ensureSession(reading.keys);
+
+    render(<Root />);
+    go(`#/chat/${id}/`);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
+    expect(window.location.hash).toBe(`#/chat/${id}/`);
+    deleteSession(id);
   });
 
   it("a code that looks like an invite keeps its refusal", async () => {
@@ -183,6 +197,49 @@ describe("how many link-made chats may wait for an answer", () => {
     await follow(codes[codes.length - 1]);
     await waitFor(() => expect(listSessions()).toHaveLength(LINK_CHATS_WAITING + 1));
   }, 120_000);
+
+  /*
+   * A link with a joined chat's seed but another contact's keys makes no chat: the engine keys a chat by its own seed, so
+   * such a chat had the joined chat's link, and what was typed there went to the joined chat's contact. It is refused as
+   * an invalid invite, and takes no place.
+   */
+  it("a link with a joined chat's seed but another contact's keys makes no chat, and is refused", async () => {
+    const { invite, inviteCode } = createChatInvite();
+    const reading = readInvite(inviteCode);
+    if (!reading.ok) throw new Error("a fresh invite reads");
+    const joined = ensureSession(reading.keys);
+    const others = Array.from({ length: LINK_CHATS_WAITING + 3 }, () =>
+      encodeInviteCode({ ...invite, peerPubKeyZ32: createIdentity().pubKeyZ32, encKeyB64: createLink().mine.encKeyB64 }));
+    window.location.hash = "#/";
+    render(<Root />);
+    for (const code of others) await follow(code);
+
+    expect(listSessions()).toHaveLength(1);
+    expect(await screen.findByTestId("invite-link-invalid")).toHaveTextContent("Invalid invite. Ask for a new one.");
+    expect(linkChatsWaiting()).toBe(0);
+
+    // The joined chat's own link still opens it, and a new invite still makes its chat.
+    await follow(inviteCode);
+    await waitFor(() => expect(window.location.hash).toBe(`#/chat/${joined}`));
+    await follow(createChatInvite().inviteCode);
+    await waitFor(() => expect(listSessions()).toHaveLength(2));
+  }, 120_000);
+
+  it("such an invite pasted in Join or tapped on a card makes no chat either, said as an invalid invite", () => {
+    const { invite, inviteCode } = createChatInvite();
+    const reading = readInvite(inviteCode);
+    if (!reading.ok) throw new Error("a fresh invite reads");
+    const joined = ensureSession(reading.keys);
+    const other = readInvite(encodeInviteCode({ ...invite, peerPubKeyZ32: createIdentity().pubKeyZ32, encKeyB64: createLink().mine.encKeyB64 }));
+    if (!other.ok) throw new Error("the other invite reads");
+
+    let refusal: unknown;
+    try { ensureSession(other.keys); } catch (cause) { refusal = cause; }
+    expect(problemText(refusal).title).toBe("Invalid invite. Ask for a new one.");
+    expect(listSessions().map((session) => session.id)).toEqual([joined]);
+    // The joined chat's own keys are still its chat.
+    expect(ensureSession(reading.keys)).toBe(joined);
+  });
 
   it("an invite the person pasted or scanned in Join is not counted, and is not held back", () => {
     for (let at = 0; at < LINK_CHATS_WAITING + 2; at++) {

@@ -816,9 +816,13 @@ export class IdentityExchange {
       if (stands) return { ...logged, challenges };
       if (!verified || !received) return { ...logged, challenges, received: held && !unavailable
         ? l.received.map(r => r === held ? { ...r, checkedAt: now, status: "unconfirmed" as const, error: reason } : r) : l.received };
+      // A name/picture looked up for this proof stays, as a re-check keeps it, while the check still names the subject it
+      // was looked up for. Another proof (a new key) never takes one, nor this one once it names another subject.
+      const earlier = l.received.find(r => r.id === id);
+      const display = earlier?.display && earlier.verified.subject === verified.subject ? earlier.display : undefined;
       // Its owner withdrew it while it was being checked: kept as if the withdraw had come just after.
       const record: ReceivedIdentity = { id, binding, evidence, verified, presenter: scope.subject, audience: scope.audience, context: scope.context,
-        verifiedAt: prior?.verifiedAt ?? now, checkedAt: prior?.checkedAt ?? now, status: withdrawn ? "withdrawn" : "verified" };
+        verifiedAt: prior?.verifiedAt ?? now, checkedAt: prior?.checkedAt ?? now, status: withdrawn ? "withdrawn" : "verified", ...(display ? { display } : {}) };
       // The older proof it replaced is no longer held: its share stops on the timeline (one already stopped has its stop).
       const replaced = l.received.filter(r => r.id !== id && !received.includes(r) && r.binding.provider === binding.provider && r.verified.subject === subject
         && r.status !== "withdrawn" && r.status !== "revoked");

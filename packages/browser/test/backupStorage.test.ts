@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { S3Store, signS3, validateS3Config } from "../src/backup/s3";
 import { backupName, createdFromName } from "../src/backup/storage";
 import { decode, encode } from "../src/backup/codec";
@@ -40,6 +40,16 @@ it("data shaped like a tag comes back as it was, and a bad tag never stops a res
   const proto = decode('{"$ghostly":"object","entries":[["__proto__",{"polluted":true}]]}') as Record<string, unknown>;
   expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   expect(Object.keys(proto)).toEqual(["__proto__"]);
+});
+
+it("a bigint tag of more digits than any stored amount or counter stays as it is, and costs nothing to read", () => {
+  // `BigInt()` pays more than its length for a long string: millions of digits, which gzip to a few KB, take seconds.
+  const big = vi.spyOn(globalThis, "BigInt");
+  const back = decode(JSON.stringify({ n: { $ghostly: "bigint", value: "9".repeat(10_000_000) }, m: { $ghostly: "bigint", value: `-${"9".repeat(101)}` } })) as Record<string, { value?: string }>;
+  expect([typeof back.n, back.n.value?.length, typeof back.m, back.m.value?.length]).toEqual(["object", 10_000_000, "object", 102]);
+  expect(big).not.toHaveBeenCalled();
+  expect(decode(JSON.stringify({ $ghostly: "bigint", value: `-${"9".repeat(100)}` }))).toBe(-(10n ** 100n - 1n));
+  big.mockRestore();
 });
 
 it("round-trips bytes, bigints and blobs, and an envelope only opens with its passphrase", async () => {

@@ -142,6 +142,18 @@ describe("bump-version", () => {
       const { stderr } = bump(repository("1.6.1", ["v1.6.1", "v1.7.4"]), "1.6.2");
       expect(stderr).not.toMatch(/is released/);
     });
+
+    it("stops a bump while an entry sits where no release reads it, before any file changes", () => {
+      const dir = repository("1.7.3", []);
+      mkdirSync(join(dir, "docs/changelog/unreleased"), { recursive: true });
+      writeFileSync(join(dir, "docs/changelog/unreleased/late.MD"), "---\nsection: Fixed\n---\n- Late.\n");
+      const before = readFileSync(join(dir, "package.json"), "utf8");
+      const { status, stderr } = bump(dir, "1.7.4");
+      expect(status).toBe(1);
+      expect(stderr).toMatch(/docs\/changelog\/unreleased\/late\.MD: no release reads it: name it <slug>\.md, such as late\.md/);
+      expect(readFileSync(join(dir, "package.json"), "utf8")).toBe(before);
+      expect(existsSync(join(dir, "docs/changelog/unreleased/late.MD"))).toBe(true);
+    });
   });
 
   describe("the apps flag", () => {

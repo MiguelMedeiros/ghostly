@@ -8,6 +8,7 @@ import { useCopyKey } from "../../hooks/useCopyKey";
 import { addableProviders, daysLeft, date, expiringSoon, providerLabel, sharedStatus, useEngineValue, useNewProof } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { fillNames } from "../../lib/fillNodes";
+import { isolate } from "../../lib/ownStatus";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "../ComposerSheet";
 import { Deck } from "../deck/Deck";
 import { CardFlip, FlipTurnButton } from "../deck/Flip";
@@ -52,7 +53,7 @@ export const DONE_MS = 1200;
  */
 const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 function seesLine(card: IdCardContent, contact: string, on: boolean, t: Translate): string {
-  const params = { contact, label: card.label, short: card.short, category: lower(card.category), validity: lower(card.validity) };
+  const params = { contact: isolate(contact), label: card.label, short: card.short, category: lower(card.category), validity: lower(card.validity) };
   if (card.attested) return on ? t("identities.picker.seesAccount", params) : t("identities.picker.willSeeAccount", params);
   if (card.provider === "domain") return on ? t("identities.picker.seesDomain", params) : t("identities.picker.willSeeDomain", params);
   return on ? t("identities.picker.sees", params) : t("identities.picker.willSee", params);
@@ -125,6 +126,8 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   // a second), and drew itself again on each.
   const state = useEngineValue(s => s && pickerView(s, peerKey));
   const { t } = useI18n();
+  // The contact's name in a line of text (a label, a button, a hint): isolated, so in Arabic "Bob!" is not drawn "!Bob".
+  const named = isolate(contact);
   const link = state?.link;
   const ids = link?.identities;
   const mine = state?.identityProofs ?? [];
@@ -177,13 +180,13 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
 
   const ghostly: Ghostly | undefined = state && link ? {
     id: GHOSTLY, ghostly: true, on: true,
-    card: ghostlyCard(t, state.me, { chat: { key: link.myPubKeyZ32, contact } }),
+    card: ghostlyCard(t, state.me, { chat: { key: link.myPubKeyZ32, contact: named } }),
   } : undefined;
   const proofs = mine.map((proof): Proof => {
     const shared = ids?.shared.find(s => s.id === proof.id);
     const on = isOn(shared);
     const card = idCard(proof, { now, refusedBy: on && shared?.status === "rejected" ? [contact] : [], t });
-    return { id: proof.id, proof, on, card: { ...card, shared: on ? t("identities.ghostly.sharedWith", { contact }) : t("identities.picker.notSharedWith", { contact }) } };
+    return { id: proof.id, proof, on, card: { ...card, shared: on ? t("identities.ghostly.sharedWith", { contact: named }) : t("identities.picker.notSharedWith", { contact: named }) } };
   });
   /** The other identities the contact sees now: what "Share only this" on the Ghostly card takes back. */
   const others = proofs.filter(p => p.on);
@@ -199,8 +202,8 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   const why = (e: Entry) => {
     if (e.add || e.ghostly || e.on) return undefined;
     if (expired(e)) return t("identities.card.expiredOn", { date: date(e.proof.expiresAt, t.language) });
-    if (ids?.contactProviders && !ids.contactProviders.includes(e.proof.provider)) return t("identities.picker.cannotVerify", { contact, provider: providerLabel(e.proof.provider, t) });
-    if (unsupported) return t("identities.picker.cannotReceive", { contact });
+    if (ids?.contactProviders && !ids.contactProviders.includes(e.proof.provider)) return t("identities.picker.cannotVerify", { contact: named, provider: providerLabel(e.proof.provider, t) });
+    if (unsupported) return t("identities.picker.cannotReceive", { contact: named });
     if (!ids) return t("identities.picker.connectFirst");
     return undefined;
   };
@@ -231,7 +234,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
           : <IdentityBack t={t} entry={showing} contact={contact} now={now} busy={busy} turning={turning} stopping={stopping} done={done} error={error} actionRef={actionRef}
             status={ids?.shared.find(s => s.id === showing.id)} onShare={() => toggle(showing.proof, false)} onStop={() => toggle(showing.proof, true)} onCards={backToCards} />} />
       : <>
-        {head && <ComposerSheetHead title={t("identities.mine.deckLabel")} who={t("identities.picker.shownTo", { contact })} />}
+        {head && <ComposerSheetHead title={t("identities.mine.deckLabel")} who={t("identities.picker.shownTo", { contact: named })} />}
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={select} onChoose={use}
           kind="radios" label={t("identities.mine.deckLabel")} name="composer-identity-deck" arrows={deckArrows(t)} className="id-deck" size={{ max: 250, share: .62 }}
           testId={e => (e.add ? "composer-identity-add" : e.ghostly ? "composer-identity-ghostly" : "composer-identity")} blocked={why}
@@ -246,7 +249,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
         </> : <>
           <p className="composer-sheet-hint" data-testid="composer-identity-hint" data-blocked={blocked ? true : undefined}>
             {blocked ?? (entry.ghostly
-              ? t("identities.ghostly.hintSees", { contact, name: entry.card.name ?? "", key: entry.card.short })
+              ? t("identities.ghostly.hintSees", { contact: named, name: entry.card.name ?? "", key: entry.card.short })
               : seesLine(entry.card, contact, entry.on, t))}
           </p>
           {expired(entry)
@@ -274,7 +277,8 @@ function GhostlyBack({ t, card, contact, others, busy, turning, done, error, act
 }) {
   const { copied, failed, copy } = useCopyKey(card.subject);
   const working = busy === GHOSTLY;
-  const state = others === 0 ? t("identities.ghostly.onlyThis", { contact }) : others === 1 ? t("identities.ghostly.alsoSeesOne", { contact }) : t("identities.ghostly.alsoSees", { contact, count: others });
+  const named = isolate(contact);
+  const state = others === 0 ? t("identities.ghostly.onlyThis", { contact: named }) : others === 1 ? t("identities.ghostly.alsoSeesOne", { contact: named }) : t("identities.ghostly.alsoSees", { contact: named, count: others });
   return (
     <div className="id-card-back" data-testid="composer-identity-back" data-ghostly="true">
       <div className="id-card-back-band">
@@ -325,6 +329,7 @@ function IdentityBack({ t, entry, contact, now, busy, turning, stopping, done, e
   actionRef: RefObject<HTMLButtonElement | null>; onShare: () => void; onStop: () => void; onCards: () => void;
 }) {
   const { proof: p, card, on } = entry;
+  const named = isolate(contact);
   // The contact's app could not verify it: the way on is to share it again (a new check), not to stop first.
   const retry = on && status?.status === "rejected";
   /** The main action stops the share. */
@@ -361,12 +366,12 @@ function IdentityBack({ t, entry, contact, now, busy, turning, stopping, done, e
         </p>}
         {done ? <p role="status" className="id-card-back-done" data-testid="composer-identity-done">
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          {done === "shared" ? t("identities.ghostly.sharedWith", { contact }) : t("identities.picker.noLongerSees", { contact })}
+          {done === "shared" ? t("identities.ghostly.sharedWith", { contact: named }) : t("identities.picker.noLongerSees", { contact: named })}
         </p> : <div className="id-card-back-actions" data-turning={turning || undefined}>
           {/* While a call runs the button stays focusable (a disabled button would drop the keyboard's focus). */}
           <button ref={actionRef} type="button" data-testid="composer-identity-share" data-variant={stops ? "secondary" : undefined} className="composer-sheet-action" disabled={turning}
             aria-disabled={!!busy || undefined} aria-busy={(working && stopping === stops) || undefined} onClick={stops ? onStop : onShare}>
-            {working && stopping === stops ? (stops ? t("identities.ghostly.stopping") : t("identities.picker.sharing")) : stops ? t("identities.stopSharing") : retry ? <>{t("identities.picker.shareAgain")}<ForwardArrow /></> : <>{t("identities.picker.shareWith", { contact })}<ForwardArrow /></>}
+            {working && stopping === stops ? (stops ? t("identities.ghostly.stopping") : t("identities.picker.sharing")) : stops ? t("identities.stopSharing") : retry ? <>{t("identities.picker.shareAgain")}<ForwardArrow /></> : <>{t("identities.picker.shareWith", { contact: named })}<ForwardArrow /></>}
           </button>
           {retry ? <button type="button" data-testid="composer-identity-stop" className="composer-identities-manage" disabled={turning} aria-disabled={!!busy || undefined} aria-busy={(working && stopping) || undefined} onClick={onStop}>{working && stopping ? t("identities.ghostly.stopping") : t("identities.stopSharing")}</button>
             : on && <p className="id-card-back-note">{fillNames(t("identities.picker.stopNote"), { contact })}</p>}

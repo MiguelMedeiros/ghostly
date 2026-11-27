@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkView, WalletView } from "@ghostly/browser/shared/types";
+import type { Language } from "../../lib/settings";
 import { MessageInput } from "../../components/MessageInput";
 import { PaymentComposer } from "../../components/PaymentComposer";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -32,10 +33,11 @@ interface Open {
   wallet?: Partial<WalletView>;
   /** What saving does; by default the engine takes the list, as the real one does, and says so in its state. */
   save?: (accepts: ChatAccepts) => Promise<void>;
+  language?: Language;
 }
 
 /** The composer in a 1:1 chat with "peer" (Alice), with its Accept side. */
-function open({ link, wallet = everyWallet(), save }: Open = {}) {
+function open({ link, wallet = everyWallet(), save, language }: Open = {}) {
   fakeEngine.setState({ links: [linkView(link)], wallet });
   const handlers = {
     onSend: vi.fn(async () => null),
@@ -43,7 +45,7 @@ function open({ link, wallet = everyWallet(), save }: Open = {}) {
     onClose: vi.fn(),
     onSaveMethods: vi.fn(save ?? (async ({ methods, networks }: ChatAccepts) => { fakeEngine.update({ links: [linkView({ ...link, paymentMethods: methods, paymentNetworks: { ...link?.paymentNetworks, ...networks } })] }); })),
   };
-  const view = renderApp(<PaymentComposer balance={1_000} {...handlers} reviewContext={reviewContext()} contact="Alice" />);
+  const view = renderApp(<PaymentComposer balance={1_000} {...handlers} reviewContext={reviewContext()} contact="Alice" />, { language });
   document.documentElement.dataset.reduceMotion = "true";
   return { ...view, ...handlers };
 }
@@ -62,11 +64,17 @@ const ticked = () => screen.getAllByRole("switch").filter((c) => c.getAttribute(
 describe("Pay and Accept", () => {
   it("has Pay and Accept in its head, and opens on Pay", () => {
     open();
-    expect(screen.getByRole("tablist", { name: "Payments with Alice" })).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Payments with \u2068Alice\u2069" })).toBeInTheDocument();
     expect(mode("pay")).toHaveAttribute("aria-selected", "true");
     expect(mode("accept")).toHaveAttribute("aria-selected", "false");
     expect(composer()).toHaveAttribute("data-mode", "pay");
     expect(screen.getByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
+  });
+
+  // The contact's name is their own words, isolated as on the sheet's other lines: in Arabic "Bob!" read "!Bob".
+  it("names the contact in its own direction in the tabs' label, in Arabic too", () => {
+    open({ language: "ar" });
+    expect(mode("pay").closest("[role=tablist]")).toHaveAttribute("aria-label", "المدفوعات مع \u2068Alice\u2069");
   });
 
   it("shows on Pay only the cards this chat has on; Accept keeps every card, the one off unticked", async () => {
@@ -232,10 +240,10 @@ describe("choosing what this chat accepts", () => {
     accept("arkade-testnet").focus();
     await user.keyboard("{End}");
     expect(accept("usdt-testnet")).toHaveFocus();
-    // A test card is named by its network.
-    expect(hint()).toHaveTextContent("Testnet USDT is on here, but Alice has it off: it works once you both have it on.");
+    // A test card is named with its network: "USDT (Testnet)".
+    expect(hint()).toHaveTextContent("USDT (Testnet) is on here, but Alice has it off: it works once you both have it on.");
     await user.keyboard(" ");
-    expect(hint()).toHaveTextContent("Testnet USDT is off here: neither of you can pay the other with it in this chat.");
+    expect(hint()).toHaveTextContent("USDT (Testnet) is off here: neither of you can pay the other with it in this chat.");
   });
 
   it("says the contact has a card off when they have no wallet of its network", async () => {
@@ -277,7 +285,7 @@ describe("one card per network", () => {
     await user.click(tab("testnet"));
     expect(accept("cashu-testnet")).toHaveAttribute("aria-checked", "true");
     await user.click(accept("cashu-testnet"));
-    expect(hint()).toHaveTextContent("Testnet Cashu is off here");
+    expect(hint()).toHaveTextContent("Cashu (Testnet) is off here");
     await user.click(save());
     const [{ methods, networks }] = onSaveMethods.mock.calls[0];
     expect(methods.cashu).toBe(true);
@@ -289,6 +297,17 @@ describe("one card per network", () => {
     expect(screen.getByTestId("payment-card-lightning-testnet")).toBeInTheDocument();
     await user.click(tab("mainnet"));
     expect(screen.getByTestId("payment-card-cashu-mainnet")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["ja", "Cashu（Testnet） はここではオフです：このチャットでは、どちらも相手に支払えません。"],
+    ["ar", "Cashu (Testnet) متوقف هنا: لا يمكن لأي منكما أن يدفع للآخر به في هذه المحادثة."],
+  ] as const)("names the test card in %s's own order, not as \"Testnet Cashu\"", async (language, line) => {
+    const { user } = open({ wallet: both(), language });
+    await user.click(mode("accept"));
+    await user.click(tab("testnet"));
+    await user.click(accept("cashu-testnet"));
+    expect(hint()).toHaveTextContent(line);
   });
 
   it("turns a way off when every one of its cards is", async () => {

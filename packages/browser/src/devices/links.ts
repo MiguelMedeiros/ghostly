@@ -20,6 +20,7 @@ import { canStartOwnSet, resumeOwnSet, startOwnSet, supersedeOwnTombstone, type 
 import { peekTurn } from "./restoreGuard";
 import { newDeviceSecretDue } from "./rotate";
 import { provesHandoffPassword } from "./handoffPake";
+import { filesOn } from "./handoffFiles";
 
 /**
  * What runs the handoff on this device (WISP 06 § The handoff): the giver while the engine runs, the giver and the
@@ -78,7 +79,11 @@ export interface DeviceLinkView {
 /** The device set as a page shows it (Profile, Devices; the standby screen): names and states, never a secret. */
 export interface DeviceSetView {
   state: DeviceState;
-  devices: { key: string; name: string; slot: number; self: boolean; active: boolean; status?: DeviceLinkView["status"] }[];
+  devices: {
+    key: string; name: string; slot: number; self: boolean; active: boolean; status?: DeviceLinkView["status"];
+    /** On the active device: files a move left for later on that device and not fetched yet (Remove says so). */
+    later?: { count: number; bytes: number };
+  }[];
   /**
    * Devices this one granted the set to whose enrollment never came back: they hold `D` and are in no record. Shown
    * as "Not finished"; moving the set to a new `D` (removal, a later part) is what takes `D` from them.
@@ -116,7 +121,8 @@ export function deviceSetView(record: DeviceRecord | null, links: DeviceLinkView
   const devices = record.deviceSet.flatMap((slot, index) => {
     if (!slot) return [];
     const link = links.find((l) => l.key === slot.key && !l.earlier);
-    return [{ key: slot.key, name: slot.name, slot: index, self: index === record.ownSlot, active: index === record.activeSlot, ...(link ? { status: link.status } : {}) }];
+    const later = record.state === "active" ? filesOn(record, slot.key) : null;
+    return [{ key: slot.key, name: slot.name, slot: index, self: index === record.ownSlot, active: index === record.activeSlot, ...(link ? { status: link.status } : {}), ...(later ? { later } : {}) }];
   });
   const listed = new Set(record.deviceSet.flatMap((slot) => (slot ? [slot.key] : [])));
   const grants = (record.unfinishedGrants ?? []).filter((grant) => !listed.has(grant.key));
@@ -967,12 +973,12 @@ export class DeviceLinks implements DeviceLinkEngine {
    * endpoint, and the link never went live. It starts again as on an app with no WebRTC, for this run (`withRtc` aside), as a group's edge
    * does (node.ts `edgeWithoutRtc`): its native endpoints run and its packet lists no `webrtc/1`, the other device starts
    * its own for it as for a Linux Desktop, and the two meet over Iroh's relay. Only with no session open, and only
-   * where this app has a native transport to go on with.
+   * where this app has a native transport to go on with: else WebRTC is tried again once the wait ran out (`rtcAgain`).
    */
   private withoutRtc(running: Running, waited = false): void {
     // A link that runs its native endpoints already (the other device has no WebRTC) has nothing more to go on with.
     if (this.stopped || running.rtcOff || running.native || !this.createPeerConnection || running.link.isDataLinkOpen) return;
-    if (!Object.values(this.nativeFactories()).some(Boolean)) return;
+    if (!Object.values(this.nativeFactories()).some(Boolean)) { if (waited) this.rtcAgain(running); return; }
     // Back from a round without WebRTC that started nothing (`withRtc`): a stalled attempt does not end this one at once,
     // the wait does, which doubles each time. Else the two would take turns every few seconds.
     if (!waited && this.rtcBacks.get(running.id)) { this.waitForRtc(running); return; }
@@ -1026,6 +1032,25 @@ export class DeviceLinks implements DeviceLinkEngine {
   private withRtc(running: Running): void {
     if (this.stopped || !this.createPeerConnection || !running.native || running.link.isDataLinkOpen || this.running.get(running.id) !== running) return;
     this.rtcBacks.set(running.id, (this.rtcBacks.get(running.id) ?? 0) + 1);
+    this.reopen(running);
+  }
+
+  /**
+   * No session opened over WebRTC by `DEVICE_RTC_MS`, and this app has no native transport to go on with (a web page
+   * with no Iroh and no HyperDHT relay): the side that dials starts its link again, with a new offer. The other device
+   * may have given up its answer to the first one and said nothing (its ICE gathering stalled under load), and that
+   * offer stood for its whole attempt (90 s) before the next. The side that answers looks fast for that new offer: it
+   * reads at the background pace after an answer it gave up (30 s). The wait before the next round doubles (`rtcBacks`).
+   */
+  private rtcAgain(running: Running): void {
+    if (this.stopped || running.link.isDataLinkOpen || this.running.get(running.id) !== running) return;
+    this.rtcBacks.set(running.id, (this.rtcBacks.get(running.id) ?? 0) + 1);
+    if (running.link.dialer === "you") this.reopen(running);
+    else running.link.expectPeer();
+  }
+
+  /** The link closed with nothing said, and the same one opened again with WebRTC. */
+  private reopen(running: Running): void {
     const run = this.queue.catch(() => {}).then(async () => {
       if (this.stopped || this.running.get(running.id) !== running || running.link.isDataLinkOpen) return;
       this.running.delete(running.id);

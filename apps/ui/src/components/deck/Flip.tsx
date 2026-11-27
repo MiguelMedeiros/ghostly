@@ -5,7 +5,8 @@ import './flip.css';
 /**
  * The turning card: its front (the chosen card's face, as the deck showed it) and its back, in the same place. It
  * starts a card's height and grows to what its back holds as it turns (a payment's review is long), following the
- * back's height after. With reduced motion the faces cross-fade instead of turning.
+ * back's height at once after (`data-settled`): a back that changes once still (a payment's review after Send) never
+ * moves its buttons under the pointer. With reduced motion the faces cross-fade instead of turning.
  *
  * `className` names the kind (`payment` → `payment-flip`, `payment-flip-card`, `payment-flip-front`…), beside the
  * generic `deck-flip…` classes flip.css styles; `tone` is the class that gives the front its card's colour.
@@ -39,7 +40,7 @@ export function CardFlip({flipped,front,back,className,tone='',onSettle}:{flippe
   return ()=>observer.disconnect();
  },[]);
  const cardHeight=Math.round(cardWidth/1.586);
- return <div ref={box} className={part('flip')} data-flipped={flipped} data-turning={flipped&&!settled||undefined} style={{'--card-w':`${cardWidth}px`,'--card-h':`${cardHeight}px`,height:flipped?backHeight:cardHeight} as CSSProperties}>
+ return <div ref={box} className={part('flip')} data-flipped={flipped} data-turning={flipped&&!settled||undefined} data-settled={settled||undefined} style={{'--card-w':`${cardWidth}px`,'--card-h':`${cardHeight}px`,height:flipped?backHeight:cardHeight} as CSSProperties}>
   <div ref={cardRef} className={part('flip-card')}>
    <div className={`${part('flip-front')}${tone?` ${tone}`:''}`} aria-hidden="true">{front}</div>
    <div ref={backRef} className={part('flip-back')}>{back}</div>

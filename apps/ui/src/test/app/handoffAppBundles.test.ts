@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { digestText, registerFileBytes, resetFileBytes, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
+import { bundleLength } from "@ghostly/browser/shared/appBundleLength";
+import type { AppManifest } from "@ghostly/core";
 import { databaseOfSpace } from "../../lib/profiles";
 import { handoffProfileHost } from "../../lib/handoffProfile";
 // covers: devices.handoff
@@ -86,10 +88,11 @@ const dropAll = async () => {
   for (const { name } of await indexedDB.databases()) if (name && name !== GIVER) await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
 };
 
-/** A bundle's bytes and its app digest (of its manifest, not of these bytes). */
+/** A bundle's bytes, as long as its manifest says a whole one is, and its app digest (of its manifest, not of these bytes). */
 const bundle = (n: number) => {
-  const bytes = Uint8Array.from({ length: 2_000 + n }, (_, i) => (i * 7 + n) % 251);
-  return { bytes, digest: digestText(sha256(Uint8Array.of(n))), sha256: digestText(sha256(bytes)) };
+  const manifest = { name: `app ${n}`, files: [{ path: "index.html", size: 2_000 + n }] };
+  const bytes = Uint8Array.from({ length: bundleLength(manifest as unknown as AppManifest) }, (_, i) => (i * 7 + n) % 251);
+  return { bytes, manifest, digest: digestText(sha256(Uint8Array.of(n))), sha256: digestText(sha256(bytes)) };
 };
 const app = (ref: string, digest: string, bytes: FileBytesKind, pending?: { digest: string; bytes: FileBytesKind }) =>
   ({ ref, publisher: "p", name: ref, sequence: 1, digest, permissions: [], manifest: {}, bytes, from: "https://example.test/app.ghostly", installedAt: 1, updatedAt: 1, ...(pending && { pending: { ...pending, sequence: 2, manifest: {}, added: [], from: "https://example.test/app2.ghostly", at: 1 } }) });
@@ -141,6 +144,170 @@ describe("a move hands over the installed apps' bundles", () => {
     expect(await source.read(`app-${installed.digest}`, 10, 5)).toEqual(installed.bytes.slice(10, 15));
   });
 
+  it("the giver takes a bundle's hash from its app's record, kept when it was written, and does not read the file whole again", async () => {
+    const [installed, waiting, older] = [bundle(11), bundle(12), bundle(13)];
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    for (const held of [installed, waiting, older]) await space.append(`app-${held.digest}`, 0, held.bytes);
+    const chess = app("chess", installed.digest, "opfs", { digest: waiting.digest, bytes: "opfs" });
+    await profileDatabase(giver, [], [
+      { ...chess, sha256: installed.sha256, manifest: installed.manifest, pending: { ...chess.pending, sha256: waiting.sha256, manifest: waiting.manifest } },
+      // A record from before the hash was kept: its file is read and hashed, as before.
+      app("notes", older.digest, "opfs"),
+    ]);
+    const hashed: string[] = [];
+    const digest = opfs.store.forSpace!(giver).digest;
+    const forSpace = opfs.store.forSpace!;
+    vi.spyOn(opfs.store, "forSpace").mockImplementation((other: string) => ({ ...forSpace(other), digest: async (id: string) => { hashed.push(id); return digest(id); } }));
+
+    const files = await handoffProfileHost("1.10.2", "web").source(giver).files();
+
+    expect(files).toEqual(expect.arrayContaining([
+      { id: `app-${installed.digest}`, size: installed.bytes.length, sha256: installed.sha256 },
+      { id: `app-${waiting.digest}`, size: waiting.bytes.length, sha256: waiting.sha256 },
+      { id: `app-${older.digest}`, size: older.bytes.length, sha256: older.sha256 },
+    ]));
+    expect(hashed).toEqual([`app-${older.digest}`]);
+  });
+
+  it("the giver keeps the hash of a bundle it read whole on its app's record, so the next move does not read it again", async () => {
+    // Apps installed before records kept the hash (every released build) got it only when they updated: until then, each
+    // Move and each reload read and hashed every bundle whole again.
+    const [installed, waiting] = [bundle(15), bundle(16)];
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    for (const held of [installed, waiting]) await space.append(`app-${held.digest}`, 0, held.bytes);
+    const chess = app("chess", installed.digest, "opfs", { digest: waiting.digest, bytes: "opfs" });
+    await profileDatabase(giver, [], [{ ...chess, manifest: installed.manifest, pending: { ...chess.pending, manifest: waiting.manifest } }]);
+    const hashed: string[] = [];
+    const digest = opfs.store.forSpace!(giver).digest;
+    const forSpace = opfs.store.forSpace!;
+    vi.spyOn(opfs.store, "forSpace").mockImplementation((other: string) => ({ ...forSpace(other), digest: async (id: string) => { hashed.push(id); return digest(id); } }));
+    const expected = [
+      { id: `app-${installed.digest}`, size: installed.bytes.length, sha256: installed.sha256 },
+      { id: `app-${waiting.digest}`, size: waiting.bytes.length, sha256: waiting.sha256 },
+    ];
+
+    expect(await handoffProfileHost("1.10.2", "web").source(giver).files()).toEqual(expected);
+    expect(hashed).toHaveLength(2);
+    expect(await handoffProfileHost("1.10.2", "web").source(giver).files()).toEqual(expected);
+
+    expect(hashed).toHaveLength(2);
+    const record = (await allOf(giver, "apps") as { ref: string; sha256?: string; pending?: { sha256?: string } }[]).find(({ ref }) => ref === "chess");
+    expect([record!.sha256, record!.pending?.sha256]).toEqual([installed.sha256, waiting.sha256]);
+  });
+
+  it("the giver keeps no hash of a bundle cut short, nor over a record that changed while it read", async () => {
+    const [cut, replaced, next] = [bundle(17), bundle(18), bundle(19)];
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    await space.append(`app-${cut.digest}`, 0, cut.bytes.subarray(0, 9));
+    await space.append(`app-${replaced.digest}`, 0, replaced.bytes);
+    await profileDatabase(giver, [], [{ ...app("todo", cut.digest, "opfs"), manifest: cut.manifest }, { ...app("chess", replaced.digest, "opfs"), manifest: replaced.manifest }]);
+    const digest = opfs.store.forSpace!(giver).digest;
+    const forSpace = opfs.store.forSpace!;
+    // An update installed while the bundle was read: its record names another version, whose hash this is not.
+    vi.spyOn(opfs.store, "forSpace").mockImplementation((other: string) => ({ ...forSpace(other), digest: async (id: string) => {
+      if (id === `app-${replaced.digest}`) await profileDatabase(giver, [], [{ ...app("chess", next.digest, "opfs"), manifest: next.manifest }]);
+      return digest(id);
+    } }));
+
+    await handoffProfileHost("1.10.2", "web").source(giver).files();
+
+    const records = await allOf(giver, "apps") as { ref: string; digest: string; sha256?: string }[];
+    expect(records.filter(({ ref }) => ref === "chess" || ref === "todo").map(({ ref, digest: at, sha256: kept }) => ({ ref, at, kept }))).toEqual([
+      { ref: "chess", at: next.digest, kept: undefined },
+      { ref: "todo", at: cut.digest, kept: undefined },
+    ]);
+  });
+
+  it("the giver keeps no hash over a record whose version got its hash, or moved to other storage, while it read", async () => {
+    const [hashed, moved] = [bundle(20), bundle(21)];
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    for (const held of [hashed, moved]) await space.append(`app-${held.digest}`, 0, held.bytes);
+    await profileDatabase(giver, [], [{ ...app("chess", hashed.digest, "opfs"), manifest: hashed.manifest }, { ...app("todo", moved.digest, "opfs"), manifest: moved.manifest }]);
+    const forSpace = opfs.store.forSpace!;
+    // The engine wrote the file again meanwhile and put the hash it checked on the record (or put the same version in
+    // other storage); this read saw the file mid-write, so its hash is not the file's.
+    vi.spyOn(opfs.store, "forSpace").mockImplementation((other: string) => ({ ...forSpace(other), digest: async (id: string) => {
+      if (id === `app-${hashed.digest}`) await profileDatabase(giver, [], [{ ...app("chess", hashed.digest, "opfs"), manifest: hashed.manifest, sha256: hashed.sha256 }]);
+      if (id === `app-${moved.digest}`) await profileDatabase(giver, [], [{ ...app("todo", moved.digest, "native"), manifest: moved.manifest }]);
+      return digestText(sha256(Uint8Array.of(1, 2, 3)));
+    } }));
+
+    await handoffProfileHost("1.10.2", "web").source(giver).files();
+
+    const records = await allOf(giver, "apps") as { ref: string; bytes: string; sha256?: string }[];
+    expect(records.filter(({ ref }) => ref === "chess" || ref === "todo").map(({ ref, bytes, sha256: kept }) => ({ ref, bytes, kept }))).toEqual([
+      { ref: "chess", bytes: "opfs", kept: hashed.sha256 },
+      { ref: "todo", bytes: "native", kept: undefined },
+    ]);
+  });
+
+  it("the giver hashes a bundle whose file is shorter than its record's whole bundle, not offering the kept hash", async () => {
+    // A rewrite of the file cut short (the tab closed mid-write) leaves part of it under a record that kept the whole
+    // file's hash: offered under it, the taker found it damaged and cancelled the move at every Move.
+    const whole = bundle(14), cut = whole.bytes.subarray(0, 7);
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    await space.remove(`app-${whole.digest}`);
+    await space.append(`app-${whole.digest}`, 0, cut);
+    await profileDatabase(giver, [], [{ ...app("todo", whole.digest, "opfs"), sha256: whole.sha256, manifest: whole.manifest }]);
+
+    const files = await handoffProfileHost("1.10.2", "web").source(giver).files();
+
+    expect(files).toContainEqual({ id: `app-${whole.digest}`, size: 7, sha256: digestText(sha256(cut)) });
+  });
+
+  it("a bundle hashed while cut short is offered with its whole hash at the next move, once its files came back", async () => {
+    // The source lives as long as the engine: the short file's hash, kept under its id, was offered with the whole file's
+    // size at every later Move of the session, and the taker found it damaged and cancelled the move each time.
+    const whole = bundle(22), cut = whole.bytes.subarray(0, 7);
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    await space.remove(`app-${whole.digest}`);
+    await space.append(`app-${whole.digest}`, 0, cut);
+    await profileDatabase(giver, [], [{ ...app("todo", whole.digest, "opfs"), sha256: whole.sha256, manifest: whole.manifest }]);
+    const source = handoffProfileHost("1.10.2", "web").source(giver);
+    expect(await source.files()).toContainEqual({ id: `app-${whole.digest}`, size: 7, sha256: digestText(sha256(cut)) });
+
+    // Open fetched its files back: written whole again, its record keeps the whole file's hash.
+    await space.remove(`app-${whole.digest}`);
+    await space.append(`app-${whole.digest}`, 0, whole.bytes);
+
+    expect(await source.files()).toContainEqual({ id: `app-${whole.digest}`, size: whole.bytes.length, sha256: whole.sha256 });
+  });
+
+  it("a bundle hashed at its whole length is offered with the hash its record got when it was written again", async () => {
+    // Damaged in place (same length), hashed by a move; then written again whole by the engine, which put the file's
+    // hash on the record: that one is the file's now, not the one read before.
+    const whole = bundle(23), damaged = whole.bytes.map((b) => b ^ 1);
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    await space.remove(`app-${whole.digest}`);
+    await space.append(`app-${whole.digest}`, 0, damaged);
+    await profileDatabase(giver, [], [{ ...app("todo", whole.digest, "opfs"), manifest: whole.manifest }]);
+    const source = handoffProfileHost("1.10.2", "web").source(giver);
+    expect(await source.files()).toContainEqual({ id: `app-${whole.digest}`, size: whole.bytes.length, sha256: digestText(sha256(damaged)) });
+
+    await space.remove(`app-${whole.digest}`);
+    await space.append(`app-${whole.digest}`, 0, whole.bytes);
+    await profileDatabase(giver, [], [{ ...app("todo", whole.digest, "opfs"), sha256: whole.sha256, manifest: whole.manifest }]);
+
+    expect(await source.files()).toContainEqual({ id: `app-${whole.digest}`, size: whole.bytes.length, sha256: whole.sha256 });
+  });
+
+  it("a chat file hashed at one size is hashed again once it holds other bytes", async () => {
+    const first = Uint8Array.from({ length: 500 }, (_, i) => i % 13), then = Uint8Array.from({ length: 900 }, (_, i) => i % 17);
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    await space.remove("link2-in-f2");
+    await space.append("link2-in-f2", 0, first);
+    const row = (bytes: Uint8Array) => ({ id: "link2-in-f2", linkId: "link2", direction: "in", bytes: "opfs", createdAt: 1, metadata: { name: "b.jpg", size: bytes.length, mime: "image/jpeg", timestamp: 1 } });
+    await profileDatabase(giver, [row(first)], []);
+    const source = handoffProfileHost("1.10.2", "web").source(giver);
+    expect(await source.files()).toContainEqual({ id: "link2-in-f2", size: first.length, sha256: digestText(sha256(first)) });
+
+    await space.remove("link2-in-f2");
+    await space.append("link2-in-f2", 0, then);
+    await profileDatabase(giver, [row(then)], []);
+
+    expect(await source.files()).toContainEqual({ id: "link2-in-f2", size: then.length, sha256: digestText(sha256(then)) });
+  });
+
   it("a taker whose frozen copy holds a bundle copies it from its file storage", async () => {
     const held = bundle(4);
     await opfs.store.append(`app-${held.digest}`, 0, held.bytes);
@@ -188,7 +355,7 @@ describe("a move hands over the installed apps' bundles", () => {
     const host = handoffProfileHost("1.10.2", "web");
     const staging = await host.staging.open();
     const file = { id: `app-${staged.digest}`, size: staged.bytes.length, sha256: staged.sha256 };
-    await staging.begin(file.id);
+    await staging.begin([file.id]);
     await staging.append(file.id, 0, staged.bytes);
     await staging.finish(file);
     expect(opfs.files.has(`${staging.database}/${file.id}`)).toBe(true);

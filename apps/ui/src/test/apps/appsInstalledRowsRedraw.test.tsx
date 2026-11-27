@@ -57,7 +57,8 @@ beforeEach(() => {
   // The installed list read again comes as equal new objects, as the engine answers.
   fakeEngine.on("appList", () => Array.from({ length: INSTALLED }, (_, i) => app(i + 1)))
     .on("appBuiltIns", () => Array.from({ length: BUILT_INS }, (_, i) => builtIn(i + 1)))
-    .on("appStoreList", () => [store()]).on("appCheckUpdates", () => [])
+    // The check found nothing new: one result an app, as the engine answers when it checked them.
+    .on("appStoreList", () => [store()]).on("appCheckUpdates", () => Array.from({ length: INSTALLED }, (_, i) => ({ ref: app(i + 1).ref, outcome: "none", run: { status: "ok" } })))
     .on("appStoreRefresh", () => [store()]);
 });
 afterEach(() => {

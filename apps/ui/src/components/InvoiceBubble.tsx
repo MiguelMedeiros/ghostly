@@ -27,6 +27,7 @@ import { Notice } from "./ui/Notice";
 import { focusLost, working } from "../lib/focus";
 import { getPrefix } from "../lib/storage";
 import { FocusSafeButton } from "./ui/FocusSafeButton";
+import { namesText } from "../lib/listText";
 
 /**
  * The one list every profile of the device kept before: it cannot be told apart by profile, so it goes, unread. Money
@@ -86,7 +87,7 @@ function useSettled(id: string): [boolean, (settled: boolean) => void] {
 }
 
 const button =
-  "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress";
+  "px-3 py-1.5 max-md:min-h-11 bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress";
 const quiet = "px-3 py-1.5 max-md:min-h-11 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer inline-flex items-center";
 
 function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId }: {
@@ -438,7 +439,7 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
         amount={inspection.amount}
         unit={money.unit}
         otherUnit={inspection.unit === "sat" ? undefined : t("payments.invoice.otherUnitRequest", { unit: inspection.unit })}
-        lines={[inspection.description, inspection.mints.length > 0 ? t("payments.invoice.mints", { mints: inspection.mints.map(host).join(", ") }) : undefined]}
+        lines={[inspection.description, inspection.mints.length > 0 ? t("payments.invoice.mints", { mints: namesText(inspection.mints.map(host), t) }) : undefined]}
         qr={value}
       >
         <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>

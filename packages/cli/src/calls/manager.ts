@@ -1,9 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
+import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_FUTURE_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
 import type { EngineState, LinkView, Settings } from "@ghostly/browser/shared/types";
-import { dhtOnly, findChat, findOwnNamedChat } from "../apiKit";
+import { dhtOnly, findChat, findOwnNamedChats } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath, clearAudioSockets, feedQueue, sharedFolder } from "./audioSocket";
 import { callIceServers, CallMedia, callUsesTurn, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
@@ -56,6 +56,8 @@ export interface CallHost {
   callPaceMs?: number;
   /** QUICK_REDIAL_MS (0: no call is held back; tests that ring and hang up over and over to see each call). */
   quickRedialMs?: number;
+  /** CHECKING_REDIAL_MS (tests shorten it). */
+  checkingRedialMs?: number;
 }
 
 /**
@@ -81,6 +83,14 @@ export const STALL_MS = 5_000;
 export const STALL_END_MS = 15_000;
 /** A connection that fails this soon after its answer went in lost the race `redial` describes, and starts over. */
 export const RACE_FAIL_MS = 2_000;
+/**
+ * An outgoing call whose answer went in and that has not connected this long after offers again (`redial`). The
+ * contact's app, whose connection failed before it ever connected, waits RESTART_GRACE_MS (8 s) for that newer offer
+ * and then hangs up, while libjuice here can still say "checking": the app's checks are all this side has when its
+ * host address is an mDNS name (WebKit's), and none from a macOS runner's WKWebView arrived in 23 s (CI run
+ * 44619228595). A call on a LAN connects in under 100 ms, one through a TURN server in a few seconds.
+ */
+export const CHECKING_REDIAL_MS = 10_000;
 /**
  * A ringing call's answer is made ahead (`prepare`), and made again this often while it rings: libjuice gives up on a
  * connection that has nothing to check (the offer's candidates wait for the answer) after about 40 s.
@@ -116,6 +126,8 @@ interface Call {
   offering: boolean;
   /** How many times this side offered again on a new connection after an answer was refused (`redial`). */
   redials: number;
+  /** How many of those redials came after the connection failed (an answer refused), not after it kept checking. */
+  refusals: number;
   /** How many times this side answered the contact's newer offer on a new connection (`reanswer`). */
   reanswers: number;
   /** The log said the contact's offers past the last start-over are ignored: it says so once a call. */
@@ -193,9 +205,12 @@ export class CallManager {
   /**
    * A new signal's timestamp in a chat: now, or 1 ms after the last one sent there. The contact drops a signal no
    * newer than the last it heard, so a redial or a hang-up in the same millisecond as the signal before it would be lost.
+   * A clock set back by more than a contact takes ahead of its own (CALL_SIGNAL_FUTURE_MS) was the wrong one: dated
+   * after it, every signal in that chat was refused there until the daemon restarted.
    */
   private stamp(chat: string): number {
-    const ts = Math.max(this.now, (this.lastSent.get(chat) ?? 0) + 1);
+    const now = this.now, last = this.lastSent.get(chat) ?? 0;
+    const ts = last >= now && last - now < CALL_SIGNAL_FUTURE_MS ? last + 1 : now;
     this.lastSent.set(chat, ts);
     return ts;
   }
@@ -265,14 +280,18 @@ export class CallManager {
       this.lastSignal.set(chat, signal.ts);
       this.held.delete(chat);
       if (call) {
-        // A hang-up while this side starts over (`redial`) is the contact's app ending a connection that failed. Once
-        // a connection came up, the call was on: a start-over before it does not make the hang-up a failure.
+        // A hang-up while this side starts over after a refused answer (`redial`) is the contact's app ending a
+        // connection that failed. One after a start-over for a connection still checking (CHECKING_REDIAL_MS) is the
+        // contact's own: nothing failed on either side. Once a connection came up, the call was on: a start-over
+        // before it does not make the hang-up a failure.
         // A hang-up that says the contact's side could not connect (`r: "u"`, WISP 601): the call failed, not declined.
         const unreachable = signal.r === "u" && call.state !== "connected";
-        const failed = unreachable || (call.state !== "connected" && (call.offering || (call.direction === "out" && call.redials > 0)));
+        const failed = unreachable || (call.state !== "connected" && call.direction === "out" && call.refusals > 0);
         const reason: EndReason = call.state === "ringing" && call.direction === "in" ? "missed"
           : call.state === "ringing" && !unreachable ? "rejected" : failed ? "failed" : "remote-hangup";
-        void this.end(call, reason, false);
+        // A hang-up that crossed our offer made again (`redial`) is answered with ours: that offer reaches a side with
+        // no call, which rings it as a new one, unless a hang-up comes after it.
+        void this.end(call, reason, call.offering && call.redials > 0);
       }
     }
   }
@@ -318,14 +337,26 @@ export class CallManager {
       if (attempt === call.attempt) this.refused(call, `the answer was refused (${error instanceof Error ? error.message : String(error)})`);
       return;
     }
-    if (attempt === call.attempt) this.arm(call, CONNECT_MS, "failed", true);
+    if (attempt !== call.attempt) return;
+    if (call.redials >= this.maxRedials) { this.arm(call, CONNECT_MS, "failed", true); return; }
+    // Still not connected a while after the answer (CHECKING_REDIAL_MS): offering again, as the contact's app waits for.
+    const wait = this.host.checkingRedialMs ?? CHECKING_REDIAL_MS;
+    this.disarm(call);
+    call.timer = setTimeout(() => {
+      call.timer = null;
+      if (call.ended || attempt !== call.attempt || call.state === "connected") return;
+      this.refused(call, `not connected ${Math.round(wait / 100) / 10} s after the answer went in (ice ${call.media?.ice.state ?? "none"})`, false);
+    }, wait);
+    call.timer.unref?.();
   }
 
   /**
    * The contact's answer on this connection was refused, or the connection failed right after it (the same race,
    * whose handshake can also fail once the answer is in): offering again (`redial`) while there are tries left.
+   * `failed` false: the connection only kept checking (CHECKING_REDIAL_MS), and a hang-up after it is no failure.
    */
-  private refused(call: Call, what: string): void {
+  private refused(call: Call, what: string, failed = true): void {
+    if (failed) call.refusals++;
     if (call.redials < this.maxRedials) {
       process.stderr.write(`ghostly: call ${call.id}: ${what}: offering again on a new connection\n`);
       void this.redial(call);
@@ -461,12 +492,13 @@ export class CallManager {
 
   async start(chat: string, options: { rate?: unknown }): Promise<Record<string, unknown>> {
     const link = this.callable(chat);
-    if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
+    this.refuseBusy(link.id);
     // The contact's call held back here (QUICK_REDIAL_MS) may still ring there: ours would cross it, and theirs, the
     // earlier offer, would win on their side while this side has already spent it. It rings here instead, as the apps do.
     const held = this.held.get(link.id);
     if (held && this.within(held.at, RING_MS)) {
       this.incoming(link.id, held.offer);
+      this.refuseBusy(link.id);
       throw new CliError("busy", "The contact is calling: their call rings here");
     }
     this.paced(link.id);
@@ -474,7 +506,7 @@ export class CallManager {
     const rate = rateOf(options.rate, DEFAULT_RATE);
     const stack = await this.stack();
     // The contact's call may have come in while the stack loaded.
-    if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
+    this.refuseBusy(link.id);
     const call = this.add(link.id, "out", rate);
     try {
       await this.attach(call, (media) => CallMedia.offer(stack, media));
@@ -496,6 +528,8 @@ export class CallManager {
     // A one-shot answers no call: it said "No call is on" instead when none rang.
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     const call = this.find(ref, (c) => c.direction === "in" && c.state === "ringing");
+    // One placed here reads `ringing` too: it rings at the contact's, for them to answer.
+    if (call.direction === "out" && call.state === "ringing") throw new CliError("refused", "That call is yours: it rings at the contact's");
     if (call.direction !== "in" || call.state !== "ringing") throw new CliError("refused", "That call is not ringing here");
     this.callable(call.chat);
     call.rate = rateOf(options.rate, call.rate);
@@ -529,9 +563,10 @@ export class CallManager {
 
   async hangup(ref: string | undefined): Promise<Record<string, unknown>> {
     const call = this.find(ref);
-    const view = this.view(call);
+    // As it was, but ended: its socket is gone and its connection closed, so no audio or stats are left to read.
+    const { stats: _, ...view } = this.view(call);
     await this.end(call, "hangup", true);
-    return { ...view, state: "ended", reason: "hangup" };
+    return { ...view, state: "ended", reason: "hangup", audio: null };
   }
 
   /** One call, by its id or its chat (or the only one). */
@@ -557,8 +592,9 @@ export class CallManager {
   setAuto(next: { on: boolean; from?: string[]; rate?: unknown }): AutoAnswer {
     // The daemon answers these chats' calls from now on: never one found only by a name its contact chose.
     const { links, groups } = this.host.engine.getState();
-    const from = (next.from ?? []).map((ref) => findOwnNamedChat(links, ref, groups).id);
-    this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, next.on ? this.auto.rate : DEFAULT_RATE) };
+    const from = findOwnNamedChats(links, next.from ?? [], groups).map((link) => link.id);
+    // Each `on` sets the whole of it: the chats and the rate, 48000 when none is given, as the usage line says.
+    this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, DEFAULT_RATE) };
     this.saveAuto();
     return this.getAuto();
   }
@@ -572,6 +608,16 @@ export class CallManager {
     const from = this.auto.from.filter((c) => c !== chat);
     this.auto = from.length > 0 ? { ...this.auto, from } : { on: false, from: [], rate: DEFAULT_RATE };
     this.saveAuto();
+  }
+
+  /**
+   * A contact blocked here (`setContactBlocked`): nothing of theirs is heard any more, their hang-up included, so a call
+   * with them ends now, as the apps' Block contact ends it. One that only rings here stops with nothing sent, as if this
+   * side were closed; one that is on, or rings on their side, ends as a hang-up does.
+   */
+  async endBlocked(): Promise<void> {
+    await Promise.all([...this.calls.values()].filter((call) => this.link(call.chat)?.blocked).map((call) =>
+      this.end(call, "hangup", !(call.direction === "in" && call.state === "ringing"))));
   }
 
   private saveAuto(): void {
@@ -597,7 +643,7 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      offering: false, redials: 0, reanswers: 0, ignoring: false, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, connectedTick: null, timer: null,
+      offering: false, redials: 0, refusals: 0, reanswers: 0, ignoring: false, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, connectedTick: null, timer: null,
       watcher: null, stalledFrom: null, stalls: 0, ended: false,
     };
     this.calls.set(call.id, call);
@@ -833,6 +879,16 @@ export class CallManager {
     };
   }
 
+  /** Refuses a call placed in a chat where one is on; the contact's that rings here says how to answer it. */
+  private refuseBusy(chat: string): void {
+    const on = this.byChat(chat);
+    if (!on) return;
+    if (on.direction === "in" && on.state === "ringing") {
+      throw new CliError("busy", `The contact is calling: their call rings here (ghostly call answer ${chat})`, { call: on.id });
+    }
+    throw new CliError("busy", "A call is already on in this chat");
+  }
+
   private byChat(chat: string): Call | undefined {
     for (const call of this.calls.values()) if (call.chat === chat) return call;
     return undefined;
@@ -849,15 +905,7 @@ export class CallManager {
     if (ref) {
       const byId = this.calls.get(ref);
       if (byId) return byId;
-      let chat: LinkView;
-      try {
-        chat = this.chatOf(ref);
-      } catch (error) {
-        if (CALL_ID.test(ref) && error instanceof CliError && error.code === "not_found" && !error.details) {
-          throw new CliError("not_found", `No call ${ref}: it ended or never existed (ghostly call list)`);
-        }
-        throw error;
-      }
+      const chat = this.chatOfCall(ref);
       const call = this.byChat(chat.id);
       if (!call) throw new CliError("not_found", `No call in chat ${ref}`);
       return call;
@@ -867,6 +915,26 @@ export class CallManager {
     if (picked.length === 1) return picked[0];
     if (!picked.length) throw new CliError("not_found", "No call is on");
     throw new CliError("bad_request", "More than one call is on: name one (its id or its chat)", { calls: picked.map((c) => c.id) });
+  }
+
+  /** The chat a ref that is no call's id names; one that names no chat either is no call. */
+  private chatOfCall(ref: string): LinkView {
+    try {
+      return this.chatOf(ref);
+    } catch (error) {
+      if (CALL_ID.test(ref) && error instanceof CliError && error.code === "not_found" && !error.details) {
+        throw new CliError("not_found", `No call ${ref}: it ended or never existed (ghostly call list)`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Refuses a ref that names no call and no chat, as `find` does, before a one-shot starts its chats (api.ts
+   * `startOnceFound`): a chat's call may still ring once they start, so one named by its chat is not looked for here.
+   */
+  named(ref: string): void {
+    if (!this.calls.has(ref)) this.chatOfCall(ref);
   }
 
   private link(chat: string): LinkView | undefined {

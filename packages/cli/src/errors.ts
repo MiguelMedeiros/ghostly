@@ -1,3 +1,5 @@
+import { shownAddress } from "@ghostly/browser/shared/shownAddress";
+
 /**
  * Errors that reach a bot: a stable `code` to branch on, a message for people, and the exit status the CLI
  * leaves with (WISP 1100 § Exit codes). The daemon sends `{code, message}` over the socket; the CLI prints
@@ -24,6 +26,12 @@ export class CliError extends Error {
 }
 
 /**
+ * What `ghostly device` and `ghostly help device` say (WISP 06): the engine runs a CLI profile on one device only
+ * (`singleDevice`), and the app's devices cannot take it. Before, `ghostly device` suggested `service`.
+ */
+export const SINGLE_DEVICE = "A CLI profile is on this one device only: it cannot be added to another device, moved to one or taken over from one, and the app's Add a device cannot add it. To run it on another machine, back it up here (ghostly profile backup --out <file>), restore it there (ghostly profile restore <file> <name>) and stop using it here";
+
+/**
  * A value as a refusal quotes it (`--limit takes a number, not "x"`): a word with a line break or longer than 40
  * characters is described, not printed, as an unknown option is (docs/CLI.md "Secrets stay hidden"). A Cashu token, a
  * wallet connection link, an nsec, a seed or a hex key typed in the wrong place is that long, and bots keep the output.
@@ -31,6 +39,15 @@ export class CliError extends Error {
 export function shownValue(value: unknown): string {
   if (typeof value !== "string") return JSON.stringify(value);
   return secretValue(value) ?? JSON.stringify(value);
+}
+
+/**
+ * A relay address as a refusal quotes it: without its `user:password@`, `?query` or `#fragment` (a relay's credentials
+ * or token), parsed or not, as the browser's TURN refusal does (`shownAddress`). The rest is said as given, so the
+ * person sees which one was refused; with a `?` or `#` before the last `@`, only the scheme.
+ */
+export function shownRelay(value: string): string {
+  return shownAddress(value);
 }
 
 /** What `shownValue` says in place of a long or secret-looking word, else undefined (the word may be printed). */
@@ -173,4 +190,17 @@ export function localFileError(error: unknown, file?: string): CliError | undefi
     return new CliError("unavailable", at ? `No room left for ${at}: free some space, then try again` : "No room left on the disk: free some space, then try again", { reason: "no_space", errno: code, ...(at && { path: at }) });
   }
   return undefined;
+}
+
+/**
+ * `localFileError` for a file that holds a secret (`--passphrase-file`, `x401 credential add <file>`): one not there
+ * is not named, as the word given may be the secret itself typed in its place, and no length tells a short passphrase
+ * from a path. `flag`: what the command calls the file; `holds`: what is in it. A file there (a folder, one not
+ * allowed) is named as `localFileError` names it.
+ */
+export function secretFileError(error: unknown, file: string, flag: string, holds: string): CliError | undefined {
+  const local = localFileError(error, file);
+  const code = local && (error as { code?: unknown }).code;
+  if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP" || code === "ENAMETOOLONG") return new CliError(local!.code, `${flag} names no file: give the path of the file that holds ${holds}`);
+  return local;
 }

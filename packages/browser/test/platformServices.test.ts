@@ -260,6 +260,43 @@ describe("sending files", () => {
     expect(stored?.transfer).toEqual({ state: "transferring", transferred: 0, size: 5 });
   });
 
+  it("keeps a copy of a small file's bytes, never the File handed over, to a chat and to a group", async () => {
+    // WebKit (the macOS app): a File dropped in, and any Blob made from it or sliced off it, keeps the temporary path
+    // it was dragged from; a record kept with it reached for that path once it was gone. So it is read once, whole.
+    withLinks(chat({ id: "drop-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    const dropped = () => new File(["%PDF-1.7 dropped"], "x.pdf", { type: "application/pdf", lastModified: 1_700_000_000_000 });
+    const picked = [dropped(), dropped()];
+    const reads = picked.map(file => vi.spyOn(file, "arrayBuffer"));
+    const put = vi.spyOn(fileStore, "put");
+    const sent: { id: string }[] = [];
+    try {
+      sent.push((await services.sendFile("peer-1", picked[0])).file, (await services.sendGroupFile!("g1", picked[1])).file);
+      expect(put).toHaveBeenCalledTimes(2);
+      for (const [i, [record]] of put.mock.calls.entries()) {
+        const kept = record.blob as File;
+        expect(kept).not.toBe(picked[i]);
+        // Read whole once (its first bytes are looked at for metadata, in slices): the digest is the copy's.
+        expect(reads[i]).toHaveBeenCalledTimes(1);
+        expect(kept).toBeInstanceOf(File);
+        expect({ name: kept.name, type: kept.type, lastModified: kept.lastModified, size: kept.size })
+          .toEqual({ name: "x.pdf", type: "application/pdf", lastModified: 1_700_000_000_000, size: picked[i].size });
+        expect(await kept.text()).toBe("%PDF-1.7 dropped");
+        expect(record.digest).toBe(await blobDigest(new Blob(["%PDF-1.7 dropped"])));
+      }
+    } finally { put.mockRestore(); }
+    // Read back from storage, not from the bytes just handed over: each record holds the file, under its type.
+    await services.deleteMessage("peer-1", "me_1");
+    const [chatFile, groupFile] = sent;
+    expect((await fileStore.listForLink("drop-link")).map(file => file.id)).toEqual([chatFile.id]);
+    for (const [file, linkId] of [[chatFile, "drop-link"], [groupFile, "group:g1"]] as const) {
+      const [listed] = (await fileStore.listForLink(linkId)).filter(stored => stored.id === file.id);
+      expect(listed.blob?.type).toBe("application/pdf");
+      expect(await listed.blob?.text()).toBe("%PDF-1.7 dropped");
+      expect(await (await services.getFile(file.id))?.text()).toBe("%PDF-1.7 dropped");
+    }
+  });
+
   it("shows a file just sent from the bytes handed over, at once, until the message is deleted", async () => {
     withLinks(chat({ id: "pic-link" }));
     const png = new File([PNG], "Pasted image.png", { type: "image/png" });
@@ -274,6 +311,54 @@ describe("sending files", () => {
     await services.deleteMessage("peer-1", "me_1");
     await fileStore.delete(file.id);
     expect(await services.getFile(file.id)).toBeNull();
+  });
+
+  it("keeps in memory only what a bubble draws at once: a picture or a voice note, not any other file", async () => {
+    // The copy of a small file's bytes (above) is memory: a PDF's bubble never reads it, so it is read from the store.
+    withLinks(chat({ id: "kept-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    const pdf = () => new File(["%PDF-1.7 report"], "report.pdf", { type: "application/pdf" });
+    const sent = [
+      (await services.sendFile("peer-1", pdf())).file,
+      (await services.sendGroupFile!("g1", pdf())).file,
+      (await services.sendFile("peer-1", new File([PNG], "a.png", { type: "image/png" }))).file,
+      (await services.sendFile("peer-1", new File(["OggS voice"], "voice.ogg", { type: "audio/ogg" }), { voice: { duration: 1_000, peaks: [1, 2, 3] } })).file,
+    ];
+    const get = vi.spyOn(fileStore, "get");
+    try {
+      for (const file of sent) await services.getFile(file.id);
+      expect(get.mock.calls.map(([id]) => id)).toEqual([sent[0].id, sent[1].id]);
+    } finally { get.mockRestore(); }
+    expect(await (await services.getFile(sent[0].id))?.text()).toBe("%PDF-1.7 report");
+  });
+
+  it("keeps the last 8 pictures just sent", async () => {
+    withLinks(chat({ id: "count-link" }));
+    const sent = [];
+    for (let i = 0; i < 9; i++) sent.push((await services.sendFile("peer-1", new File([PNG], `${i}.png`, { type: "image/png" }))).file);
+    const get = vi.spyOn(fileStore, "get");
+    try {
+      for (const file of sent) await services.getFile(file.id);
+      expect(get.mock.calls.map(([id]) => id)).toEqual([sent[0].id]);
+    } finally { get.mockRestore(); }
+  });
+
+  it("keeps the pictures just sent within a budget of bytes", async () => {
+    withLinks(chat({ id: "budget-link" }));
+    // Three pictures of 12 MiB each (a PNG with a second, large IDAT, which the metadata strip keeps): over 32 MiB
+    // together, so the oldest is read back.
+    const data = 12 * 1024 * 1024;
+    const idat = new Uint8Array(12 + data);
+    new DataView(idat.buffer).setUint32(0, data);
+    idat.set(ascii("IDAT"), 4);
+    const big = (name: string) => new File([PNG.subarray(0, -12), idat, PNG.subarray(-12)], name, { type: "image/png" });
+    const sent = [];
+    for (const name of ["1.png", "2.png", "3.png"]) sent.push((await services.sendFile("peer-1", big(name))).file);
+    const get = vi.spyOn(fileStore, "get");
+    try {
+      for (const file of sent) await services.getFile(file.id);
+      expect(get.mock.calls.map(([id]) => id)).toEqual([sent[0].id]);
+    } finally { get.mockRestore(); }
   });
 
   // covers: files.image.metadata

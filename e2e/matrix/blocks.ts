@@ -651,7 +651,7 @@ async function mainnetUi({ a, b, combo }: World): Promise<void> {
       if (combo.rail === "ln-mint") {
         await wallet(p, "lightning-mainnet");
         await expect(p.page.getByTestId("wallet-card-lightning-mainnet")).toContainText(containing("Invoices via Cashu"));
-        await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-current")).toContainText("Cashu mints");
+        await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-current")).toContainText(containing("Cashu mints"));
       }
       made.add(p);
       continue;
@@ -798,7 +798,7 @@ export const restore: Block = {
     if (b.locale !== "en") await setLanguage(restored, b.locale);
     await go(restored, "#/profile");
     const again = restored.page.getByTestId("profile-backups");
-    await again.getByTestId("restore-open").click();
+    await openRestore(restored, again);
     await again.getByTestId("restore-file").setInputFiles({ name: file.suggestedFilename(), mimeType: "application/json", buffer: bundle });
     await again.getByTestId("restore-passphrase").fill(PASSPHRASE);
     await again.getByTestId("restore-go").click();
@@ -826,6 +826,24 @@ export const restore: Block = {
     await sees(a, "restored and here", 120_000);
   },
 };
+
+/**
+ * Opens "Restore from a backup" and waits for its file field. On a fresh browser the click right after the page came
+ * has twice left it closed in the nightly matrix (no trace kept, not seen here): it is clicked again then, and the log
+ * says what the page showed. Restore (`restore-go`) is there whenever the panel is open: open without the file field
+ * is no lost click, and is not clicked shut.
+ */
+async function openRestore(actor: Actor, backups: Locator): Promise<void> {
+  const button = backups.getByTestId("restore-open"), file = backups.getByTestId("restore-file");
+  for (let click = 1; ; click++) {
+    await button.click();
+    if (await file.waitFor({ state: "attached", timeout: 5_000 }).then(() => true, () => false)) return;
+    const open = await backups.getByTestId("restore-go").count() > 0;
+    const shown = `the button reads "${await button.textContent()}", the address is ${await actor.page.evaluate(() => location.hash)}`;
+    if (open || click === 3) throw new Error(`Restore from a backup ${open ? "opened with no file field" : `did not open after ${click} clicks`}: ${shown}`);
+    console.log(`  ↻ ${test.info().title} [${actor.name}] Restore from a backup did not open on click ${click} (${shown}): clicked again`);
+  }
+}
 
 /* ---------- the scenario ---------- */
 

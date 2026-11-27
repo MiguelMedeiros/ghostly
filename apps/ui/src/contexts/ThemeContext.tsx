@@ -1,25 +1,12 @@
 import {
-  createContext,
-  useContext,
   useEffect,
   useLayoutEffect,
   useState,
   type ReactNode,
 } from "react";
 import { useSettings } from "./SettingsContext";
-import type { Theme, ColorScheme, ColorTheme } from "../lib/settings";
+import type { ColorTheme } from "../lib/settings";
 import { applyWindowTheme } from "../lib/windowTheme";
-
-interface ThemeContextValue {
-  effectiveScheme: "dark" | "light";
-  colorScheme: ColorScheme;
-  colorTheme: ColorTheme;
-  // Legacy support
-  effectiveTheme: "dark" | "light";
-  theme: Theme;
-}
-
-const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 /**
  * Puts the theme on the page at once. Its colors are variables, so every element with a color transition (a chat row, a
@@ -45,7 +32,7 @@ export function switchTheme(scheme: "dark" | "light", colorTheme: ColorTheme, ro
  * App: the lock screen and a standby device's screen show no App, and the theme still changes under them (System follows
  * the OS), while the bar kept what the boot guard wrote at load.
  */
-function syncThemeColor(root: HTMLElement = document.documentElement): void {
+export function syncThemeColor(root: HTMLElement = document.documentElement): void {
   const meta = document.querySelector('meta[name="theme-color"]');
   if (!meta) return;
   const color = getComputedStyle(root).getPropertyValue("--theme-panel-header").trim();
@@ -86,26 +73,5 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     syncThemeColor();
   }, [effectiveScheme, settings.colorTheme]);
 
-  return (
-    <ThemeContext.Provider
-      value={{
-        effectiveScheme,
-        colorScheme: settings.colorScheme,
-        colorTheme: settings.colorTheme,
-        // Legacy support
-        effectiveTheme: effectiveScheme,
-        theme: settings.theme,
-      }}
-    >
-      {children}
-    </ThemeContext.Provider>
-  );
-}
-
-export function useTheme(): ThemeContextValue {
-  const context = useContext(ThemeContext);
-  if (!context) {
-    throw new Error("useTheme must be used within a ThemeProvider");
-  }
-  return context;
+  return <>{children}</>;
 }

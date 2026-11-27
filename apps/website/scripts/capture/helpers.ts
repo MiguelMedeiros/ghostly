@@ -237,13 +237,6 @@ export const go = async (p: Peer, hash: string) => {
   await expect(p.page.getByPlaceholder("Message…")).toBeVisible();
 };
 
-/** Open the chat with `name` from the chat list. */
-export async function openChatWith(p: Peer, name: string) {
-  await home(p);
-  await p.page.getByTestId("sidebar").getByText(name, { exact: true }).first().click();
-  await expect(p.page.getByPlaceholder("Message…")).toBeVisible();
-}
-
 /**
  * Ghostly Browser (the built extension, apps/extension/dist) in a Chromium profile of its own, the way
  * e2e/support/extension.ts opens it: the localhost permission granted up front (Chrome's prompt

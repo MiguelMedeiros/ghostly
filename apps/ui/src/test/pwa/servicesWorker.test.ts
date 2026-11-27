@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BRIDGE_PAGE, MAX_REQUEST_BYTES } from "../../../../web/src/svc/protocol";
+import { BRIDGE_PAGE, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES } from "../../../../web/src/svc/protocol";
 
 // covers: services.web-open
 describe("the services worker", () => {
@@ -81,13 +81,18 @@ describe("the services worker", () => {
 
     it("with no referrer and no client (Firefox's every one), goes on through a page that renders only inside Ghostly, as it was made", async () => {
       const { GO_KEY, GO_SCRIPT } = await import("../../../../web/src/svc/worker");
+      const { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT } = await import("@ghostly/core");
       const page = await fetchThrough({ method: "POST", path: "/api/save?x=1", mode: "navigate", destination: "iframe", referrer: "" })!;
       expect(page.status).toBe(200);
       expect(page.headers.get("referrer-policy")).toBe("same-origin");
       const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(GO_SCRIPT)));
       expect(page.headers.get("content-security-policy"))
-        .toBe(`frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; script-src 'sha256-${btoa(String.fromCharCode(...digest))}'`);
-      const token = /<script data-go="([0-9a-f-]+)">/.exec(await page.text())?.[1];
+        .toBe(`frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; script-src ${CLIPBOARD_GUARD_HASH} ${VIEWER_GUARD_HASH} 'sha256-${btoa(String.fromCharCode(...digest))}'; form-action 'none'; base-uri 'none'`);
+      // It stays on this origin (its next navigation needs this origin's referrer), and the app's page can read its
+      // window: the guards run in it first, as in each of the app's pages (the WebRTC one too while Hide my IP is on).
+      const html = await page.text();
+      expect(html.startsWith(`<!doctype html><meta charset="utf-8"><script>${CLIPBOARD_GUARD_SCRIPT}</script><script>${VIEWER_GUARD_SCRIPT}</script><script data-go=`)).toBe(true);
+      const token = /<script data-go="([0-9a-f-]+)">/.exec(html)?.[1];
       expect(token).toBeTruthy();
       // Nothing reached the contact: in another site's frame the page never renders, and no one asks again.
       expect(bridge.postMessage).not.toHaveBeenCalled();
@@ -108,6 +113,48 @@ describe("the services worker", () => {
       expect((bridge.postMessage.mock.calls[2]![0] as { method: string; path: string }).method).toBe("GET");
     });
 
+    it("goes on from its page only while that page is in the view the bridge frames: under the app itself, or anywhere else, nothing asks again", async () => {
+      const { GO_SCRIPT } = await import("../../../../web/src/svc/worker");
+      /** A window of another origin, whose location throws; the top's parent is itself, as in a browser. */
+      const foreign = (parent?: unknown) => {
+        const w: { parent: unknown; readonly location: Location } = {
+          parent,
+          get location(): Location { throw new DOMException("cross-origin", "SecurityError"); },
+        };
+        w.parent ??= w;
+        return w;
+      };
+      const app = foreign();
+      /** The go-on page's script run with `parent` and `top` as given: the address it asked for again, if any. */
+      const run = (parent: unknown, top: unknown): string | null => {
+        let asked: string | null = null;
+        const location = { href: `${ORIGIN}/account?x=1`, replace: (to: string) => { asked = to; } };
+        const history = { replaceState: (_s: unknown, _t: string, to: URL) => { location.href = String(to); } };
+        const document = { currentScript: { dataset: { go: "token" } } };
+        new Function("location", "history", "document", "parent", "top", GO_SCRIPT)(location, history, document, parent, top);
+        return asked;
+      };
+      const bridgePage = { location: new URL(`${ORIGIN}${BRIDGE_PAGE}`), parent: app };
+      expect(run(bridgePage, app)).toBe(`${ORIGIN}/account?x=1`);
+      // A frame of the app's own pages inside the view, at any depth.
+      const page = { location: new URL(`${ORIGIN}/`), parent: bridgePage };
+      expect(run(page, app)).toBe(`${ORIGIN}/account?x=1`);
+      expect(run({ location: new URL(`${ORIGIN}/widget`), parent: page }, app)).toBe(`${ORIGIN}/account?x=1`);
+      // Its frame left the bridge (the app frames this origin itself): the parent is the app's, unreadable.
+      expect(run(app, app)).toBeNull();
+      // A page of this origin framed by the app, not by a bridge; or another origin between it and the bridge.
+      expect(run({ location: new URL(`${ORIGIN}/`), parent: app }, app)).toBeNull();
+      expect(run({ location: new URL(`${ORIGIN}/`), parent: foreign(bridgePage) }, app)).toBeNull();
+      // It is the top, or the bridge is.
+      const self: { parent?: unknown } = {};
+      self.parent = self;
+      expect(run(self, self)).toBeNull();
+      const topBridge: { location: URL; parent?: unknown } = { location: new URL(`${ORIGIN}${BRIDGE_PAGE}`) };
+      topBridge.parent = topBridge;
+      expect(run(topBridge, topBridge)).toBeNull();
+      expect(run({ location: new URL(`${ORIGIN}/`), parent: topBridge }, topBridge)).toBeNull();
+    });
+
     it("is never another site's: its form POST at the top or into a frame of its own, or a window it opens", async () => {
       const tries = [
         { method: "POST", path: "/api/delete", mode: "navigate", destination: "document", referrer: `${OTHER}/` },
@@ -123,7 +170,7 @@ describe("the services worker", () => {
         const response = await answer!;
         expect(response.status).toBe(403);
         expect(await response.text()).toBe("This app opens only inside Ghostly.");
-        expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'self' https://app.ghostly.example");
+        expect(response.headers.get("content-security-policy")).toMatch(/^frame-ancestors 'self' https:\/\/app\.ghostly\.example;/);
       }
       expect(bridge.postMessage).not.toHaveBeenCalled();
     });
@@ -201,6 +248,77 @@ describe("the services worker", () => {
     });
   });
 
+  describe("an origin of its own, apart from another contact's app open at once", () => {
+    // The apps' origins share one site (the services host): with no `Origin-Agent-Cluster: ?1` a browser keys their
+    // agent cluster by site, where `document.domain` joins two of them and they may share a process.
+    it("every answer the worker makes asks for an agent cluster of this origin's own, whatever the contact sends", async () => {
+      const answers: [string, () => Promise<Response>][] = [
+        ["refused", () => fetchThrough({ mode: "navigate", destination: "document", referrer: "" })!],
+        ["go on", () => fetchThrough({ mode: "navigate", destination: "iframe", referrer: "" })!],
+        ["contact's", () => {
+          bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+            const port = transfer[0] as MessagePort;
+            port.postMessage({ type: "head", status: 200, headers: [["content-type", "text/html"], ["Origin-Agent-Cluster", "?0"]] });
+            port.postMessage({ type: "end" });
+          });
+          return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        }],
+        ["error page", () => {
+          bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+            (transfer[0] as MessagePort).postMessage({ type: "error", status: 503, text: "Unreachable", lang: "en" });
+          });
+          return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        }],
+        ["empty error", () => {
+          bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+            (transfer[0] as MessagePort).postMessage({ type: "error", status: 304, text: "Not modified" });
+          });
+          return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        }],
+      ];
+      for (const [label, answer] of answers) {
+        expect((await answer()).headers.get("origin-agent-cluster"), label).toBe("?1");
+      }
+    });
+  });
+
+  describe("an answer the worker makes in place of the contact's", () => {
+    // Such a page is on the app's origin: the app's page may frame one and reach anywhere through its window (its
+    // `fetch`, an image of its document), under that page's policy alone.
+    it("lets nothing load or run from it, whichever answer it is", async () => {
+      const failing = (reply: unknown) => () => {
+        bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+          (transfer[0] as MessagePort).postMessage(reply);
+        });
+        return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+      };
+      const answers: [string, () => Promise<Response>][] = [
+        ["refused", () => fetchThrough({ mode: "navigate", destination: "document", referrer: "" })!],
+        ["no bridge", () => { clients = clients.filter((client) => client !== bridge); return fetchThrough({ mode: "cors", destination: "", referrer: `${ORIGIN}/` }, "app")!; }],
+        ["plain error", failing({ type: "error", status: 503, text: "Unreachable" })],
+        ["empty error", failing({ type: "error", status: 304, text: "Not modified" })],
+        ["failed", failing({ type: "head", status: 200, headers: null })],
+        ["timed out", () => {
+          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+          bridge.postMessage.mockImplementation(() => {});
+          const answer = fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+          return vi.waitFor(() => expect(bridge.postMessage).toHaveBeenCalled())
+            .then(() => vi.advanceTimersByTimeAsync(HEAD_TIMEOUT_MS))
+            .then(() => answer).finally(() => vi.useRealTimers());
+        }],
+      ];
+      const statuses: number[] = [];
+      for (const [label, answer] of answers) {
+        clients = [bridge, ...clients.filter((client) => client !== bridge)];
+        const response = await answer();
+        statuses.push(response.status);
+        expect(response.headers.get("content-security-policy"), label).toBe("frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; form-action 'none'; base-uri 'none'; sandbox");
+        expect(response.headers.get("x-content-type-options"), label).toBe("nosniff");
+      }
+      expect(statuses).toEqual([403, 503, 503, 304, 502, 504]);
+    });
+  });
+
   describe("a request the app's page could not get an answer to", () => {
     it("is said in the profile's language and direction, as a page with nothing to run: never the worker's plain English", async () => {
       bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
@@ -209,7 +327,7 @@ describe("the services worker", () => {
       const response = await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
       expect(response.status).toBe(503);
       expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
-      expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; style-src 'unsafe-inline'");
+      expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; sandbox");
       const html = await response.text();
       expect(html).toContain('<html lang="ar" dir="rtl">');
       expect(html).toContain("<p>لا يمكن الوصول &#60;b&#62;إليه&#60;/b&#62;</p>");
@@ -427,6 +545,7 @@ describe("a request body of a contact's app, where the browser's Request has no 
     expect(arrayBuffer).not.toHaveBeenCalled();
     expect(bridge.postMessage).not.toHaveBeenCalled();
     expect(refused.status).toBe(413);
+    expect(refused.headers.get("content-security-policy")).toMatch(/; default-src 'none'(;|$)/);
     expect(await refused.text()).toBe("The request body is too large.");
   });
 

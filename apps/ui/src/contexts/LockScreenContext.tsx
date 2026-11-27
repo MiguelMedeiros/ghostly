@@ -59,6 +59,12 @@ export interface LockedCall {
   /** Answers as the call came: with the camera for a video call. */
   answer: () => void;
   decline: () => void;
+  /**
+   * Once unlocked, for a call Answer was pressed for that turned into the other kind meanwhile (not answered): rings on
+   * in the chat the app opens. Only a chat that goes with the lock (before the first unlock) has it; one that stays
+   * loaded rings on by itself.
+   */
+  ringOn?: () => void;
 }
 
 const LockScreenContext = createContext<LockScreenContextValue | null>(null);
@@ -310,7 +316,7 @@ export function useRingOnLockScreen(call: LockedCall | null): void {
   useEffect(() => {
     const shown = latest.current;
     if (!offerCall || !key || !shown) return;
-    return offerCall({ ...shown, answer: () => latest.current?.answer(), decline: () => latest.current?.decline() });
+    return offerCall({ ...shown, answer: () => latest.current?.answer(), decline: () => latest.current?.decline(), ringOn: () => latest.current?.ringOn?.() });
   }, [offerCall, key]);
 }
 

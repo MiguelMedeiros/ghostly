@@ -1,5 +1,5 @@
 /* /developers: page rules are prefixed dv-. The shared rules further down
-   (.preset, .bgrid-*, .stage-*, .nego-*, .peer-*, .cap-chip, .avail*, .path-code)
+   (.preset, .bgrid-*, .stage-*, .peer-*, .cap-chip, .avail*, .path-code)
    are also used by BlockGrid, Negotiation and /roadmap. */
 
 /* ── Rhythm: every chapter owns its vertical air ─── */
@@ -65,37 +65,15 @@
   }
 }
 @media (max-width: 1200px) {
-  .dv-hero-actions .btn--primary {
-    padding-inline: 18px;
-  }
   .dv-btn-sm {
     padding: 8px 13px;
     font-size: 14px;
   }
 }
 @media (max-width: 1000px) and (min-width: 961px) {
-  .dv-hero-actions .btn--primary {
-    padding-inline: 15px;
-  }
   .dv-btn-sm {
     padding: 8px 11px;
     font-size: 13.5px;
-  }
-}
-/* Below 960px the copy would have to squeeze the CTAs; the hero stacks instead. */
-@media (max-width: 960px) {
-  .dv-hero-grid {
-    grid-template-columns: 1fr;
-    gap: 24px;
-  }
-  .dv-art {
-    max-width: 560px;
-    justify-self: center;
-  }
-}
-@media (max-width: 640px) {
-  .dv-hero-actions .btn {
-    flex: 1 1 auto;
   }
 }
 
@@ -124,9 +102,8 @@
   box-shadow: 0 30px 80px -40px rgba(34, 211, 238, 0.25);
 }
 
-/* Presets (shared by composer and negotiation) */
-.composer-presets,
-.nego-scenarios {
+/* Composer presets */
+.composer-presets {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -467,10 +444,6 @@
 }
 
 /* Negotiation */
-.nego {
-  display: grid;
-  gap: 20px;
-}
 .peer {
   display: grid;
   gap: 14px;

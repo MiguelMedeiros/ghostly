@@ -1,9 +1,12 @@
 import { render, waitFor, act, screen } from "@testing-library/react";
-import { createChatInvite } from "@ghostly/core";
+import { createChatInvite, createDeviceInvite, createIdentity, createLink, encodeInviteCode } from "@ghostly/core";
 import { afterEach, expect, it, vi, describe } from "vitest";
 import { Root } from "../../Root";
-import { listSessions } from "../../lib/storage";
+import { takeDeviceLink } from "../../lib/devices";
+import { ensureSession, LINK_CHATS_WAITING, listSessions } from "../../lib/storage";
+import { readInvite } from "../../lib/url";
 import { axeViolations } from "../axe";
+import { fakeEngine } from "../fakeEngine";
 
 // covers: invite.link, profiles.lock
 
@@ -20,7 +23,7 @@ vi.mock("../../contexts/LockScreenContext", async (importOriginal) => ({
   }),
 }));
 
-afterEach(() => { window.location.hash = ""; lock.isLocked = true; });
+afterEach(() => { window.location.hash = ""; lock.isLocked = true; takeDeviceLink(); });
 
 it("an invite link opened while locked makes its chat only after the lock is passed", async () => {
   const code = createChatInvite().inviteCode;
@@ -36,6 +39,92 @@ it("an invite link opened while locked makes its chat only after the lock is pas
   expect(chat.viaLink).toBe(true);
   await waitFor(() => expect(window.location.hash).toBe(`#/chat/${chat.id}`));
   expect(window.location.hash).not.toContain(code);
+}, 60_000);
+
+// covers: invite.link, profiles.lock
+/*
+ * Several invite links opened while locked (a tab that takes the profile over opens every link no tab answered, one
+ * after the other): each makes its chat after the unlock, the same one once, and one past what links may make waiting
+ * (`LINK_CHATS_WAITING`) is refused, said then. Only the last used to be kept.
+ */
+it("invite links opened while locked each make their chat after the unlock, up to the links' limit", async () => {
+  const codes = [createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode];
+  window.location.hash = `#${codes[0]}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  for (const code of [codes[1], codes[0], codes[2], codes[3]]) {
+    window.location.hash = `#${code}`;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+  expect(listSessions()).toHaveLength(0);
+  expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(listSessions()).toHaveLength(3));
+  const peerOf = (code: string) => { const reading = readInvite(code); return reading.ok ? reading.keys.peerPubKeyB64 : null; };
+  expect(listSessions().map((s) => s.peerPubKeyB64).sort()).toEqual(codes.slice(0, 3).map(peerOf).sort());
+  expect(screen.getByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(listSessions()).toHaveLength(3);
+}, 60_000);
+
+// covers: invite.link, profiles.lock
+/*
+ * Links with a joined chat's seed but another contact's keys, opened while locked: none makes a chat after the unlock
+ * (the engine keys a chat by its own seed, so such a chat had the joined chat's link), and the app says so. The joined
+ * chat's own link opens it.
+ */
+it("links with a joined chat's seed but other keys, opened while locked, make no chat after the unlock", async () => {
+  const { invite, inviteCode } = createChatInvite();
+  const reading = readInvite(inviteCode);
+  if (!reading.ok) throw new Error("a fresh invite reads");
+  const joined = ensureSession(reading.keys);
+  const others = Array.from({ length: LINK_CHATS_WAITING + 3 }, () =>
+    encodeInviteCode({ ...invite, peerPubKeyZ32: createIdentity().pubKeyZ32, encKeyB64: createLink().mine.encKeyB64 }));
+  window.location.hash = "#/";
+  const { rerender } = render(<Root />);
+  for (const code of [...others, inviteCode]) {
+    window.location.hash = `#${code}`;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+  expect(listSessions()).toHaveLength(1);
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe(`#/chat/${joined}`));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(listSessions().map((session) => session.id)).toEqual([joined]);
+  expect(screen.getByTestId("invite-link-invalid")).toBeInTheDocument();
+}, 60_000);
+
+// covers: invite.link, profiles.lock
+/*
+ * A link that comes after the one refused past the limit, still under the lock (one already held again, or a group's
+ * link): the refusal, not yet said, stays to be said after the unlock. Wiped, the refused link was lost with no word.
+ */
+it.each([
+  ["an invite link already held", (codes: string[]) => `#${codes[0]}`],
+  ["a group's link", () => "#/join/group2/after"],
+  ["a device code's link", () => `#${createDeviceInvite(new Uint8Array(32).fill(7)).code}`],
+  ["a device code's link that names the profile", () => `#Ana#${createDeviceInvite(new Uint8Array(32).fill(7)).code}`],
+])("the refusal of an invite link past the limit is still said after the unlock when %s comes next", async (_, next) => {
+  const codes = [createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode];
+  window.location.hash = `#${codes[0]}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  for (const hash of [`#${codes[1]}`, `#${codes[2]}`, `#${codes[3]}`, next(codes)]) {
+    window.location.hash = hash;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(listSessions()).toHaveLength(3));
+  expect(screen.getByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
 }, 60_000);
 
 // covers: invite.invalid, invite.link, profiles.lock
@@ -165,4 +254,77 @@ describe("a refused invite link and the lock screen", () => {
     await waitFor(() => expect(window.location.hash).toBe(`#/chat/${listSessions()[0].id}`));
     expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
   }, 60_000);
+
+  /*
+   * A refusal said before the lock is no link's past the limit: a group's link held under it answers for itself, and the
+   * notice left there would sit over the group that link opens after the unlock.
+   */
+  it("a refusal said before the lock goes when a group's link held under it opens its group after the unlock", async () => {
+    fakeEngine.on("joinGroupByLink", () => ({ groupId: "g1" }));
+    lock.isLocked = false;
+    const { rerender } = render(<Root />);
+    await screen.findByTestId("sidebar");
+    go(`#/${damaged()}`);
+    expect(await screen.findByTestId("invite-link-invalid")).toHaveTextContent(REFUSAL);
+
+    lock.isLocked = true;
+    rerender(<Root />);
+    go("#/join/group2/abc");
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+
+    lock.isLocked = false;
+    rerender(<Root />);
+    await waitFor(() => expect(window.location.hash).toBe("#/group/g1"));
+    expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
+  }, 60_000);
 });
+
+// covers: invite.link, profiles.lock
+/*
+ * Invite links to chats already here, opened under the lock, take no place among the links that may make chats: unlocked,
+ * they open their chats, and the new chat's link after them is made. Counted, it was refused as one too many, "delete a
+ * chat that got no answer" with none waiting.
+ */
+it("invite links to chats already here, opened while locked, leave room for a new chat's link", async () => {
+  const codes = [createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode];
+  for (const code of codes.slice(0, 3)) { const reading = readInvite(code); if (reading.ok) ensureSession(reading.keys); }
+  window.location.hash = `#${codes[0]}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  for (const code of codes.slice(1)) {
+    window.location.hash = `#${code}`;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+  expect(listSessions()).toHaveLength(3);
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(listSessions()).toHaveLength(4));
+  expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
+}, 60_000);
+
+// covers: invite.link, profiles.lock
+/*
+ * An invite link to a chat already here that comes after a new chat's link refused past the limit, still under the lock:
+ * it opens its chat after the unlock, and the refusal stays to be said. Cleared by it, the refused link was lost with no word.
+ */
+it("an invite link to a chat already here, opened after a refused one while locked, leaves the refusal said", async () => {
+  const known = createChatInvite().inviteCode;
+  const reading = readInvite(known);
+  if (reading.ok) ensureSession(reading.keys);
+  const codes = [createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode];
+  window.location.hash = `#${codes[0]}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  for (const code of [...codes.slice(1), known]) {
+    window.location.hash = `#${code}`;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(listSessions()).toHaveLength(4));
+  expect(screen.getByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
+}, 60_000);

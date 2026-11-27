@@ -6,12 +6,11 @@ import { GROUP_FILE_LIMITS, HOLD_LIMITS, LIMITS, NO_PICTURE_METADATA, NO_AUDIO_M
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf, type FileBytes } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
-import { replyRef } from "@ghostly/browser/shared/replies";
 import type { EngineState, FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { childEnv } from "./childEnv";
-import { bool, chatOf, findChatOrGroup, keptForJoin, list, noFile, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
-import { dhtOnlyOf, groupSendRefused } from "./api";
+import { bool, chatOf, findChatOrGroup, keptForJoin, list, noFile, nobodyJoined, node, num, oneOf, oneShotWaits, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
+import { dhtOnlyOf, groupSendRefused, notHere } from "./api";
 import { CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
@@ -35,6 +34,9 @@ const TYPES: Record<string, string> = {
   ".zip": "application/zip", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
   ".aac": "audio/aac", ".flac": "audio/flac", ".oga": "audio/ogg", ".weba": "audio/webm",
   ".webm": "audio/webm", ".mp4": "video/mp4", ".mov": "video/quicktime",
+  // As a browser's file picker types them: an .m4v or .ogv plays in the contact's app, not a file to download, and a
+  // WMA's refusal (its tags are not removed) is an audio file's, not a video's.
+  ".m4v": "video/x-m4v", ".ogv": "video/ogg", ".wma": "audio/x-ms-wma",
 };
 
 /** A voice note in an .mp4 is its sound in an MP4 box, as an .m4a: sent as audio/mp4, not as a video. */
@@ -57,16 +59,14 @@ async function voiceTime(ctx: ApiContext, stored: { id: string; linkId: string; 
 
 /**
  * The message of a chat or a group (`group:<id>`) that `test` picks: looked for among its newest first, where the one a
- * command names almost always is, then in all of them only when there are more. A whole history costs a read of every row;
- * `older` reads fewer, where the message is known to be among them.
+ * command names almost always is, then among `older` (fewer rows than the whole history, where the message is known to
+ * be among them) only when there are more.
  */
-async function findMessage(ctx: ApiContext, linkId: string, test: (m: StoredMessage) => boolean, older?: (linkId: string) => Promise<StoredMessage[]>): Promise<StoredMessage | undefined> {
+async function findMessage(ctx: ApiContext, linkId: string, test: (m: StoredMessage) => boolean, older: (linkId: string) => Promise<StoredMessage[]>): Promise<StoredMessage | undefined> {
   const page = await node(ctx).messagePage({ linkId, limit: 200 });
   const newest = page.messages.find(test);
   if (newest || !page.more) return newest;
-  if (older) return (await older(linkId)).find(test);
-  const group = linkId.startsWith("group:") ? linkId.slice("group:".length) : undefined;
-  return (group ? await node(ctx).groupMessages({ groupId: group }) : await node(ctx).getMessages(linkId)).find(test);
+  return (await older(linkId)).find(test);
 }
 
 /** A chat's files as the timeline shows them, with where each transfer stands (`transferOf`, by file id). */
@@ -78,8 +78,17 @@ export function filesOf(messages: { id: string; file?: MessageFile; sender: stri
   }));
 }
 
-/** A file's size as a person reads it: "40 MB", "26.2 MB". */
-const megabytes = (size: number) => `${Math.round(size / 100_000) / 10} MB`;
+/**
+ * A file's size as a person reads it: "40 MB", "26.2 MB"; under a megabyte "49 KB" or "512 B", as a nearly full disk's
+ * room is met (`noRoomWords`): "0 MB free" beside "(0.1 MB)" said neither. `round` is the way to the step: up for
+ * what a file needs and down for the room, so a file that does not fit never reads as if it did. The unit is chosen
+ * after it, so 999_001 B needed reads "1 MB", not "1000 KB".
+ */
+const megabytes = (size: number, round = Math.round) => {
+  if (size < 1000) return `${size} B`;
+  const kb = round(size / 1000);
+  return kb < 1000 ? `${kb} KB` : `${round(size / 100_000) / 10} MB`;
+};
 
 /**
  * Where an unfinished transfer stands, in words, for a person reading a timeout: the stage's id ("asking", "waiting")
@@ -229,6 +238,17 @@ async function stageWhileAsked(bytes: FileBytes, id: string, path: string, sourc
 }
 
 /**
+ * A reply's refusal by the engine (`said`), as `not_found` only for a message that is not there: one that is but cannot
+ * be replied to (an old app's text with no wire id, a group's event or payment note) keeps the engine's words, said by
+ * the caller. Only a row named by its own id can be refused while there (one found by its wire id has a reply ref), so
+ * one row is read, only on this path.
+ */
+async function replyRefused(ctx: ApiContext, params: Params, linkId: string, replyTo: string, said: string): Promise<CliError | undefined> {
+  if (await node(ctx).getMessage(linkId, replyTo)) return undefined;
+  return notHere(said, replyTo, { group: linkId.startsWith("group:"), ref: str(params, "chat", true) });
+}
+
+/**
  * A file announced in a group (WISP 503): its bytes staged under a group file id with their digest, as a chat's are, then
  * the announcement. This device is its first holder and serves the members who ask. A group has no receipts: `waitMs`
  * (`wait: sent`) waits until a member's edge took the announcement, and `edges` and `sent` say how many did, as for
@@ -241,10 +261,11 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   }
   if (!picked) throw new CliError("refused", "An empty file cannot go to a group");
   const mime = mimeOf(path, str(params, "mime"), params.voice !== undefined);
+  // A reply names a message of this group: the engine checks it (`replyFor`, by its row), as `send --reply`'s does,
+  // before a byte is copied in, and the announcement again.
   const replyTo = str(params, "reply");
-  if (replyTo) {
-    if (!await findMessage(ctx, `group:${group.id}`, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw noMessage(replyTo, { group: true, ref: str(params, "chat", true) }, { tail: ", or it cannot be replied to" });
-  }
+  const refusal = replyTo ? await node(ctx).replyRefusal(`group:${group.id}`, replyTo) : null;
+  if (refusal) throw await replyRefused(ctx, params, `group:${group.id}`, replyTo!, refusal) ?? groupSendRefused(refusal);
   // A send the group would refuse anyway (its files of the minute are taken, or this device is not in it) is refused
   // before a byte is copied in: a retry loop writes nothing. The announcement checks again.
   const check = await node(ctx).groupFileCheck({ groupId: group.id });
@@ -268,7 +289,8 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   if (result.error) {
     // Not announced: nothing is in the group, so the staged copy goes too.
     await removeStored(fileId).catch(() => {});
-    throw result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error);
+    const missing = replyTo ? await replyRefused(ctx, params, `group:${group.id}`, replyTo, result.error) : undefined;
+    throw missing || (result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error));
   }
   const messageId = result.messageId ?? null;
   // A timeout names the file as the 1:1 chat's does: a bot that retries finds it there instead of sending a second copy.
@@ -300,8 +322,10 @@ export function fitName(name: string, mark = ""): string {
   if (!mark && fits(name)) return name;
   const extension = /\.[^.\s]{1,15}$/u.exec(name)?.[0] ?? "";
   const stem = [...name.slice(0, name.length - extension.length)];
-  while (stem.length && !fits(stem.join("").trimEnd() + mark + extension)) stem.pop();
-  return (stem.join("").trimEnd() || "file") + mark + extension;
+  // A cut that ends the name in a dot loses it too, as `sanitizeFileName` drops them: Windows would name the file without it.
+  const end = (chars: string[]) => chars.join("").replace(/[\s.]+$/u, "");
+  while (stem.length && !fits(end(stem) + mark + extension)) stem.pop();
+  return (end(stem) || "file") + mark + extension;
 }
 
 /**
@@ -383,9 +407,10 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
   const ms = num(params, "timeout", 300, { min: 1, max: 86_400 }) * 1000;
   // A received file that waits for this person's `file accept` (over 25 MiB, or a group's file that did not come by
   // itself) does not move however long this waits: said at once, naming the command. Before, it waited out its
-  // timeout and answered "0 of 40000000 bytes, asking", as if the contact were slow.
+  // timeout and answered "0 of 40000000 bytes, asking", as if the contact were slow. A group's file has no transfer in
+  // the engine's state until its Download: its record says it waits (`waitingGroupFile`), as `file save` reads it.
   const transfer = await waitForState(ctx, (s) => {
-    const now = s.transfers[fileId] ?? stored?.transfer;
+    const now = s.transfers[fileId] ?? waitingGroupFile(stored) ?? stored?.transfer;
     return now && (now.state === "done" || now.state === "failed" || (now.stage === "asking" && now.direction === "in")) ? now : undefined;
   }, ms, `file ${fileId} to arrive`, stopping).catch((error: unknown) => {
     const now = state(ctx).transfers[fileId];
@@ -431,9 +456,9 @@ function noRoomWords(fileId: string, name: string | undefined, size: number, roo
   const named = holders.slice(0, HOLDERS_NAMED).map((h) => `${h.name ?? "a file"} from ${h.chat} (${megabytes(h.left)} to come: ghostly file cancel ${shellWord(h.id, "<file>")})`);
   const more = holders.length > HOLDERS_NAMED ? ` and ${holders.length - HOLDERS_NAMED} more` : "";
   const which = named.length ? `: ${named.join(", ")}${more}` : "";
-  const rest = coming > 0 ? `, and ${megabytes(coming)} of files still coming need it first${which}` : "";
+  const rest = coming > 0 ? `, and ${megabytes(coming, Math.ceil)} of files still coming need it first${which}` : "";
   const out = coming > 0 && named.length ? "Free some space or cancel one of them" : "Free some space";
-  return `${name ?? "The file"} (${megabytes(size)}) does not fit: ${megabytes(room)} free${rest}. ${out}, then ghostly file accept ${fileId} again (or file decline)`;
+  return `${name ?? "The file"} (${megabytes(size, Math.ceil)}) does not fit: ${megabytes(room, Math.floor)} free${rest}. ${out}, then ghostly file accept ${fileId} again (or file decline)`;
 }
 
 /** A received file that waits for this person's `file accept` (`file wait`, `file save`): said naming the command. */
@@ -448,6 +473,8 @@ export const FILE_METHODS: Record<string, Method> = {
     // the file's own without --name, read once cleaned (a key split by a `:` or a line break the cleaning drops is whole).
     const name = sanitizeFileName(str(params, "name") ?? basename(path));
     guardText(name, bool(params, "force"), "file's name", "send it");
+    // Its type too, which the contact's app shows, as it goes out (`sendFile` reads `file.mime`).
+    guardText(mimeOf(path, str(params, "mime"), params.voice !== undefined), bool(params, "force"), "file's type", "send it");
     const target = chatOrGroupOf(ctx, params);
     let info;
     try { info = await stat(path); } catch { throw new CliError("not_found", `No file ${path}`); }
@@ -470,11 +497,12 @@ export const FILE_METHODS: Record<string, Method> = {
     if (link.dataLink === "open" && !link.capabilities?.largeFiles && info.size > LIMITS.maxFileBytes) throw new CliError("refused", `Too large for the contact's app (at most ${LIMITS.maxFileBytes} bytes)`);
     if (typeof link.peerFileRoom === "number" && info.size > link.peerFileRoom) throw new CliError("refused", `Not enough space on the contact's device (${link.peerFileRoom} bytes free)`);
     const mime = mimeOf(path, str(params, "mime"), params.voice !== undefined);
-    // A reply names a message of this chat, as `send --reply` does: checked before anything is stored.
+    // A reply names a message of this chat, as `send --reply` does: the engine checks it (`replyFor`, by single rows)
+    // before a byte is copied in, and `sendFile` again. Looked for here, the newest 200 then the whole chat were read for
+    // an older message or one the chat lacks, 0.8-1 s held at 100,000 messages on each send.
     const replyTo = str(params, "reply");
-    if (replyTo) {
-      if (!await findMessage(ctx, link.id, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw noMessage(replyTo, { group: false, ref: str(params, "chat", true) }, { tail: ", or it cannot be replied to" });
-    }
+    const refusal = replyTo ? await node(ctx).replyRefusal(link.id, replyTo) : null;
+    if (refusal) throw await replyRefused(ctx, params, link.id, replyTo!, refusal) ?? new CliError("refused", refusal);
     const { voice, warning } = await voiceOf(params, path, mime, info.size);
     const source = await whileUnchanged(path, () => sendable(path, mime));
     // A picture goes with its size, read from its first bytes as the apps read it (PNG, JPEG, GIF, WebP).
@@ -496,7 +524,9 @@ export const FILE_METHODS: Record<string, Method> = {
       // Refused before it started (offline, a stopped chat, a contact whose app takes no files): nothing is in the chat,
       // so the staged copy goes too.
       await removeStored(file.id).catch(() => {});
-      throw new CliError("refused", error instanceof Error ? error.message : String(error));
+      const said = error instanceof Error ? error.message : String(error);
+      const missing = replyTo ? await replyRefused(ctx, params, link.id, replyTo, said) : undefined;
+      throw missing || new CliError("refused", said);
     }
     // The message's id, as a group's file and `send` answer it: what `message delete`, `react`, `pin` and `--reply` take.
     // The engine names a sent file's row after its time (node.ts `sendFile`), the one given here.
@@ -554,6 +584,14 @@ export const FILE_METHODS: Record<string, Method> = {
     };
     if ("group" in where) {
       if (action === "resend") throw new CliError("bad_request", "A group's file is downloaded (file accept) or asked for again (file request)");
+      // Sent from here: its record is done (staged whole at send), and the members fetch it from whoever holds it, this
+      // device among them (WISP 503). Nothing here stops that; its message deleted for everyone does (`Groups.removed`).
+      if (fileId.startsWith(`group-${where.group}-out-`) && (action === "cancel" || action === "pause" || action === "decline")) {
+        const messageId = (await node(ctx).fileMessages(linkId).catch(() => [])).find((m) => m.file?.id === fileId)?.id;
+        const ref = typeof params.chat === "string" ? params.chat : `group:${where.group}`;
+        throw new CliError("refused", `A file sent to a group is fetched by the members from whoever holds it: it is not stopped from here (ghostly message delete ${shellWord(ref, "<group>")} ${messageId ? shellWord(messageId, "<message>") : "<message>"} takes it back from everyone)`,
+          { reason: "sent_to_group", group: where.group, ...(messageId ? { messageId } : {}) });
+      }
       await refuseAllHere();
       try { await node(ctx).fileAction({ linkId, fileId, action }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
       return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };

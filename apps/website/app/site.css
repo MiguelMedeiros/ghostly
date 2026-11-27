@@ -214,9 +214,6 @@ body {
 .accent {
   color: var(--cyan);
 }
-.accent-green {
-  color: var(--mint);
-}
 .text-gradient-animated {
   background: linear-gradient(135deg, #22d3ee 0%, #00a884 50%, #22d3ee 100%);
   background-size: 200% auto;
@@ -509,7 +506,10 @@ body {
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
-  outline: none;
+}
+/* The site's ring, drawn inside the item: the menu's padding and the 2px between items hold it. */
+.nav-open-menu a:focus-visible {
+  outline-offset: -2px;
 }
 .nav-open-menu a small {
   font-size: 12.5px;
@@ -608,15 +608,6 @@ body {
   gap: 18px;
   max-width: 760px;
   margin-bottom: clamp(40px, 6vw, 72px);
-}
-.section-head--center {
-  text-align: center;
-  margin-inline: auto;
-  justify-items: center;
-}
-.divider-glow {
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.35), transparent);
 }
 .bg-grid {
   background-image:
@@ -1335,7 +1326,7 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
   animation-duration: 3s;
 }
 /* Asleep, it floats twice more and rests, as the footer's sleeper does (#2809): looped, a sleeping ghost beside a
-   still pointer restyled the page 8 times a second for as long as the reader stayed (agents#1115). Its own name, so
+   still pointer restyled the page 8 times a second for as long as the reader stayed. Its own name, so
    the doze starts afresh each time it falls asleep, and ends where the float starts. */
 .pet[data-mood="sleeping"] .pet-body {
   animation: pet-doze 6s ease-in-out 2 both;

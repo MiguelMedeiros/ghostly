@@ -28,7 +28,7 @@ import { canRetryFile, fileHeld, fileNeverSent } from "../lib/fileStatus";
 import { holdFull, rawError, SAVE_REFUSED } from "../lib/errorText";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
-import { useDhtOnly, waitsForLive } from "../lib/delivery";
+import { useDhtOnly, useLiveBlocked, waitsForLive } from "../lib/delivery";
 import { useEngineValue } from "../lib/engineState";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer, useTransferValue } from "../hooks/useServicesPlatform";
@@ -667,16 +667,31 @@ function ForwardItem({ file, sender, onForward }: { file?: ChatFile; sender: "me
 }
 
 /**
+ * What Delete for everyone does, said in its confirmation. A removal goes on the live session only, never on the DHT
+ * nor held (WISP 400 § Delete for everyone), and is given up a week after the delete (`RESEND_POLICY`): in a 1:1 chat
+ * that one side keeps on DHT only, the contact's copy goes only if that side leaves it within the week. Read only while
+ * the confirmation shows. A group's removal goes over its members' edges.
+ */
+function EveryoneHint({ group, peerPubKey }: { group?: boolean; peerPubKey?: string }) {
+  const { t } = useI18n();
+  const blocked = useLiveBlocked(peerPubKey);
+  return <>{t(group ? "chat.deleteForEveryoneGroupHint" : blocked === "you" ? "chat.deleteForEveryoneHintDhtYou"
+    : blocked === "contact" ? "chat.deleteForEveryoneHintDhtContact" : "chat.deleteForEveryoneHint")}</>;
+}
+
+/**
  * What can be done to a message, behind its ⋮: answering it, sending it again or not at all, saving the file it carries,
  * its details, and forgetting it here.
  * The deletion is local, so the menu says so before it happens: nothing is sent, and the contact keeps their copy.
  * Both popovers are drawn over the page (the list scrolls and would cut them off) and kept inside the message list.
  */
-function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply, onEdit, onReact, onPin, pinned, onSave, saved, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
+function MessageMenu({ onDelete, onDeleteForEveryone, group, peerPubKey, onDetails, onReply, onEdit, onReact, onPin, pinned, onSave, saved, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
   onDelete?: () => void;
   onDeleteForEveryone?: () => void;
   /** A group's message: Delete for everyone takes it off the members' devices, not a contact's. */
   group?: boolean;
+  /** A 1:1 chat's contact: whether its chat goes live, which Delete for everyone's removal waits for (`EveryoneHint`). */
+  peerPubKey?: string;
   onDetails: () => void;
   /** Answers the message (WISP 400 § Replies): the first row. */
   onReply?: () => void;
@@ -712,7 +727,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
   const ref = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   // A right-click on the message: this menu, at the pointer, with the focus on ⋮ as a click on it would leave it (the
-  // keys work, Escape goes back there). Each one opens it afresh: the press that asked closes a menu open before.
+  // keys work, Escape goes back there). Each one opens it afresh, and closes any other menu open (Menu.tsx's openMenus).
   const [pointed, setPointed] = useState<MenuPoint & { n: number }>();
   useContextMenu(ref, "[data-message-row]", (at) => {
     button.current?.focus({ preventScroll: true });
@@ -732,7 +747,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
   // A file still on its way stops on both sides when its message is deleted (the engine's deleteMessage): the contact
   // keeps no copy of it, so the hint says what happens instead.
   const { transfer } = useTransfer(download?.file.id);
-  const deleteHint = confirm === "everyone" ? t(group ? "chat.deleteForEveryoneGroupHint" : "chat.deleteForEveryoneHint") : transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
+  const deleteHint = confirm === "everyone" ? <EveryoneHint group={group} peerPubKey={peerPubKey} /> : transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
     : t(download?.sender === "me" ? "chat.deleteSendingFileHint" : "chat.deleteArrivingFileHint");
   const confirmed = confirm === "everyone" ? onDeleteForEveryone : onDelete;
   // The hint describes the confirmation and its Delete: the focus lands on Cancel, and a screen reader said only the
@@ -811,7 +826,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
                 type="button"
                 data-menu-item
                 onClick={() => setConfirm(null)}
-                className="px-2 py-0.5 rounded border border-border bg-surface-hover text-text-muted text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+                className="px-2 py-0.5 rounded border border-border bg-surface-hover text-text-muted text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer max-md:min-h-11 max-md:px-4"
               >
                 {t("common.cancel")}
               </button>
@@ -827,7 +842,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
                   confirmed();
                 }}
                 // Filled, as the other destructive confirmations: red on a pink fill read at 3.98:1 in the light theme.
-                className="px-2 py-0.5 rounded border border-danger-fill bg-danger-fill text-white text-xs font-bold hover:bg-danger-fill/90 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+                className="px-2 py-0.5 rounded border border-danger-fill bg-danger-fill text-white text-xs font-bold hover:bg-danger-fill/90 transition-colors cursor-pointer max-md:min-h-11 max-md:px-4"
               >
                 {t("common.delete")}
               </button>
@@ -1053,7 +1068,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(refuse(shown));
   };
   /** Delete for everyone, confirmed: a refused one stays, with why under it, as a refused Send again. */
-  const deleteForEveryone = onDeleteForEveryone && (() => {
+  // Not a file whose copy into this device failed: it never left, the engine has no row of it and would refuse.
+  const deleteForEveryone = fileUnsent ? undefined : onDeleteForEveryone && (() => {
     setRefused(null);
     void Promise.resolve(onDeleteForEveryone()).catch(refuse(shown));
   });
@@ -1204,7 +1220,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           <CallEventIcon type={type} hasVideo={hasVideo} />
           <span>{callEventText(t, type, hasVideo, callLineCount(message.callEvent)) ?? message.text}</span>
           {duration !== undefined && duration >= 1000 && (
-            <span className="text-text-muted">({formatCallLength(duration, t)})</span>
+            // Whole on one line: on a narrow phone the line breaks between its words, never inside the length.
+            <span className="text-text-muted whitespace-nowrap">({formatCallLength(duration, t)})</span>
           )}
           <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
         </div>
@@ -1236,7 +1253,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // The admin's mark beside their name, out of it: a member can take the admin's name, never this.
   const nickEl = nameEl && author?.admin ? <div className="flex items-center gap-1.5">{nameEl}<AdminMark testId="message-nick-admin" /></div> : nameEl;
   const menu = !choosing && (
-    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? deleteForEveryone : undefined} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
+    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? deleteForEveryone : undefined} group={inGroup} peerPubKey={peerPubKey} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
       onForward={onForward} onSelect={onSelect} align={isMe ? "left" : "right"} download={download} sender={isMe ? "me" : "peer"} {...(isMe ? sending : {})} />
   );
 
@@ -1340,7 +1357,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       )}
       {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
-      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={deleteForEveryone} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
+      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={deleteForEveryone} group={inGroup} peerPubKey={peerPubKey} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
       {/* A group member's picture at the start of the line (the reading direction's), or its empty place. */}
       {!isMe && author && <SenderAvatar author={author} onOpen={choosing ? undefined : onOpenAuthor} />}
       {/* The bubble, and its reactions under it. */}

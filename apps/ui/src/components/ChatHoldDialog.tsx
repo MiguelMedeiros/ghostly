@@ -75,12 +75,12 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
         </div>
         <p className="text-[11px] text-text-muted">{t("chat.hold.privacy")}</p>
         {error && <p role="alert" dir={ownDirection(error)} className="text-xs text-danger">{error}</p>}
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm bg-surface-alt text-text-primary border border-border hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
           {/* Busy while it saves, not disabled: that would drop a keyboard's focus to the page, and keep it there on a refusal. */}
           <FocusSafeButton type="button" data-testid="chat-hold-save" disabled={enabled === initial && !busy} aria-disabled={busy || undefined} aria-busy={busy || undefined}
             onClick={() => { if (busy) return; setBusy(true); setError(""); void onSave(enabled).then(onClose, (e) => { setError(problemLine(e, t)); setBusy(false); }); }}
-            className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] text-on-accent hover:bg-accent-hover cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">
             {busy ? t("chat.hold.saving") : t("common.save")}
           </FocusSafeButton>
         </div>

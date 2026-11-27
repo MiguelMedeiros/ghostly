@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { parseDid } from "@ghostly/core";
 import { PUBKY_RELAYS, pubkyHomeserver } from "@ghostly/browser/proofs/pubky";
 import { boundedIdentityFetch } from "@ghostly/browser/proofs/verify";
@@ -10,34 +10,34 @@ import { identityStanding } from "./identityStanding";
 import { useT, type Translate } from "../../contexts/I18nContext";
 import { problemLine } from "../../lib/problemText";
 import { localProvider } from "../../lib/providerWords";
+import { namesText } from "../../lib/listText";
+import { fillNames } from "../../lib/fillNodes";
 
 const fetchForCard = boundedIdentityFetch({ online: () => globalThis.navigator?.onLine !== false });
 const host = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
 
-/** The badge's words for a contact's proof of it: "Proved by Ana". */
-function stateWords(t: Translate, state: BadgeState, named: string): string {
-  const who = named || t("chat.entity.someContact");
-  switch (state) {
-    case "verified": case "expiring": return t("chat.entity.provedBy", { who });
-    case "revoked": return t("chat.entity.revokedBy", { who });
-    case "failed": return t("chat.entity.checkFailed", { who });
-    case "expired": return t("chat.entity.proofExpired", { who });
-  }
+/** The badge's words for a contact's proof of it: "Proved by ~Ana", the name its own <bdi> (in Arabic "~Bob!" read "!Bob~"). */
+function stateWords(t: Translate, state: BadgeState, named: string): ReactNode {
+  if (!named) return t(STATE_WORDS[state], { who: t("chat.entity.someContact") });
+  return fillNames(t(STATE_WORDS[state]), { who: named });
 }
+
+const STATE_WORDS = { verified: "chat.entity.provedBy", expiring: "chat.entity.provedBy", revoked: "chat.entity.revokedBy", failed: "chat.entity.checkFailed", expired: "chat.entity.proofExpired" } as const satisfies Record<BadgeState, string>;
 
 /**
  * How a subject is looked up, said before the tap, and whether it can run on this device alone. `hidden`: none at all,
  * a did:web someone else chose with Hide my IP on (its server would learn this device's address, as a contact's
  * picture link's would). The other lookups ask only this device or fixed relays.
  */
-function lookupOf(t: Translate, provider: "pubky" | "did", subject: string, hideIp: boolean): { offline: boolean; hidden?: boolean; where: string } {
-  if (provider === "pubky") return { offline: false, where: t("chat.entity.lookupPubky", { relays: PUBKY_RELAYS.map(host).join(", ") }) };
+function lookupOf(t: Translate, provider: "pubky" | "did", subject: string, hideIp: boolean): { offline: boolean; hidden?: boolean; where: ReactNode } {
+  if (provider === "pubky") return { offline: false, where: t("chat.entity.lookupPubky", { relays: namesText(PUBKY_RELAYS.map(host), t) }) };
   const { method, id } = parseDid(subject);
   if (method === "key" || method === "jwk") return { offline: true, where: t("chat.entity.lookupLocal") };
   if (method === "dht") return { offline: false, where: t("chat.entity.lookupDht") };
   const server = id.split(":")[0].replace(/%3a/gi, ":");
-  if (hideIp) return { offline: false, hidden: true, where: t("chat.entity.lookupWebHiddenIp", { host: server }) };
-  return { offline: false, where: t("chat.entity.lookupWeb", { host: server }) };
+  // The host its writer chose, its own <bdi> as the badge's name: a port or a dot at its edge stays on its side in Arabic.
+  if (hideIp) return { offline: false, hidden: true, where: fillNames(t("chat.entity.lookupWebHiddenIp"), { host: server }) };
+  return { offline: false, where: fillNames(t("chat.entity.lookupWeb"), { host: server }) };
 }
 
 type Lookup = { status: "idle" } | { status: "loading" } | { status: "ok"; facts: readonly { label: string; value: string }[] } | { status: "error"; error: string };

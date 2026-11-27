@@ -3,13 +3,13 @@ import { formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { NAME, withName } from "../apps/aroundName";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
+import { useFileActions } from "../../hooks/useFileActions";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { downloadFile } from "../../lib/fileDownload";
 import { formatFileSize } from "../../lib/format";
 import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction } from "../../lib/fileStatus";
-import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
 import { audioFormat, canPlayAudio } from "../../lib/videoPlayer";
@@ -20,13 +20,13 @@ import { Highlight } from "../chat/ChatSearch";
 import { FORCED_EDGE, ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { SpeedPill } from "../voice/VoiceBubble";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
-import { roomHeld } from "../../lib/filesComing";
 import { FilesStillComing } from "../chat/FilesStillComing";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
 type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
 
-const pill = `text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
+/** A file answer under the player (Decline, Pause, Resume, Cancel): on a phone 44 px tall, as FileBubble's and VoiceBubble's. */
+const pill = `text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
 
 /**
  * An audio file in the chat (an MP3, an M4A, a FLAC: sent as a file, not recorded as a voice message): its name, a
@@ -51,9 +51,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const [position, setPosition] = useState(remembered?.at ?? 0);
   const [duration, setDuration] = useState(remembered?.duration ?? 0);
   const [rate, setRate] = useState(voiceRate);
-  const [actionError, setActionError] = useState("");
-  // Accept refused for the files still coming: which ones, from which chat, show under the offer (FileBubble).
-  const [heldRoom, setHeldRoom] = useState(false);
+  // Accept refused for the files still coming (`heldRoom`): which ones, from which chat, show under the offer (FileBubble).
+  const { act, actionError, setActionError, heldRoom, acceptRef } = useFileActions(platform, file.id);
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(false);
   const whyId = useId();
@@ -62,7 +61,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   useChosenSpeaker(audioRef, src);
   const playRef = useRef<HTMLButtonElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  useFocusKept(rootRef);
+  // A Cancel in the list of files still coming, or the ⓘ, gone with the refusal: the focus goes to Accept.
+  useFocusKept(rootRef, () => acceptRef.current);
   const srcRef = useRef<string | null>(null);
   /** The source playing: a blob URL, or a file the platform streams (released when it stops). */
   const sourceRef = useRef<StoredMedia | null>(null);
@@ -224,11 +224,6 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   };
   mediaRef.current = { title: t("chat.audio.message"), play: () => void play(), pause, seekTo: seek };
 
-  const act = (action: FileAction) => {
-    setActionError("");
-    setHeldRoom(false);
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => { setActionError(problemLine(error, t)); setHeldRoom(roomHeld(error)); });
-  };
   const save = () => {
     if (!platform) return;
     setActionError("");
@@ -337,10 +332,10 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
       </div>
       {offered && (
         <div className="mt-1.5 px-1" data-testid="audio-offer">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Not turned off by a room shown less than its size: that room may be old, and the engine reads it again. */}
-            <button type="button" data-testid="audio-accept" onClick={() => act("accept")}
-              className={`text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}>
+            <button ref={acceptRef} type="button" data-testid="audio-accept" onClick={() => act("accept")}
+              className={`text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}>
               {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
             </button>
             {!group && <button type="button" data-testid="audio-decline" onClick={() => act("decline")} className={pill}>{t("chat.file.decline")}</button>}
@@ -350,11 +345,11 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
               {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : withName(t("chat.media.wantsToSend", { name: NAME, size: formatFileSize(transfer.room, t) }), peerName)}
             </p>
           )}
-          {!group && (heldRoom || noRoom) && <FilesStillComing except={file.id} open={heldRoom} />}
+          {!group && (heldRoom || noRoom) && <FilesStillComing except={file.id} open={heldRoom} accept={acceptRef} />}
         </div>
       )}
       {controls && !offered && !group && (canPause || pausedHere || canCancel) && (
-        <div className="flex gap-1.5 mt-1 px-1">
+        <div className="flex flex-wrap gap-1.5 mt-1 px-1">
           {canPause && <button type="button" className={pill} data-testid="audio-pause-transfer" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={pill} data-testid="audio-resume-transfer" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
           {canCancel && <button type="button" className={pill} data-testid="audio-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>}

@@ -7,10 +7,10 @@
 | Document kind | Profile |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [600](600-media.md), [601](601-webrtc-media.md), [902](902-group-mesh.md), [903](903-group-community.md) |
-| Implementation | Not built. This draft is the contract the core, the node, the engine and the app are built against. |
+| Implementation | Since 1.12, in communities: the `call` field in core [`groupMeta.ts`](../../packages/core/src/groupMeta.ts); the engine's `setGroupCall` and `groupCallToken` in [`node.ts`](../../packages/browser/src/engine/node.ts); the app's [`GroupCallButton`](../../apps/ui/src/components/GroupCallButton.tsx) and [`groupCallPass.ts`](../../apps/ui/src/lib/groupCallPass.ts). The CLI names the node (`group call <group> --sfu`) but does not join. |
 | Summary | A community group names a node that forwards its calls, and a member asks that node for a call pass with a signed request. |
-| Availability | Planned |
-| Notes | Community groups only. Media goes through the node's forwarding server (an SFU, LiveKit), not from each member to each other. End-to-end encryption of the media is optional in this revision. |
+| Availability | Available |
+| Notes | Community groups only, joined from the web app, the extension, Android and the desktop app on macOS and Windows; not from the desktop app on Linux or the CLI yet. Media goes through the node's forwarding server (an SFU, LiveKit), not from each member to each other. End-to-end encryption of the media is optional in this revision. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 

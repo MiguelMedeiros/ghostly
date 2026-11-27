@@ -92,7 +92,9 @@ describe("a publisher's ghostly-revoke.json", () => {
     verifies.mockClear();
     shapeChecks.mockClear();
     await store.checkUpdates();
-    expect(verifies.mock.calls.length + shapeChecks.mock.calls.length, "every entry read once, not once per app").toBe(list.length);
+    // And the two revoked apps' own, kept with the profile's by the check: read from there (no signature checked) at
+    // their record's write and their run check.
+    expect(verifies.mock.calls.length + shapeChecks.mock.calls.length, "every entry read once, not once per app").toBe(list.length + 2 * 2);
     expect(await store.runCheck({ ref: six[0]!.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
     expect(await store.runCheck({ ref: six[3]!.ref })).toEqual({ status: "revoked", reason: "Lost key" });
     for (const i of [1, 2, 4, 5]) expect(await store.runCheck({ ref: six[i]!.ref })).toEqual({ status: "ok" });
@@ -104,7 +106,8 @@ describe("a publisher's ghostly-revoke.json", () => {
     shapeChecks.mockClear();
     await store.checkUpdates();
     expect(verifies).toHaveBeenCalledTimes(0);
-    expect(shapeChecks).toHaveBeenCalledTimes(list.length);
+    // And again the two revoked apps' own kept ones, read where the check judges with them.
+    expect(shapeChecks).toHaveBeenCalledTimes(list.length + 2 * 2);
     expect(await store.runCheck({ ref: six[0]!.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
   }, 60_000);
 

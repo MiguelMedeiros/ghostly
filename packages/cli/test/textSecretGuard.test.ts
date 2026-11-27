@@ -74,6 +74,21 @@ describe("the secret guard on names and other texts that leave the device", { ti
     error(await ghostly(["--home", dir, "file", "send", "nope", path, "--name", split(":"), "--force"]), "not_found", 3);
   });
 
+  it("file send refuses a secret as the file's type (--mime) as it refuses it as the name, unless --force", async () => {
+    const dir = home("file-mime-secret");
+    ok(await ghostly(["--home", dir, "profile", "create", "bot", "--use"]));
+    const path = join(dir, "a.txt");
+    writeFileSync(path, "a");
+    const { group } = ok(await ghostly(["--home", dir, "group", "create", "team", "--mesh"])) as { group: string };
+    // In lower case, as it goes out: a key fits the 64 characters of a subtype.
+    const mime = `application/${NSEC}`;
+    for (const target of ["nope", group]) {
+      expect(error(await ghostly(["--home", dir, "file", "send", target, path, "--mime", mime]), "confirm", 5).message, target).toMatch(/type looks like a secret.*--force/);
+    }
+    // With --force it goes on, to the chat this profile does not have.
+    error(await ghostly(["--home", dir, "file", "send", "nope", path, "--mime", mime, "--force"]), "not_found", 3);
+  });
+
   it("app revoke refuses a seed as the reason unless --force", async () => {
     const dir = home("revoke-reason-secret");
     mkdirSync(join(dir, "app"));

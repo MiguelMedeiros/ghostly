@@ -15,7 +15,8 @@ import { loadSettings } from "../../ui/src/lib/settings";
 import { bootDetails, browserTraits, lockdownLikely, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
 import { OtherTab, type OtherTabState } from "../../ui/src/components/OtherTab";
-import { dropLinks, forwardLink, linkInAddress, takeLinks } from "../../ui/src/lib/otherTabLink";
+import { dropLinks, forwardLink, linkInAddress, openInTurn, takeLinks } from "../../ui/src/lib/otherTabLink";
+import { followSettingsWhileWaiting } from "../../ui/src/lib/otherTabSettings";
 import { loadLocale, translatorFor } from "../../ui/src/locales";
 import { countInstallVisit, watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
@@ -52,6 +53,10 @@ setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: c
 // GNOME Web and other WebKitGTK browsers before 2.52 keep the sounds' output running: waking it froze the page.
 gateSounds();
 
+// Read once, as the page opened and before anything is awaited: a link that reaches it later (while it starts, or
+// waits behind another tab) takes the address, the share is still this page's.
+const sharing = openedForShare();
+
 // The chosen local profile (WISP 04): its own chats, database, settings and single-peer lock. The
 // default profile keeps the original names, so nothing existing moves. A profile a handoff moved whose pointer was lost
 // is pointed at its state again before anything opens storage. Its language is on <html> before the first paint (the
@@ -82,12 +87,16 @@ const missing = await missingEssentials();
 if (missing.length) await cannotRun(missing);
 
 const peerLock = profile ? `ghostly-peer-${profile}` : "ghostly-peer";
-// Read once, as the page opened: a link that reaches it later takes the address, the share is still this page's.
-const sharing = openedForShare();
-/** What stops handing links on, once this tab holds the lock; it returns the last link no tab answered yet. */
-let stopLink = (): string | null => null;
+/** What stops handing links on, once this tab holds the lock; it returns the links no tab answered yet, oldest first. */
+let stopLink = (): string[] => [];
 await becomeThePeer(peerLock, () => {
-  const draw = (state: OtherTabState) => root.render(<OtherTab state={state} t={profileTranslator()} />);
+  let shown: OtherTabState = "plain";
+  const draw = (state: OtherTabState) => {
+    shown = state;
+    root.render(<OtherTab state={state} t={profileTranslator()} />);
+  };
+  // The open tab's change of language or theme: this screen takes it while it waits.
+  const stopFollowing = followSettingsWhileWaiting(() => draw(shown));
   // Opened for a share while the app runs in another tab: that tab gets it (after a wait, or as this tab goes), and
   // this one says it went only once the worker handed it over. Once the lock is this tab's, it asks for it itself.
   if (sharing) handShareOver(() => isPeer, draw, sharing);
@@ -116,8 +125,9 @@ await becomeThePeer(peerLock, () => {
   addEventListener("hashchange", arrived);
   stopLink = () => {
     removeEventListener("hashchange", arrived);
+    stopFollowing();
     for (const stop of pending.keys()) stop();
-    return [...pending.values()].pop() ?? null;
+    return [...pending.values()];
   };
   draw(sharing ? "sharing" : link ? "link" : "plain");
   // The lock is there but the browser refuses it: the same screen as a browser without it.
@@ -126,11 +136,15 @@ await becomeThePeer(peerLock, () => {
 await mayStart(() => untilAskedFor(peerLock));
 
 isPeer = true;
-// A link no tab answered while this one waited is this tab's to open: back in the address, unless another page is there now.
-const unanswered = stopLink();
-if (unanswered && window.location.hash.replace(/^#\/?/, "") === "") {
+// Links no tab answered while this one waited are this tab's to open, unless another page is there now: the first back
+// in the address, each later one once the app took the one before (`openInTurn`).
+const unansweredLinks = stopLink();
+const [unanswered, ...laterLinks] = window.location.hash.replace(/^#\/?/, "") === "" ? unansweredLinks : [];
+if (unanswered) {
   history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#${unanswered}`);
 }
+/** A link this tab opens while it is the app: as if its address had changed to it, for the intakes to take. */
+const openLink = (route: string) => { window.location.hash = route; };
 // This tab is the app: a visit, once per tab (its reloads are the same one), for the install hint.
 countInstallVisit();
 // The device state, before anything of the profile starts (WISP 06 § The gate): one small local read. A profile that
@@ -146,7 +160,7 @@ if (gate.full) {
   listenForShares(peerLock);
   askForShare(sharing);
   // Links another tab of this profile opened: here, as if this tab's address had changed to them.
-  takeLinks(peerLock, (route) => { window.location.hash = route; });
+  takeLinks(peerLock, openLink);
 } else {
   // On standby nothing takes them: a tab waiting with one drops it rather than keep it in its address.
   dropLinks(peerLock);
@@ -177,3 +191,5 @@ root.render(
     <Root />
   </StrictMode>,
 );
+// The later links no tab answered: the same way, once the app took the first (on standby none opens, as above).
+if (gate.full) openInTurn(laterLinks, openLink);

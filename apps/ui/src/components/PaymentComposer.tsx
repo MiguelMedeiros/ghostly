@@ -31,6 +31,7 @@ import { Notice } from "./ui/Notice";
 import { SecretGuardDialog } from "./SecretGuardDialog";
 import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { fillNames } from "../lib/fillNodes";
+import { isolate } from "../lib/ownStatus";
 import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 interface PaymentComposerProps {
@@ -101,7 +102,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   // while a file moves.
   const [peer] = usePlatformValue(() => [servicesPlatform?.getPeer(chat ?? ""), wallet?.getState()] as const);
   const who = contact || t("payments.composer.yourContact");
-  const networkName = (card: InstanceCard) => `${card.network === "testnet" ? "Testnet" : "Mainnet"} ${card.name}`;
+  // "Cashu (Testnet)", in the language's own order ("Cashu（Testnet）"), as the Accept sheet names a card.
+  const networkName = (card: InstanceCard) => t("payments.accept.cardNetwork", { card: card.name, network: card.network === "testnet" ? "Testnet" : "Mainnet" });
   /**
    * Why a card cannot be used in this chat: not set up, off here, off for the contact, or no wallet of its network
    * there. `contact`: it is the contact's side that says no (the card's face says "Not accepted", else "Off here").
@@ -300,9 +302,11 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         // Fedimint, but no federation in common: their request carries an invoice of their federation instead.
         clearInterval(timer);
         setAsking(null);
+        // A Notice's title is a string: the name goes in it between FSI and PDI, as the sheet's <bdi>s keep it.
+        const name = isolate(who);
         setError(answer.invoice
-          ? { tone: "error", title: t("payments.composer.error.noFederationInvoice", { name: who }), next: t("payments.composer.error.noFederationInvoiceNext") }
-          : { tone: "error", title: t("payments.composer.error.noFederation", { name: who }), next: t("payments.composer.error.noFederationNext") });
+          ? { tone: "error", title: t("payments.composer.error.noFederationInvoice", { name }), next: t("payments.composer.error.noFederationInvoiceNext") }
+          : { tone: "error", title: t("payments.composer.error.noFederation", { name }), next: t("payments.composer.error.noFederationNext") });
       } else if (answer?.target && context && bound) {
         clearInterval(timer);
         const token = answer.target.method === "usdt";
@@ -403,7 +407,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   };
   // Pay, and Accept beside it: two sides of one sheet, chosen in its head.
   const modes = onSaveMethods && (
-    <span role="tablist" aria-label={t("payments.mode.label", { name: who })} className="payment-modes" onKeyDown={modeKeys}>
+    <span role="tablist" aria-label={t("payments.mode.label", { name: isolate(who) })} className="payment-modes" onKeyDown={modeKeys}>
       {MODES.map((m) => (
         <button key={m} type="button" role="tab" data-testid={`payment-mode-${m}`} aria-selected={mode === m} tabIndex={mode === m ? 0 : -1} onClick={() => switchMode(m)} className="max-md:min-h-11">
           {t(m === "pay" ? "payments.mode.pay" : "payments.mode.accept")}

@@ -58,15 +58,21 @@ class MemoryFiles implements GroupFileStore {
 }
 
 /** `brief`: views that go in the next state the engine sends, and then away (as the engine's `dropBriefViews`, `sent`). */
-interface Files { store: MemoryFiles; transfers: Map<string, FileTransferView>; brief: Map<string, FileTransferView>; settings: { autoDownloads: boolean; serveFiles: boolean } }
+interface Files {
+  store: MemoryFiles; transfers: Map<string, FileTransferView>; brief: Map<string, FileTransferView>; settings: { autoDownloads: boolean; serveFiles: boolean };
+  /** Bytes still to come of the files its 1:1 chats took (`FileDesk.chatsComing`). */
+  chatsComing: number;
+  /** What still came of the group files each time the desk said it changed (`GroupFilesHost.comingChanged`). */
+  coming: number[];
+}
 
 /** Frames on the edges, as they went: who to whom, and the frame. */
 type Seen = { from: string; to: string; frame: Record<string, unknown> }[];
 
 const limits = GROUP_FILE_LIMITS as { -readonly [K in keyof typeof GROUP_FILE_LIMITS]: number };
 const saved = { ...limits };
-const elapsed = performance.now;
-afterEach(() => { Object.assign(limits, saved); performance.now = elapsed; });
+const elapsed = performance.now, wallClock = Date.now;
+afterEach(() => { Object.assign(limits, saved); performance.now = elapsed; Date.now = wallClock; });
 
 class FilesWorld {
   readonly world: CommunityWorld;
@@ -81,6 +87,9 @@ class FilesWorld {
     this.world = new CommunityWorld(undefined, network);
     // Time gone by, as every device's monotonic clock reads it: the world's, whatever a device's wall clock says (`clock`).
     performance.now = () => this.world.now;
+    // And the time a transfer's round trips are read on (`ChatFiles`): on the real clock, a test process paused under load
+    // between two steps (35 ms is enough) looked like a queue on the path, and a file then came at a slower pace.
+    Date.now = () => this.world.now;
     this.world.drop = (from, to, frame) => {
       this.seen.push({ from: from.name, to: to.name, frame });
       if (!this.hold?.(from, to, frame)) return false;
@@ -96,9 +105,11 @@ class FilesWorld {
 
   /** `binary`: its edges agreed files/4, so what it serves goes as binary messages. */
   add(name: string, binary = false, staysOnline = false): Peer {
-    const files: Files = { store: new MemoryFiles(), transfers: new Map(), brief: new Map(), settings: { autoDownloads: true, serveFiles: true } };
+    const files: Files = { store: new MemoryFiles(), transfers: new Map(), brief: new Map(), settings: { autoDownloads: true, serveFiles: true }, chatsComing: 0, coming: [] };
     const brief = (id: string) => { const view = files.transfers.get(id); if (view) files.brief.set(id, view); };
     const peer = this.world.add(name, p => ({ groupFiles: { store: files.store, transfers: files.transfers, brief, settings: () => files.settings, sendFiles: (linkId, frame) => this.world.sendFiles(p, linkId, frame),
+      chatsComing: () => files.chatsComing,
+      comingChanged: () => files.coming.push(p.groups.files!.stillComing()),
       ...(binary && { sendData: (linkId: string, id: string, offset: number, data: Uint8Array) => this.world.sendData(p, linkId, id, offset, data) }) } }), { staysOnline });
     this.files.set(peer, files);
     return peer;
@@ -612,6 +623,91 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(sha(t.got(bob, id, auto.messageId).bytes!)).toBe(auto.meta.d);
   });
 
+  /**
+   * Each file fetched by itself was checked against the room alone, not beside the files already coming: six 8 MiB files
+   * with 38.9 MiB free were all asked for, and the two past the room ended "Not enough space". Each counts the ones
+   * still to come before it: the first four come, the other two wait for a Download.
+   */
+  it("of six files fetched by themselves at once that fit only four at a time, four come and the rest wait for a Download", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const store = t.files.get(bob)!.store, MiB = 1024 * 1024, room = Math.round(38.9 * MiB);
+    // The room shrinks as bytes are stored here, as a disk's does.
+    const used = () => [...store.bytes].reduce((n, [file, bytes]) => n + (store.records.get(file)?.direction === "in" ? bytes.length : 0), 0);
+    store.room = async () => room - used();
+    const sent = await Promise.all([0, 1, 2, 3, 4, 5].map(i => t.send(alice, id, pattern(8 * MiB, i + 1), { name: `g${i}.bin` })));
+    const order = sent.map(s => s.messageId).sort((a, b) => bob.messages.findIndex(m => m.id === a) - bob.messages.findIndex(m => m.id === b));
+    await t.world.until(() => sent.every(s => t.got(bob, id, s.messageId).message), 60_000);
+    // One at a time from the one holder: 32 MiB take a while.
+    await t.world.until(() => order.slice(0, 4).every(messageId => t.done(bob, id, messageId)), 60 * 60_000, 5_000);
+    await t.world.run(5 * 60_000);
+    const wanted = (messageId: string) => t.seen.some(s => s.from === "bob" && s.frame.t === "group-want" && s.frame.id === messageId);
+    expect(order.map(wanted)).toEqual([true, true, true, true, false, false]);
+    expect(order.map(messageId => t.done(bob, id, messageId))).toEqual([true, true, true, true, false, false]);
+    for (const messageId of order.slice(4)) expect(t.got(bob, id, messageId).transfer).toMatchObject({ state: "transferring", stage: "asking" });
+    expect(used()).toBeLessThanOrEqual(room);
+  });
+
+  /**
+   * The files the 1:1 chats took and still wait for were not counted either: a group file fetched by itself beside
+   * them went past the room. One that fits only without them waits for a Download; a smaller one beside them comes.
+   */
+  it("a file fetched by itself counts what the 1:1 chats still have to come: one that fits only without it waits for a Download", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const files = t.files.get(bob)!;
+    files.store.roomLeft = 1_000_000;
+    files.chatsComing = 500_000;
+    const wanted = (messageId: string) => t.seen.some(s => s.from === "bob" && s.frame.t === "group-want" && s.frame.id === messageId);
+    const big = await t.send(alice, id, pattern(600_000, 3), { name: "big.bin" });
+    await t.world.run(60_000);
+    expect(wanted(big.messageId)).toBe(false);
+    expect(t.got(bob, id, big.messageId).transfer).toMatchObject({ state: "transferring", stage: "asking" });
+    const small = await t.send(alice, id, pattern(400_000, 4), { name: "small.bin" });
+    await t.world.until(() => t.done(bob, id, small.messageId), 60_000);
+  });
+
+  /**
+   * A 1:1 offer waiting shows the room left beside the group files still coming: the desk says when that changes, as a
+   * file is asked for and as it ends, so the offer's room is read again then (`FileDesk.comingChanged`).
+   */
+  it("says what still comes changed when a file fetched by itself is asked for and when it ends", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const files = t.files.get(bob)!;
+    files.coming.length = 0;
+    const sent = await t.send(alice, id, pattern(400_000, 7), { name: "told.bin" });
+    await t.world.until(() => t.done(bob, id, sent.messageId), 60_000);
+    expect(files.coming).toEqual([400_000, 0]);
+  });
+
+  /**
+   * A holder's offer was checked against the room alone too: the room taken meanwhile (a 1:1 file under way, another
+   * group file asked for before it), the offer was taken and the disk filled part way. Counted beside the files still
+   * to come before it, the one that does not fit waits for a Download, its holder told there is no room.
+   */
+  it("a holder's offer that fits only without the files still to come before it is refused, and the file waits for a Download", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    const files = t.files.get(bob)!;
+    const used = () => [...files.store.bytes].reduce((n, [file, bytes]) => n + (files.store.records.get(file)?.direction === "in" ? bytes.length : 0), 0);
+    files.store.room = async () => 1_000_000 - used();
+    // Both asked for while they fit, each of its author; their offers held until the room changed.
+    t.hold = (_from, to, frame) => to === bob && frame.t === "pf-offer";
+    const first = await t.send(alice, id, pattern(400_000, 5), { name: "first.bin" });
+    await t.world.until(() => t.seen.some(s => s.from === "bob" && s.frame.t === "group-want" && s.frame.id === first.messageId), 60_000);
+    const second = await t.send(carol, id, pattern(400_000, 6), { name: "second.bin" });
+    await t.world.until(() => t.seen.filter(s => s.to === "bob" && s.frame.t === "pf-offer").length === 2, 60_000);
+    // A 1:1 file taken meanwhile still has 300 kB to come: the first fits beside it, the second not beside both.
+    files.chatsComing = 300_000;
+    t.release(id);
+    await t.world.until(() => t.done(bob, id, first.messageId), 60_000);
+    await t.world.run(60_000);
+    expect(t.seen.filter(s => s.from === "bob" && s.frame.t === "pf-refuse").map(s => [s.to, s.frame.why])).toEqual([["carol", "no-room"]]);
+    expect(t.got(bob, id, second.messageId).transfer).toMatchObject({ state: "transferring", stage: "asking" });
+    expect(files.store.records.get(t.got(bob, id, second.messageId).message!.file!.id)!.group).not.toHaveProperty("auto");
+  });
+
   it("a holder that stalls mid-way is left, and the next holder goes on from the bytes stored here", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
@@ -680,6 +776,26 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(sha(t.got(carol, id, messageId).bytes!)).toBe(meta.d);
     const fromBob = t.seen.filter(s => s.from === "bob" && s.to === "carol" && s.frame.t === "pf-data").map(s => s.frame.offset as number);
     expect(fromBob.filter(offset => offset < cut).length).toBe(cut / (16 * 1024));
+  });
+
+  it("a file cut mid-way by a restart shows the bytes stored here while it waits for a holder, and counts only the rest as still to come", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const size = 600_000, cut = 256 * 1024;
+    t.hold = (from, to, frame) => from === alice && to === bob && frame.t === "pf-data" && (frame.offset as number) >= cut;
+    const { messageId, meta } = await t.send(alice, id, pattern(size, 11));
+    await t.world.until(() => (t.got(bob, id, messageId).transfer?.transferred ?? 0) >= cut, 5 * 60_000);
+    // Alice's app closes (the transfer ends, what came is kept), then Bob's starts again: nobody holds the file in reach.
+    alice.online = false;
+    t.hold = null;
+    await t.world.run(10_000);
+    await t.restart(bob);
+    await t.world.run(10_000);
+    expect(t.got(bob, id, messageId).transfer).toMatchObject({ state: "transferring", stage: "waiting", transferred: cut, size });
+    expect(bob.groups.files!.stillComing()).toBe(size - cut);
+    t.world.reopen(alice);
+    await t.world.until(() => t.done(bob, id, messageId), 5 * 60_000);
+    expect(sha(t.got(bob, id, messageId).bytes!)).toBe(meta.d);
   });
 
   it("a holder serving bad bytes then stalling does not get the next holder blamed", async () => {
@@ -1741,8 +1857,10 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
 
   it("a member downloading at a good pace stays with its holder when its device's clock is set ahead mid-way", async () => {
     const t = new FilesWorld();
-    // Done in about 20 seconds at its pace, well within `wantWaitMs`.
-    const { bob, id, messageId, meta, step, offers } = await twoHolders(t, 768 * 1024, 1);
+    // Done in about 10 seconds at its pace, well within `wantWaitMs`: at `slowAfterMs` what is left of it comes within
+    // 30 s at the pace so far, its window still opening. (768 KiB was not: only the real clock's round trips, much
+    // shorter than the world's steps, opened the window at once, and a test process paused under load left it slow.)
+    const { bob, id, messageId, meta, step, offers } = await twoHolders(t, 384 * 1024, 1);
     for (let i = 0; i < 3; i++) await step();
     expect(offers()).toHaveLength(1);
     expect(t.done(bob, id, messageId)).toBe(false);
@@ -1765,6 +1883,59 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(new Set(offers()).size).toBe(2);
     expect(t.world.now - set).toBeLessThan(GROUP_FILE_LIMITS.slowAfterMs + 5_000);
     expect(t.done(bob, id, messageId)).toBe(false);
+  });
+
+  /**
+   * Alice wrote a file that Carol holds too; Bob asks for it. The first holder to answer is held up on its way to Bob
+   * (none of its files/3 frames reach him) until `release`, so Bob's want waits for that holder's offer.
+   */
+  const silentFirst = async (t: FilesWorld) => {
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    for (const p of [bob, carol]) t.files.get(p)!.settings.autoDownloads = false;
+    const { messageId } = await t.send(alice, id, pattern(256 * 1024, 15));
+    await t.world.until(() => [bob, carol].every(p => !!t.got(p, id, messageId).message?.file), 60_000);
+    await carol.groups.downloadFile(t.got(carol, id, messageId).message!.file!.id);
+    await t.world.until(() => t.done(carol, id, messageId), 5 * 60_000);
+    await t.world.run(15_000);
+    t.say(carol, bob, id, { t: "group-have", g: id, ids: [messageId] });
+    await t.world.run(1_000);
+    let first: string | undefined;
+    t.hold = (from, to, frame) => {
+      if (!first && to === bob && frame.t === "pf-offer") first = from.name;
+      return to === bob && from.name === first && typeof frame.t === "string" && frame.t.startsWith("pf-");
+    };
+    const mark = t.seen.length;
+    const offers = () => new Set(t.seen.slice(mark).filter(s => s.to === "bob" && s.frame.t === "pf-offer").map(s => s.from));
+    await bob.groups.downloadFile(t.got(bob, id, messageId).message!.file!.id);
+    return { bob, id, messageId, offers };
+  };
+
+  it.each([["an hour", 60 * 60_000], ["ten minutes", 10 * 60_000]])("a member whose holder never offers asks the next one after `wantWaitMs` though its device's clock was set back %s", async (_, back) => {
+    const t = new FilesWorld();
+    const { bob, id, messageId, offers } = await silentFirst(t);
+    for (let i = 0; i < 10 && !offers().size; i++) await t.world.run(1_000);
+    expect(offers().size).toBe(1);
+    bob.clock = -back;
+    const set = t.world.now;
+    for (let i = 0; i < 120 && offers().size < 2; i++) await t.world.run(5_000);
+    // Within `wantWaitMs` and a step, not the length of the jump: the other holder offers it.
+    expect(offers().size).toBe(2);
+    expect(t.world.now - set).toBeLessThan(GROUP_FILE_LIMITS.wantWaitMs + 5_000);
+    await t.world.until(() => t.done(bob, id, messageId), 5 * 60_000);
+  });
+
+  it("a member whose device's clock is set ahead just after it asks waits for the offer of the holder it asked", async () => {
+    const t = new FilesWorld();
+    const { bob, id, messageId, offers } = await silentFirst(t);
+    bob.clock = 60 * 60_000;
+    for (let i = 0; i < 10 && !offers().size; i++) await t.world.run(1_000);
+    expect(offers().size).toBe(1);
+    // The holder's offer is on its way a few seconds more, well within `wantWaitMs`: Bob does not ask the next one.
+    await t.world.run(5_000);
+    expect(offers().size).toBe(1);
+    t.release(id);
+    await t.world.until(() => t.done(bob, id, messageId), 5 * 60_000);
+    expect(offers().size).toBe(1);
   });
 
   it("a holder that serves the rest of a file counts that rest toward its day, not the whole file", async () => {

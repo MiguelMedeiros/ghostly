@@ -270,6 +270,19 @@ describe("what it says", () => {
     expect(screen.getByTestId("message-details-keys-hint")).toHaveTextContent("Keys are never shown here.");
   });
 
+  it("a long text's excerpt ends before an emoji it would cut in half, or a family emoji it would cut into its parts", async () => {
+    fakeEngine.on("messageDetails", () => null);
+    for (const [text, kept] of [[`${"a".repeat(89)}😀 and more`, "a".repeat(89)], [`${"a".repeat(85)}👨‍👩‍👧 and more`, "a".repeat(85)]]) {
+      const { user, unmount, container } = bubble({ text });
+      await detailsClick(user, container.querySelector("[data-message-bubble]")!);
+      const excerpt = await screen.findByTestId("message-details-excerpt");
+      expect(excerpt).toHaveTextContent(`${kept}…`);
+      // No half of an emoji (a lone surrogate) in it.
+      expect(excerpt.textContent).not.toMatch(/\p{Cs}/u);
+      unmount();
+    }
+  });
+
   it("a text received through an Iroh relay names the relay", async () => {
     fakeEngine.on("messageDetails", () => textView({
       message: { id: "peer_x", wireId: "w", linkId: "link-1", sender: "peer", timestamp: 1_700_000_000_000, via: "datalink", kind: "text", textBytes: 5 },
@@ -466,6 +479,14 @@ describe("the words", () => {
     expect(formatDuration(42)).toBe("42 ms");
     expect(formatDuration(3_456)).toBe("3.46 s");
     expect(formatDuration(125_000)).toBe("2 min 5 s");
+  });
+
+  it("a size that rounds up to 1024 KB is said in MB, MB staying the top unit", () => {
+    expect(formatBytes(1_048_524)).toBe("1,023.9 KB (1,048,524 bytes)");
+    expect(formatBytes(1_048_525)).toBe("1.0 MB (1,048,525 bytes)");
+    expect(formatBytes(1_048_575)).toBe("1.0 MB (1,048,575 bytes)");
+    expect(formatBytes(1_048_575, translateWith(locales.pt, "pt"))).toBe("1,0 MB (1.048.575 bytes)");
+    expect(formatBytes(1024 ** 3 - 1)).toBe("1,024.0 MB (1,073,741,823 bytes)");
   });
 
   it("in another language: its words, its numbers and its times, with the JSON copy still in English", () => {

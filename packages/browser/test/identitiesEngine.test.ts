@@ -1062,6 +1062,31 @@ describe("per chat", () => {
     expect(ledgers.b.received[0].display).toEqual({ source: "Test directory", fetchedAt: 2 });
   });
 
+  it("a looked-up public name survives the contact presenting the same proof again (result lost)", async () => {
+    const p = await shared();
+    const display: IdentityDisplay = { name: "Alice PGP", source: "keys.openpgp.org", fetchedAt: Math.floor(Date.now() / 1000) };
+    p.state.providers.b = [{ ...fakeKey, lookupDisplay: async () => display } as IdentityProofProvider];
+    await p.engines.b.lookupDisplay({ linkId: "chat", id: p.id });
+    expect(p.ledgers.b.received.find(r => r.id === p.id)?.display?.name).toBe("Alice PGP");
+    p.ledgers.a = { ...p.ledgers.a, shared: p.ledgers.a.shared.map(s => s.id === p.id ? { ...s, status: "pending" as const } : s) };
+    p.engines.a.closed("chat"); p.engines.b.closed("chat");
+    p.engines.a.ready("chat"); p.engines.b.ready("chat");
+    await vi.waitFor(() => expect(p.ledgers.a.shared.find(s => s.id === p.id)?.status).toBe("accepted"));
+    expect(p.ledgers.b.received.find(x => x.id === p.id)?.display?.name).toBe("Alice PGP");
+    expect(p.engines.b.linkView("chat", true)!.received.find(x => x.id === p.id)?.display).toEqual(display);
+  });
+
+  it("a new proof of the same identity does not take the name looked up for the one it replaces", async () => {
+    const p = await shared();
+    p.state.providers.b = [{ ...fakeKey, lookupDisplay: async () => ({ name: "Alice PGP", source: "keys.openpgp.org", fetchedAt: 1 }) } as IdentityProofProvider];
+    await p.engines.b.lookupDisplay({ linkId: "chat", id: p.id });
+    const next = await prove(p.engines.a);
+    await p.engines.a.share({ linkId: "chat", id: next.id });
+    await vi.waitFor(() => expect(p.ledgers.b.received.find(r => r.id === next.id)?.status).toBe("verified"));
+    expect(p.ledgers.b.received.find(r => r.id === next.id)).not.toHaveProperty("display");
+    expect(p.engines.b.linkView("chat", true)!.received.find(x => x.id === next.id)?.display).toBeUndefined();
+  });
+
   it("a proof received under the contact's previous key is shown as such, not verified", async () => {
     const { engines, state } = await shared();
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("verified");

@@ -21,23 +21,42 @@
  *   form, a checkbox, a double click or the app's own context menu copies on the person's tap, and nothing else does
  *   (not on load, not from a timer or a promise after a tap). `execCommand("paste")` is refused. Every other command
  *   passes as it is. The wrapped `execCommand` is left fixed in place (not writable, not configurable), once per
- *   window;
+ *   window. A page that rewrites itself (`document.open()`, which takes every listener of the document and of its
+ *   window away) has those inputs listened for again as the call returns, before its new page adds any of its own; so
+ *   does one that calls `document.write()` or `writeln()` once it has loaded (the same open steps, run without
+ *   `open()`), before what it wrote is parsed: an empty write goes first, for the browser to run those steps (or not,
+ *   as it would for the page's), so a script the page writes runs with them listened for. One of those three called
+ *   on another window's document (`Document.prototype.write.call(frame.contentDocument, …)`) is handed to that
+ *   window's own method, so the guard there listens again (a window whose own is this one again throws);
  * - runs in a frame's window before the page holds it, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`): what a frame
  *   element hands out is guarded first, the frames of the document and of its shadow trees are gone over as one loads
- *   (an empty frame's first load fires as it is put in the page) and as the page changes, each `srcdoc` frame gets
- *   this script first, a declarative shadow root the page's script would make is refused, and with `VIEWER_GUARD_CSP`
+ *   (an empty frame's first load fires as it is put in the page) and as the page changes (the whole page once, then
+ *   only what each change put in it and the frames whose `srcdoc` it set: no change costs more as the page grows), the
+ *   document's frames as each call that puts nodes in a page returns (`appendChild`, `append`, `innerHTML`,
+ *   `insertNode`, `document.write` and the like, an `execCommand`), so the window of a frame read by its index in the
+ *   task that put it in is guarded before the page holds it, whatever its answer, each `srcdoc` frame gets this script
+ *   first, a declarative shadow root the page's script would make is refused, and with `VIEWER_GUARD_CSP`
  *   a `javascript:` URL is refused (its own Trusted Types default policy; one passes every other string on as it is,
  *   or, once the page made its own `default` policy, to that one's rules: the page's `createPolicy("default")` gets the
- *   guard's policy back with them, and the copy of itself it puts in a `srcdoc` frame skips them);
+ *   guard's policy back with them, a kind of string they have no rule for passes on as it is, and the copy of itself it
+ *   puts in a `srcdoc` frame skips them. The guard cannot tell an app's own `require-trusted-types-for` from its own, so
+ *   it keeps none: an app that enforces Trusted Types itself has every string its rules leave out passed on);
  * - starts a worker made from a `blob:` URL of the page's own from a script that makes a pass-through Trusted Types
- *   `default` policy in it first, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`, whichever of the two runs first).
- * A frame's window keeps what was run in it on its first, empty page when the page it loads is of the same origin (the
+ *   `default` policy in it first, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`, whichever of the two runs first);
+ * - keeps each cookie the page's script sets to the page's own host: a `Domain` attribute is left out of a
+ *   `document.cookie` write, and a `domain` out of `cookieStore.set` and `cookieStore.delete` (each of the other
+ *   members read once). The apps' origins under a services host share its site: one an app set for the whole host
+ *   would be read by every other contact's app open at once. The bridge drops those left from before as it starts
+ *   (apps/web/src/svc/clearSite.ts, with the setter it kept before this ran). Both fixed in place, once per window.
+ * A look over the frames passes by a frame of another origin without touching it (its prototype reads as null; this
+ * script cannot run there) and by one whose document it already found guarded for good, so an insertion costs little
+ * in an app with embeds. A frame's window keeps what was run in it on its first, empty page when the page it loads is of the same origin (the
  * bridge's guard reaches the app's frame then): there this script only watches the new document. Each document it
  * watches is marked (`ghostlyClipboardGuard`, fixed in place): the bridge reads that to know the guard ran in the page
  * it shows. It uses nothing the page can change after it ran (the page's own code runs later, in the same realm).
  *
- * A fence, not a wall, as the WebRTC guard's own: a frame's window read by its index (`window[0]`) before it loads,
- * inside a shadow tree written in the HTML the page itself sends, is out of its sight.
+ * A fence, not a wall, as the WebRTC guard's own: a frame inside a shadow tree written in the HTML the page itself
+ * sends is out of its sight.
  * No backslash, `${` or backtick in it.
  */
 export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
@@ -50,8 +69,9 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
     const home = w.document;
     const exec = describe(proto, "execCommand");
     const fresh = !!exec && exec.configurable === true && typeof exec.value === "function";
-    const watched = !!describe(home, "ghostlyClipboardGuard");
-    if (!fresh && watched) return;
+    const mark = describe(home, "ghostlyClipboardGuard");
+    const watched = !!mark;
+    if (!fresh && watched) return !!exec && exec.configurable === false && mark.configurable === false;
     if (!watched) define(home, "ghostlyClipboardGuard", { value: true });
     const own = "<script>(" + noClipboardWrites + ")(window)<" + "/script>";
     const close = "<" + "/script>";
@@ -61,8 +81,18 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
     const slice = text.prototype.slice;
     const index = text.prototype.indexOf;
     const listen = w.EventTarget.prototype.addEventListener;
+    const above = w.Object.getPrototypeOf;
+    const Known = w.WeakSet;
+    const known = typeof Known === "function" ? new Known() : null;
+    const has = known && Known.prototype.has;
+    const add = known && Known.prototype.add;
     const shut = (inner) => {
-      try { if (inner && inner !== w) noClipboardWrites(inner); } catch (e) {}
+      try {
+        if (!inner || inner === w || apply(above, null, [inner]) === null) return;
+        const doc = inner.document;
+        if (known !== null && apply(has, known, [doc])) return;
+        if (noClipboardWrites(inner) === true && known !== null) apply(add, known, [doc]);
+      } catch (e) {}
     };
     const count = describe(w, "length").get;
     const view = describe(proto, "defaultView").get;
@@ -91,17 +121,54 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
     };
     const Observer = w.MutationObserver;
     const observe = Observer.prototype.observe;
+    const getter = (kind, name) => {
+      try {
+        const found = describe(kind.prototype, name);
+        return found && typeof found.get === "function" ? found.get : null;
+      } catch (e) { return null; }
+    };
+    const kindOf = getter(w.MutationRecord, "type");
+    const targetOf = getter(w.MutationRecord, "target");
+    const addedOf = getter(w.MutationRecord, "addedNodes");
+    const nodeType = getter(w.Node, "nodeType");
+    const matches = elements.matches;
+    const within = elements.querySelectorAll;
+    const piecemeal = kindOf !== null && targetOf !== null && addedOf !== null && nodeType !== null && typeof matches === "function" && typeof within === "function";
+    const framed = "iframe[srcdoc]";
+    const each = (node) => {
+      if (apply(nodeType, node, []) !== 1) return;
+      if (apply(matches, node, [framed])) first(node);
+      const frames = apply(within, node, [framed]);
+      for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+    };
     const watch = (root, all) => {
-      const scan = () => {
+      const look = () => {
         try {
-          const frames = apply(all, root, ["iframe[srcdoc]"]);
+          const frames = apply(all, root, [framed]);
           for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
         } catch (e) {}
+      };
+      const changed = (records) => {
+        let whole = !piecemeal;
+        try {
+          for (let r = 0; !whole && r < records.length; r++) {
+            const record = records[r];
+            const target = apply(targetOf, record, []);
+            if (apply(kindOf, record, []) !== "childList") {
+              if (apply(nodeType, target, []) === 1 && apply(matches, target, [framed])) first(target);
+              continue;
+            }
+            const added = apply(addedOf, record, []);
+            for (let i = apply(size, added, []); i-- > 0;) each(added[i]);
+          }
+        } catch (e) { whole = true; }
+        if (whole) look();
         sweep();
       };
-      apply(observe, new Observer(scan), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
+      apply(observe, new Observer(changed), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
       apply(listen, root, ["load", sweep, true]);
-      scan();
+      look();
+      sweep();
       return root;
     };
     if (fresh) {
@@ -162,14 +229,17 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
         for (let i = 0; i < shutters.length; i++) { try { shutters[i](); } catch (e) {} }
       };
       const taps = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu", "touchstart", "touchend", "keydown", "keypress", "keyup"];
-      for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
       const followed = (event) => {
         if (open === 0) return;
         const found = trust(event);
         if (found !== null) follows = { event: event, trusted: found, at: tapped, next: follows };
       };
-      apply(listen, w, ["submit", followed, true]);
-      apply(listen, w, ["change", followed, true]);
+      const hear = () => {
+        for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
+        apply(listen, w, ["submit", followed, true]);
+        apply(listen, w, ["change", followed, true]);
+      };
+      hear();
       const tapping = () => {
         if (tap !== null && dispatching(tap, trusted) && recent(tapped)) return true;
         for (let f = follows; f !== null; f = f.next) if (dispatching(f.event, f.trusted) && recent(f.at)) return true;
@@ -180,17 +250,58 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
         if (name === "paste" || ((name === "copy" || name === "cut") && !tapping())) return false;
         const args = [name];
         for (let i = 1; i < arguments.length; i++) args[i] = arguments[i];
-        return apply(run, this, args);
+        try { return apply(run, this, args); } finally { sweep(); }
       };
       define(proto, "execCommand", { value: guarded, writable: false, enumerable: exec.enumerable, configurable: false });
+      const trim = text.prototype.trim;
+      const jar = describe(proto, "cookie");
+      if (jar && jar.configurable === true && typeof jar.set === "function") {
+        const put = jar.set;
+        const hostOnly = function cookie(value) {
+          const line = text(value);
+          let at = apply(index, line, [";"]);
+          let kept = at < 0 ? line : apply(slice, line, [0, at]);
+          while (at >= 0) {
+            const next = apply(index, line, [";", at + 1]);
+            const part = next < 0 ? apply(slice, line, [at + 1]) : apply(slice, line, [at + 1, next]);
+            const named = apply(index, part, ["="]);
+            if (apply(lower, apply(trim, named < 0 ? part : apply(slice, part, [0, named]), []), []) !== "domain") kept += ";" + part;
+            at = next;
+          }
+          return apply(put, this, [kept]);
+        };
+        define(proto, "cookie", { get: jar.get, set: hostOnly, enumerable: jar.enumerable, configurable: false });
+      }
+      const store = w.CookieStore && w.CookieStore.prototype;
+      const fields = ["name", "value", "expires", "path", "sameSite", "partitioned", "maxAge"];
+      const changes = ["set", "delete"];
+      for (let i = 0; store && i < changes.length; i++) {
+        const real = store[changes[i]];
+        if (typeof real !== "function") continue;
+        const ownHost = function (options) {
+          const args = [];
+          for (let j = 0; j < arguments.length; j++) args[j] = arguments[j];
+          if (options !== null && (typeof options === "object" || typeof options === "function")) {
+            const given = { __proto__: null };
+            for (let f = 0; f < fields.length; f++) {
+              const found = options[fields[f]];
+              if (found !== undefined) given[fields[f]] = found;
+            }
+            args[0] = given;
+          }
+          return apply(real, this, args);
+        };
+        define(ownHost, "name", { value: changes[i] });
+        define(store, changes[i], { value: ownHost, writable: false, enumerable: true, configurable: false });
+      }
       const types = w.trustedTypes;
       if (types && !types.defaultPolicy) {
         try {
           let rules = null;
           const rule = (kind) => (input, type, sink) => {
             if (kind === "createScript" && sink === "Location href") return null;
-            if (passing || rules === null) return input;
-            return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+            if (passing || rules === null || !rules[kind]) return input;
+            return apply(rules[kind], undefined, [input, type, sink]);
           };
           const members = ["createHTML", "createScript", "createScriptURL"];
           const create = types.createPolicy;
@@ -270,10 +381,25 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
           }
         } catch (e) {}
       }
+      const reheard = (doc, opening) => {
+        try {
+          if (apply(view, doc, []) === w) {
+            if (opening) apply(opening, doc, [""]);
+            apply(listen, doc, ["load", sweep, true]);
+            hear();
+          }
+        } catch (e) {}
+      };
+      const away = (doc) => {
+        const there = apply(view, doc, []);
+        return there !== null && there !== w ? there : null;
+      };
       const reopen = proto.open;
       proto.open = function () {
+        const there = away(this);
+        if (there !== null) return apply(there.Document.prototype.open, this, arguments);
         const got = apply(reopen, this, arguments);
-        try { if (apply(view, this, []) === w) apply(listen, this, ["load", sweep, true]); } catch (e) {}
+        reheard(this, null);
         return got;
       };
       const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
@@ -292,6 +418,7 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
         };
       }
       let tail = "";
+      const blank = proto.write;
       const writes = ["write", "writeln"];
       for (let i = 0; i < writes.length; i++) {
         const real = proto[writes[i]];
@@ -301,6 +428,9 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
           for (let j = 0; j < arguments.length; j++) checked += text(arguments[j]);
           if (shadowed(tail + checked)) refuse();
           tail = apply(slice, tail + checked, [-16]);
+          const there = away(this);
+          if (there !== null) return apply(there.Document.prototype[writes[i]], this, [checked]);
+          reheard(this, blank);
           return apply(real, this, [checked]);
         };
       }
@@ -322,6 +452,31 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
           try { define(owner, name, found); } catch (e) {}
         }
       }
+      const inserts = [
+        [w.Node, ["appendChild", "insertBefore", "replaceChild"]],
+        [w.Element, ["append", "prepend", "before", "after", "replaceWith", "replaceChildren", "insertAdjacentElement", "insertAdjacentHTML", "setHTMLUnsafe", "setHTML", "innerHTML", "outerHTML"]],
+        [w.CharacterData, ["before", "after", "replaceWith"]],
+        [w.DocumentType, ["before", "after", "replaceWith"]],
+        [w.Document, ["append", "prepend", "replaceChildren", "write", "writeln", "body"]],
+        [w.Range, ["insertNode", "surroundContents"]],
+        [w.HTMLTableElement, ["caption", "tHead", "tFoot"]],
+        [w.HTMLSelectElement, ["add"]],
+        [w.HTMLOptionsCollection, ["add"]],
+      ];
+      for (let k = 0; k < inserts.length; k++) {
+        const owner = inserts[k][0] && inserts[k][0].prototype;
+        const names = inserts[k][1];
+        for (let n = 0; n < names.length; n++) {
+          const found = owner && describe(owner, names[n]);
+          const key = found && found.set ? "set" : "value";
+          if (!found || typeof found[key] !== "function") continue;
+          const real = found[key];
+          found[key] = function () {
+            try { return apply(real, this, arguments); } finally { sweep(); }
+          };
+          try { define(owner, names[n], found); } catch (e) {}
+        }
+      }
       const inShadow = w.DocumentFragment.prototype.querySelectorAll;
       if (attachShadow) {
         elements.attachShadow = function () {
@@ -336,4 +491,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-D8U3zSg1xP77RbZuV/DekRuM6nx80gIN5mh2TQAtZ40='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-NrFCyaCHdDqCX/ZnAEFZL1MfTG6j1DbpPrfS5RyQd5Y='";

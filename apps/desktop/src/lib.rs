@@ -16,6 +16,8 @@ mod app_sandbox;
 #[cfg(desktop)]
 mod app_window;
 mod bitcoind_rpc;
+#[cfg(any(target_os = "macos", test))]
+mod bundle_folders;
 mod clipboard;
 mod commands;
 // The e2e build pastes from a stand-in, never from the clipboard.
@@ -297,7 +299,11 @@ pub fn run() {
     if let Err(error) = android_tls() {
         eprintln!("tls: Android's certificate verifier is not ready: {error}");
     }
-    let context = tauri::generate_context!();
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+    let mut context = tauri::generate_context!();
+    // A Mac bundle renamed after it was built keeps its own data, cache and log folders (`bundle_folders`).
+    #[cfg(target_os = "macos")]
+    bundle_folders::apply(&mut context);
     // Launched again on the same profile, it brings the running window forward and leaves here, before Tauri and
     // its threads start (an exit under tao's X11 thread could crash).
     #[cfg(target_os = "linux")]
@@ -412,6 +418,7 @@ pub fn run() {
             let files = file_store::FileStore::new(app.path().app_data_dir()?.join("files"));
             files.keep_private();
             files.remove_staged_saves();
+            files.remove_unfinished_saves();
             app.manage(files);
             // A video's Full screen button works in the Ghostly window (WKWebView has it off, WebView2 fills only
             // the webview).
@@ -693,8 +700,8 @@ fn exit_on_signals(quit: impl FnOnce() + Send + 'static) {
 ///   through.
 /// - Every exit, those or a quit that nothing can hold (Cmd+Q and `quit` on macOS end the process
 ///   from `applicationWillTerminate`): a call's hang-up the page left is said, the native connections close, so each
-///   contact sees its close (`leave`), and on Linux the app's notifications go from the desktop's list
-///   (`notifications::exit`).
+///   contact sees its close (`leave`), on Linux the app's notifications go from the desktop's list
+///   (`notifications::exit`), and a save cut short leaves no partial copy (`FileStore::remove_unfinished_saves`).
 fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
     match event {
         tauri::RunEvent::ExitRequested { code, api, .. } => {
@@ -712,6 +719,11 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => app_window::show_main(app),
         tauri::RunEvent::Exit => {
+            // A Save a copy still running ends with the app (its copy runs on a thread exit does not wait for): its
+            // hidden partial copy goes from the folder the person chose.
+            if let Some(files) = app.try_state::<file_store::FileStore>() {
+                files.remove_unfinished_saves();
+            }
             tauri::async_runtime::block_on(leave(app));
             notifications::exit();
             // Ghostly launched again while this app was leaving: that launch starts now, a window of its own.

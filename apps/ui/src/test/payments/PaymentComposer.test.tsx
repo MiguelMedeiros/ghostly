@@ -437,14 +437,23 @@ describe("a card that cannot be used here", () => {
   it("says a way of paying is off in this chat, naming the card's network", () => {
     rememberNetwork("peer", "testnet");
     open({ link: { paymentMethods: { ...ALL_ON, bark: false } } });
-    expect(card("bark-testnet")).toHaveAttribute("title", "Testnet Bark is off in this chat");
+    expect(card("bark-testnet")).toHaveAttribute("title", "Bark (Testnet) is off in this chat");
     expect(within(card("bark-testnet")).getByText("Off here")).toBeInTheDocument();
   });
 
   it("says a card is off when this chat takes its way of paying on the other network only", () => {
     open({ link: { paymentNetworks: { ...Object.fromEntries(Object.keys(ALL_ON).map((m) => [m, ["mainnet", "testnet"]])), cashu: ["testnet"] } as LinkView["paymentNetworks"] } });
-    expect(card("cashu-mainnet")).toHaveAttribute("title", "Mainnet Cashu is off in this chat");
+    expect(card("cashu-mainnet")).toHaveAttribute("title", "Cashu (Mainnet) is off in this chat");
     expect(card("lightning-mainnet")).not.toHaveAttribute("aria-disabled");
+  });
+
+  it.each([
+    ["ja", "Bark（Testnet） はこのチャットではオフです"],
+    ["ar", "Bark (Testnet) متوقف في هذه المحادثة"],
+  ] as const)("names the card that is off in %s's own order, not as \"Testnet Bark\"", (language, reason) => {
+    rememberNetwork("peer", "testnet");
+    open({ link: { paymentMethods: { ...ALL_ON, bark: false } }, language });
+    expect(card("bark-testnet")).toHaveAttribute("title", reason);
   });
 
   it("says the contact does not accept a way of paying", () => {
@@ -469,11 +478,20 @@ describe("a card that cannot be used here", () => {
       rememberNetwork("peer", "testnet");
       const { user } = open({ wallet: testCashu(), link: { dataLink: "open", capabilities: { files: true, payments: true, methods: ALL_ON, networks: theirs } } });
       expect(card("cashu-testnet")).toHaveAttribute("aria-disabled", "true");
-      expect(card("cashu-testnet")).toHaveAttribute("title", "Your contact has no Testnet Cashu wallet");
+      expect(card("cashu-testnet")).toHaveAttribute("title", "Your contact has no Cashu (Testnet) wallet");
       expect(within(card("cashu-testnet")).getByText("Not accepted")).toBeInTheDocument();
       await user.click(card("cashu-testnet"));
-      expect(screen.getByText("Your contact has no Testnet Cashu wallet", { selector: "p" })).toBeInTheDocument();
+      expect(screen.getByText("Your contact has no Cashu (Testnet) wallet", { selector: "p" })).toBeInTheDocument();
       expect(screen.getByTestId("payment-use")).toBeDisabled();
+    });
+
+    it.each([
+      ["ja", "連絡先は Cashu（Testnet） ウォレットを持っていません"],
+      ["ar", "لا تملك جهة اتصالك محفظة Cashu (Testnet)"],
+    ] as const)("names the card the contact lacks in %s's own order, not as \"Testnet Cashu\"", (language, reason) => {
+      rememberNetwork("peer", "testnet");
+      open({ wallet: testCashu(), link: { dataLink: "open", capabilities: { files: true, payments: true, methods: ALL_ON, networks: theirs } }, language });
+      expect(card("cashu-testnet")).toHaveAttribute("title", reason);
     });
 
     it("still offers the card the contact has a wallet for", () => {
@@ -1130,6 +1148,53 @@ describe("Request and Send while the chosen card turns", () => {
     await waitFor(() => expect(screen.getByTestId("payment-request")).toBeEnabled());
   });
 
+  /**
+   * The review takes the amount's place after Send and is taller. The card grew to it over half a second (flip.css's
+   * height transition), Approve sliding under the pointer as it grew: a press on Approve let go a few pixels lower is no
+   * click, and the review stayed open with nothing sent (the e2e matrix saw it). Once the card is still, its height
+   * follows its back at once; the turns themselves still grow and shrink it. Read from flip.css's own rules, which the UI
+   * tests do not load: the last one this card matches that sets a transition (reduced motion's are not matched here).
+   */
+  const FLIP_CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/deck/flip.css"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, "");
+  const heightTransition = (card: Element) => {
+    let found = "";
+    for (const [, selectors, body] of FLIP_CSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const transition = /(?:^|;)\s*transition\s*:\s*([^;]+)/.exec(body)?.[1]?.trim();
+      if (transition && selectors.split(",").some((s) => card.matches(s.trim()))) found = transition;
+    }
+    return found;
+  };
+
+  it("grows the card with its turns only: once it is still, the review after Send is in its place at once", async () => {
+    fakeEngine.setState({ links: [linkView()], wallet: everyWallet({ mints: [mint(REAL_MINT, 1_000), mint(TEST_MINT, 1_000)], balance: 1_000 }) });
+    rememberRail("peer", "cashu:testnet");
+    const { user, engine } = renderApp(<PaymentComposer balance={1_000} onSend={async () => null} onRequest={async () => null} onClose={() => {}} reviewContext={reviewContext()} contact="Alice" />);
+    engine.on("preparePayment", reviewOf);
+    const card = () => screen.getByTestId("payment-back").closest(".deck-flip")!;
+    await user.click(screen.getByTestId("payment-use"));
+    await user.type(screen.getByTestId("payment-amount"), "21");
+    // Turning over: the card grows from a card's height to its back's as it turns.
+    expect(card()).toHaveAttribute("data-turning", "true");
+    expect(heightTransition(card())).toMatch(/^height /);
+    await waitFor(() => expect(screen.getByTestId("payment-send")).toBeEnabled());
+    expect(card()).toHaveAttribute("data-settled", "true");
+    expect(heightTransition(card())).toBe("none");
+    // Turning back shrinks it again, from the render that starts the turn.
+    await user.click(screen.getByTestId("payment-change-card"));
+    expect(card()).not.toHaveAttribute("data-settled");
+    expect(heightTransition(card())).toMatch(/^height /);
+    await user.click(await screen.findByTestId("payment-use"));
+    // The amount stayed while the card was away.
+    expect(screen.getByTestId("payment-amount")).toHaveValue("21");
+    await waitFor(() => expect(screen.getByTestId("payment-send")).toBeEnabled());
+    await user.click(screen.getByTestId("payment-send"));
+    expect(await screen.findByTestId("review-approve")).toBeEnabled();
+    // The review's taller back: the card takes its height at once, Approve does not move after it shows.
+    expect(card()).toHaveAttribute("data-settled", "true");
+    expect(heightTransition(card())).toBe("none");
+  });
+
   // With motion reduced there is no turn (flip.css takes the card's transition away, the faces cross-fade where they
   // are): nothing to wait for.
   it("does not wait with motion reduced", async () => {
@@ -1448,6 +1513,24 @@ describe("the payment sheet's names, each in its own direction", () => {
     open(everyWallet(), "en", "محمد 🚀");
     expect(isolated(one(".composer-sheet-who"))).toEqual(["محمد 🚀"]);
     expect(one(".composer-sheet-who")).toHaveTextContent("with محمد 🚀");
+  });
+
+  // The error is a Notice's title, a string: the name goes in it between FSI and PDI, "Bob!" read "!Bob" in Arabic.
+  it.each([["no invoice", undefined], ["an invoice of their federation", "lnbcrt1theirs"]])("no federation in common (%s)", async (_, invoice) => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      rememberRail("peer", "fedimint:testnet");
+      const fed = { federations: [{ id: "ab".repeat(32), name: "Fed", guardians: [], consensusVersion: "2.1", network: "regtest" as const, modules: [], joinedAt: 1, invite: "fed11qq", balance: 2_000, status: "ready" as const, lightning: true }], balance: 2_000, history: [] };
+      const { user, engine } = open(everyWallet({ fedimint: fed }), "ar", "Bob!");
+      engine.on("askToPay", () => ({ askId: "ask-1" }));
+      await user.click(screen.getByTestId("payment-use"));
+      await user.type(amount(), "3");
+      await user.click(send());
+      await waitFor(() => expect(engine.callsTo("askToPay")).toHaveLength(1));
+      act(() => engine.update({ payments: { "req-1": paymentView({ id: "req-1", kind: "request", direction: "in", ask: "ask-1", amount: 3, target: undefined, federations: ["cd".repeat(32)], invoice }) } }));
+      act(() => { vi.advanceTimersByTime(400); });
+      expect(await screen.findByRole("alert")).toHaveTextContent("⁨Bob!⁩");
+    } finally { vi.useRealTimers(); }
   });
 });
 

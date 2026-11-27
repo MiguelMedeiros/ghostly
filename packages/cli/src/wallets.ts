@@ -2,13 +2,13 @@ import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { parsePaymentAmount, type WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
-import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Lookup, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/providers/cashuMint";
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
-import { CliError, type ErrorCode } from "./errors";
+import { CliError, shownValue, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
-import { findSecret, secretWords } from "./secretGuard";
+import { checkGuardedSize, findSecret, secretWords } from "./secretGuard";
 import { shellWord } from "./shellWord";
 import { isLocalHost } from "../../../apps/ui/src/lib/localHost";
 
@@ -52,7 +52,8 @@ function createChecked(type: WalletType, n: WalletNetwork, offer: WalletOffer | 
   if (!sources?.length) return;
   if (!provider) throw new CliError("bad_request", `${type} needs --provider: one of ${sources.map((p) => p.id).join(", ")} (ghostly wallet list)`);
   const source = sources.find((p) => p.id === provider);
-  if (!source) throw new CliError("bad_request", `No ${type} source ${JSON.stringify(provider)} on ${n} (ghostly wallet list)`);
+  // A value that names no source is said as `shownValue` says it: a connection link typed here carries its secret.
+  if (!source) throw new CliError("bad_request", `No ${type} source ${shownValue(provider)} on ${n} (ghostly wallet list)`);
   const unknown = Object.keys(values).find((name) => !source.fields.some((f) => f.name === name));
   // Never the name itself: a secret given with no name= but with a base64 `=` (a macaroon, a rune) reads as one (`pairs`).
   if (unknown) throw new CliError("bad_request", `one --value names no field of ${provider}: ${source.fields.length ? `its fields are ${source.fields.map((f) => f.name).join(", ")}` : "it has no fields"}`);
@@ -72,7 +73,7 @@ function netView(s: EngineState, n: WalletNetwork): NetworkWalletsView | undefin
 /** A Lightning card named by `card` on the network asked: one that is not there is not_found, before the engine is asked. */
 function lightningCard(ctx: ApiContext, params: Params): void {
   const n = network(params), card = str(params, "card", true);
-  if (!netView(state(ctx), n)?.lightnings?.some((c) => c.card === card)) throw new CliError("not_found", `No Lightning card ${JSON.stringify(card)} on ${n} (ghostly wallet list)`);
+  if (!netView(state(ctx), n)?.lightnings?.some((c) => c.card === card)) throw new CliError("not_found", `No Lightning card ${shownValue(card)} on ${n} (ghostly wallet list)`);
 }
 
 /**
@@ -203,6 +204,7 @@ const isLnurl = (text: string) => /^(lightning:)?lnurl[0-9a-z]+$/i.test(text.tri
 function memoOf(params: Params, verb: string, field: "memo" | "comment" = "memo"): string | undefined {
   const memo = str(params, field);
   if (memo && !bool(params, "force")) {
+    checkGuardedSize(memo, `The ${field}`);
     const secret = findSecret(memo);
     if (secret) throw new CliError("confirm", `The ${field} looks like ${secretWords(secret)}; ${verb} with --force if you mean to`, { kind: secret.kind });
   }
@@ -240,6 +242,9 @@ export function mintUrlShape(params: Params): string {
   return url;
 }
 
+/** A count of sats in a refusal: "1 sat", "2 sats". */
+const satsText = (n: number) => `${n} sat${n === 1 ? "" : "s"}`;
+
 /**
  * What `pay` says with `paid: false`: the payment is not known paid yet. The mint (or the card's source) holds it
  * pending, or its answer was lost; the engine keeps asking and never pays it twice. Before, the answer said `paid:
@@ -251,8 +256,9 @@ function notPaidYet(ctx: ApiContext, n: WalletNetwork, source: string, amount: n
   if (source !== CASHU_MINT_SOURCE) {
     return `Not paid yet: your Lightning source has not confirmed this payment (it is pending, or its answer was lost). It is asked again${running} and never paid twice: \`ghostly wallet list\` shows the card's balance once it settles.`;
   }
-  const sats = `${amount + feeReserve} ${n === "testnet" ? "test sats" : "sats"}`;
-  return `Not paid yet: the mint has not settled this payment (it is pending, or its answer was lost). ${sats} are set aside for it, out of the balance: they leave with the payment, or come back to the balance if the mint says it failed. It settles by itself: the wallet keeps asking the mint${running} and never pays it twice. \`ghostly wallet history\` lists it once paid, and \`ghostly wallet list\` shows the balance.`;
+  const total = amount + feeReserve, one = total === 1;
+  const sats = `${total} ${n === "testnet" ? "test sat" : "sat"}${one ? " is" : "s are"}`;
+  return `Not paid yet: the mint has not settled this payment (it is pending, or its answer was lost). ${sats} set aside for it, out of the balance: ${one ? "it leaves with the payment, or comes back" : "they leave with the payment, or come back"} to the balance if the mint says it failed. It settles by itself: the wallet keeps asking the mint${running} and never pays it twice. \`ghostly wallet history\` lists it once paid, and \`ghostly wallet list\` shows the balance.`;
 }
 
 function badMintUrl(error: unknown): boolean {
@@ -338,6 +344,15 @@ function mintNotOffered(error: unknown): CliError | undefined {
   if (!isLocalHost(new URL(mint).hostname)) return undefined;
   return new CliError("engine", `${words}: its mint is not one of yours, and it is on this machine or a local network (add a mint there only if you run it yourself)`);
 }
+
+/** The payment `payment reclaim` names, one this profile keeps. */
+function paymentToReclaim(ctx: ApiContext, params: Params): void {
+  const id = str(params, "payment", true);
+  if (!state(ctx).payments[id]) throw new CliError("not_found", `No payment ${shownValue(id)} (ghostly payment list)`);
+}
+
+/** What a one-shot looks up before any chat starts (api.ts `startOnceFound`). */
+export const PAYMENT_LOOKUPS: Record<string, Lookup> = { "payment.reclaim": paymentToReclaim };
 
 const WALLETS: Record<string, Method> = {
   async "wallet.list"(ctx, params) {
@@ -470,7 +485,7 @@ const WALLETS: Record<string, Method> = {
       // Asked before the address's server hears of the payment (and its comment).
       if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
       const view = await node(ctx).lnurlResolve({ text, network: n });
-      if (amount < view.minSat || amount > view.maxSat) throw new CliError("refused", `${view.domain} takes from ${view.minSat} to ${view.maxSat} sats`);
+      if (amount < view.minSat || amount > view.maxSat) throw new CliError("refused", `${view.domain} takes from ${view.minSat} to ${satsText(view.maxSat)}`);
       const got = await node(ctx).lnurlInvoice({ id: view.id, amount, ...(comment ? { comment } : {}), network: n });
       invoice = got.invoice; note = got.note;
     }
@@ -479,9 +494,9 @@ const WALLETS: Record<string, Method> = {
     const quote =await node(ctx).walletQuoteInvoice({ invoice, network: n, ...(card ? { card } : {}) });
     // With an invoice, --amount is what the payer expects it to ask: the invoice's writer never decides past it.
     const expected = isInvoice(text) ? num(params, "amount", 0, { min: 1 }) : 0;
-    if (expected && quote.amount !== expected) throw new CliError("refused", `The invoice asks ${quote.amount} sats, not the ${expected} given with --amount`);
+    if (expected && quote.amount !== expected) throw new CliError("refused", `The invoice asks ${satsText(quote.amount)}, not the ${expected} given with --amount`);
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
-    if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
+    if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${satsText(quote.feeReserve)}, more than the ${maxFee} allowed`);
     const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
     const source = (quote as { source?: string }).source ?? quote.mint;
     return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source, paid: paid.paid, ...(!paid.paid && { note: notPaidYet(ctx, n, source, quote.amount, quote.feeReserve) }) };
@@ -540,7 +555,7 @@ const WALLETS: Record<string, Method> = {
     if (request?.linkId === link.id && request.kind !== "request") {
       throw new CliError("not_found", `${JSON.stringify(paymentId)} is ${request.direction === "out" ? "a payment you sent" : "a payment you received"}, not a request: chat pay-request pays a request the contact made of you ${listed}`);
     }
-    if (!request || request.linkId !== link.id) throw new CliError("not_found", `No request ${JSON.stringify(paymentId)} in this chat ${listed}`);
+    if (!request || request.linkId !== link.id) throw new CliError("not_found", `No request ${shownValue(paymentId)} in this chat ${listed}`);
     // One I made is the contact's to pay: the engine knew it only as "Unknown payment request" (engine, exit 1).
     if (request.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(paymentId)} is your own request: the contact pays it`);
     // The request says which network it is paid on: real money or test coins, never the choice of the payer.
@@ -586,7 +601,7 @@ const WALLETS: Record<string, Method> = {
     const s = state(ctx);
     const link = chatOf(ctx, params, s);
     const p = s.payments[str(params, "payment", true)];
-    if (p?.linkId !== link.id) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
+    if (p?.linkId !== link.id) throw new CliError("not_found", `No payment ${shownValue(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
     // The contact's app is asked to look for a request it made: one of mine, or a payment, has nothing to look for.
     if (p.kind !== "request" || p.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(p.id)} is ${p.kind === "request" ? "your own request" : p.direction === "out" ? "a payment you sent" : "a payment you received"}: payment check is for a request the contact made of you`);
     await node(ctx).checkPayment({ linkId: link.id, paymentId: str(params, "payment", true) });
@@ -594,7 +609,7 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "payment.reclaim"(ctx, params) {
-    if (!state(ctx).payments[str(params, "payment", true)]) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} (ghostly payment list)`);
+    paymentToReclaim(ctx, params);
     await node(ctx).reclaimPayment({ paymentId: str(params, "payment", true) });
     const p = state(ctx).payments[str(params, "payment", true)];
     return p ? paymentJson(p) : { paymentId: str(params, "payment", true) };

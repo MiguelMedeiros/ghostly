@@ -5,6 +5,7 @@ import {
   COMMUNITY_LIMITS, CommunitySession,
   type CommunityFrame, type CommunityIncomingApp, type CommunitySessionHooks, type CommunityState,
 } from "../src/groupCommunity";
+import { nextPinNumber } from "../src/pins";
 // covers: groups.pins, groups.catch-up
 
 /*
@@ -19,6 +20,8 @@ interface Member { name: string; session: CommunitySession; online: boolean; app
 
 /** The engine's rule (community.ts): the admin's `pin` frame is lasting. */
 const lasting = (session: () => CommunitySession) => (m: CommunityIncomingApp) => m.frame.t === "pin" && m.sender === session().admin ? "pin" : undefined;
+/** And its order: the pin's number. */
+const lastingRank = (m: CommunityIncomingApp) => m.frame.t === "pin" && typeof m.frame.n === "number" ? m.frame.n : undefined;
 
 class Net {
   readonly members = new Map<string, Member>();
@@ -43,7 +46,7 @@ class Net {
       changed: () => {},
       clock: () => this.now,
       app: m => { member.apps.push(m.frame); },
-      ...(this.withLasting && { lasting: lasting(() => member.session) }),
+      ...(this.withLasting && { lasting: lasting(() => member.session), lastingRank }),
     };
   }
   byKey(key: string): Member | undefined { for (const m of this.members.values()) if (m.session.myKey === key) return m; return undefined; }
@@ -162,6 +165,83 @@ describe("a community's pin reaches a member who was away however much was said 
     expect(pinsOf(carol)).toEqual([{ t: "pin", id: "m1", n: 5_000 }]);
     expect(alice.session.epoch - carol.session.state.lasting!.pin.e).toBeLessThan(COMMUNITY_LIMITS.window);
     expect(bob.session.needsCatchUp).toBe(false);
+  });
+
+  /**
+   * Alice's clock runs `ahead` ms ahead when she pins m1 (its time and number, as the app makes them), then is set
+   * right, and `after` ms later she takes the pin off (her app numbers the unpin as it does, `nextPinNumber`). Bob is
+   * away while Carol says 300 things.
+   */
+  async function clockAhead(ahead: number, after: number) {
+    const net = new Net();
+    const alice = net.create("Alice");
+    const bob = await net.admit(alice, "Bob");
+    const carol = await net.admit(alice, "Carol");
+    await net.settle();
+    bob.online = false;
+    const pinned = net.now + ahead;
+    const pin = await alice.session.sendApp({ t: "pin", id: "m1", n: pinned }, "Alice", pinned);
+    if ("error" in pin) throw new Error(pin.error);
+    await net.settle();
+    const unpinned = net.now + after, n = nextPinNumber(pinned, unpinned);
+    const unpin = await alice.session.sendApp({ t: "pin", id: "", n }, "Alice", unpinned);
+    if ("error" in unpin) throw new Error(unpin.error);
+    await net.settle();
+    for (let i = 0; i < 300; i++) {
+      const sent = await carol.session.sendText(`Carol ${i}`, "Carol", net.now + i);
+      if ("error" in sent) throw new Error(sent.error);
+      await net.settle();
+    }
+    bob.online = true;
+    for (let i = 0; i < 4; i++) {
+      bob.session.catchUp(carol.session.myKey);
+      await net.settle();
+      net.now += 6_000;
+    }
+    return { bob, carol, n };
+  }
+
+  it("a pin said by a clock a day ahead is not kept: the admin's unpin after it is what a member back after 300 gets", async () => {
+    const { bob, n } = await clockAhead(86_400_000, 0);
+    expect(n).toBe(1_000_000);
+    expect(pinsOf(bob)).toEqual([{ t: "pin", id: "", n }]);
+  });
+
+  it("a pin said by a clock 9 minutes ahead, then an unpin once it was set right: the unpin is kept, as members show it live", async () => {
+    const { bob, carol, n } = await clockAhead(9 * 60_000, 60_000);
+    // The unpin's number is past the pin's, its time before it.
+    expect(n).toBe(1_000_000 + 9 * 60_000 + 1);
+    expect(carol.session.state.lasting?.pin.ts).toBe(1_000_000 + 60_000);
+    expect(pinsOf(bob)).toEqual([{ t: "pin", id: "", n }]);
+  });
+
+  it("a pin numbered 10 minutes ahead of the member's clock is kept, 1 ms more is not", async () => {
+    for (const [ahead, kept] of [[10 * 60_000, true], [10 * 60_000 + 1, false]] as const) {
+      const net = new Net();
+      const alice = net.create("Alice");
+      const carol = await net.admit(alice, "Carol");
+      await net.settle();
+      const sent = await alice.session.sendApp({ t: "pin", id: "m1", n: net.now + ahead }, "Alice", net.now);
+      if ("error" in sent) throw new Error(sent.error);
+      await net.settle();
+      expect(carol.session.state.lasting?.pin !== undefined).toBe(kept);
+    }
+  });
+
+  it("a kept pin from a clock ahead (an app before this check: no rank, its time a day ahead) gives way to the admin's next one", async () => {
+    const net = new Net();
+    const alice = net.create("Alice");
+    const carol = await net.admit(alice, "Carol");
+    await net.settle();
+    const sent = await alice.session.sendApp({ t: "pin", id: "m1", n: 5_000 }, "Alice", 1_000);
+    if ("error" in sent) throw new Error(sent.error);
+    await net.settle();
+    carol.session.state.lasting = { pin: { ...carol.session.state.lasting!.pin, ts: net.now + 86_400_000 } };
+    delete carol.session.state.lastingRank;
+    const unpin = await alice.session.sendApp({ t: "pin", id: "", n: 6_000 }, "Alice", net.now);
+    if ("error" in unpin) throw new Error(unpin.error);
+    await net.settle();
+    expect(carol.session.state.lasting?.pin.ts).toBe(1_000_000);
   });
 
   it("a member's own pin frame is not lasting, nor is any other application frame", async () => {

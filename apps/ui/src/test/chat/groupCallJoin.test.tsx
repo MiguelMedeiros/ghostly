@@ -109,6 +109,20 @@ describe("Join call in a group's header", () => {
     expect(screen.getByTestId("group-call-join")).toHaveAccessibleName("Join call");
   });
 
+  it("reads as Join call, not as a video call: its label on it, a phone, in the call's colour", () => {
+    joinButton();
+    const join = screen.getByTestId("group-call-join");
+    expect(join).toHaveTextContent("Join call");
+    expect(join.querySelector("path")?.getAttribute("d")).toMatch(/^M22 16\.92/);
+    expect(join.querySelector("rect")).toBeNull();
+    expect(join).toHaveClass("text-accent", "bg-accent/15");
+    expect(join.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    // Folded under 640 px of header: beside Share link's label it left a long name 35 px wide (pt at 540).
+    expect(screen.getByText("Join call", { selector: "span" })).toHaveClass("@max-[640px]/group-head:hidden");
+    // Off (Hide my IP with no relay, the Linux Desktop…), its edge in forced colors greys as the rest of it does.
+    expect(join).toHaveClass("forced-colors:aria-disabled:border-[color:GrayText]");
+  });
+
   it("asks the node for a pass, joins its room with it and opens the call; Leave call closes it", async () => {
     answerPass(() => pass());
     const { user } = joinButton();
@@ -154,6 +168,24 @@ describe("Join call in a group's header", () => {
     expect(await screen.findByTestId("group-call")).toBeInTheDocument();
     expect(screen.queryByTestId("group-call-problem")).toBeNull();
     expect(passAsks()).toHaveLength(2);
+  });
+
+  // Try again goes with the box it stands in: as Close, it hands the focus to Join call, or it fell to the page's body,
+  // and the call window opened from there had nothing to give it back to on Leave call.
+  it("Try again by keyboard hands the focus to Join call, refused again or joined, and Leave call gives it back there", async () => {
+    answerPass(() => { throw new Error("The call node refused the pass (403)"); });
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    act(() => screen.getByTestId("group-call-retry").focus());
+    await user.keyboard("{Enter}");
+    expect(await screen.findByTestId("group-call-problem")).toBeInTheDocument();
+    expect(screen.getByTestId("group-call-join")).toHaveFocus();
+    answerPass(() => pass());
+    act(() => screen.getByTestId("group-call-retry").focus());
+    await user.keyboard("{Enter}");
+    expect(await screen.findByTestId("group-call")).toBeInTheDocument();
+    await user.click(screen.getByTestId("group-call-leave"));
+    expect(screen.getByTestId("group-call-join")).toHaveFocus();
   });
 
   it("the engine's own refusals, not let in by the node or not a member, say the refused line too", async () => {

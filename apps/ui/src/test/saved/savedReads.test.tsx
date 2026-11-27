@@ -43,4 +43,36 @@ describe("the saved messages' reads", () => {
     await waitFor(() => expect(engine.callsTo("savedMessages")).toHaveLength(before + 2));
     // Eleven real settles are 3.3 s of the default 5 s.
   }, 15_000);
+
+  it("build no set of the chats and groups on a state that has the same ones, as each state comes up to 20 a second", async () => {
+    const many = Array.from({ length: 200 }, (_, i) => ({ id: `link-${i}`, peerPubKeyZ32: `peerkey${i}`, peerNick: `Contact ${i}` }));
+    const { engine } = renderApp(<SidebarSaved active={false} onOpen={() => {}} />, { route: "/" });
+    engine.on("savedMessages", () => rows).setState({ links: many.map((l) => linkView(l)), groups: [g2, g1] });
+    await waitFor(() => expect(engine.callsTo("savedMessages")).toHaveLength(1));
+    await settle();
+    const before = engine.callsTo("savedMessages").length;
+
+    // Every set made from a list holding a chat's id, while states with the same chats and groups come.
+    const RealSet = globalThis.Set;
+    let built = 0;
+    globalThis.Set = new Proxy(RealSet, {
+      construct(target, args, newTarget) {
+        if (Array.isArray(args[0]) && args[0].includes("link-7")) built++;
+        return Reflect.construct(target, args, newTarget) as object;
+      },
+    });
+    try {
+      // The engine sends each state as new objects; a message puts one group or the other first.
+      for (let i = 0; i < 30; i++) act(() => engine.setState({ links: many.map((l) => linkView(l)), groups: i % 2 ? [g2, g1] : [{ ...g1, lastMessageAt: NOW + i }, g2] }));
+    } finally {
+      globalThis.Set = RealSet;
+    }
+    expect(built).toBe(0);
+    await settle();
+    expect(engine.callsTo("savedMessages")).toHaveLength(before);
+
+    // A chat going still asks again.
+    act(() => engine.setState({ links: many.slice(1).map((l) => linkView(l)), groups: [g2, g1] }));
+    await waitFor(() => expect(engine.callsTo("savedMessages")).toHaveLength(before + 1));
+  });
 });

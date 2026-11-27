@@ -6,6 +6,7 @@ import {
   parseCallSignal,
   answersOffer,
   BURST_RING_MS,
+  CALL_SIGNAL_MAX_AGE_MS,
   callSignalHeardAt,
   QUICK_REDIAL_MS,
   keepsToRelays,
@@ -17,9 +18,11 @@ import {
   type CallSignal,
   type CallEventType,
   type CallMedia,
+  type CallAudioMix,
   type CallIceServer,
 } from "@ghostly/core";
 import { endOtherCalls, otherCallOn as anotherCallOn, setCallOn, setRingingIn, subscribeCalls } from "./callRegistry";
+import { captureScreen, mixWithWebAudio } from "./screenCapture";
 
 /** What a peer can put on the video lane of a call. */
 export type Picture = "camera" | "screen";
@@ -99,6 +102,7 @@ const browserMedia: CallMedia = {
   createPeerConnection: (config) => new RTCPeerConnection(config),
   getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
   getDisplayMedia: (options) => navigator.mediaDevices.getDisplayMedia(options),
+  mixAudio: mixWithWebAudio,
 };
 
 /** How long a failed screen share stays explained in the call window. */
@@ -258,6 +262,14 @@ export function screenShareErrorMessage(error: unknown, elapsedMs = Infinity): s
     default:
       return "Could not share the screen. Try again.";
   }
+}
+
+/** Lets a shared screen's sound go: its mix with the voice closed, its capture stopped. Safe to call twice. */
+function letScreenSoundGo(ref: { current: { sound: MediaStreamTrack; mix: CallAudioMix } | null }): void {
+  const held = ref.current;
+  ref.current = null;
+  held?.mix.close();
+  held?.sound.stop();
 }
 
 /** The video section of the call, once the peers agreed on one. */
@@ -506,6 +518,11 @@ export function useWebRTC({
   const heldOfferRef = useRef<{ signal: CallSignal; at: number; line: string | null } | null>(null);
   const hangupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myOfferTimestampRef = useRef<number>(0);
+  /**
+   * When our offer went out, on this device's clock. Its `ts` (`stamp`) may be a little ahead of that clock: when a
+   * contact's signal was heard here (`at`) is held against this one.
+   */
+  const myOfferAtRef = useRef<number>(0);
   /** Our published offer's DTLS fingerprint: with its timestamp, what decides who rings when both call at once. */
   const myOfferFingerprintRef = useRef<string>("");
   /** Whether a picture was on at any point, which is what the chat log calls a video call. */
@@ -516,6 +533,9 @@ export function useWebRTC({
   const pictureBeforeShareRef = useRef<Picture | null>(null);
   /** A share is being started or stopped: the picker may be open. */
   const shareBusyRef = useRef(false);
+  /** The shared screen's sound and its mix with the voice, on the audio sender while the screen is shared. */
+  const screenSoundRef = useRef<{ sound: MediaStreamTrack; mix: CallAudioMix } | null>(null);
+  const [screenSound, setScreenSound] = useState(false);
   /** Counts the picture changes asked for: one whose camera or screen opens after a later one was asked is dropped. */
   const pictureRequestRef = useRef(0);
   /** The same for the microphone switches: one that opens after a later one was picked is dropped. */
@@ -546,9 +566,20 @@ export function useWebRTC({
   /** The wait before a restart while ICE only says "disconnected", and the wait before the next restart. */
   const disconnectGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restartRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Our latest restart offer's `ts` while its answer is awaited (0: none), and the last one's, so each is later. */
+  /** Our latest restart offer's `ts` while its answer is awaited (0: none). */
   const restartOfferRef = useRef(0);
-  const lastRestartOfferRef = useRef(0);
+  /**
+   * The `ts` of what this side says next (`stamp`): now, or 1 ms after the last thing it said. The contact takes only a
+   * signal later than the last one it heard from this side (WISP 601, Time): one dated by a clock set back since was
+   * dropped there, so Cancel left the call ringing and the next call did not ring. A clock set back by more than a
+   * contact takes ahead of its own (CALL_SIGNAL_MAX_AGE_MS: a signal read from the call record carries no `at`, and is
+   * taken only that close to the reader's clock) was the wrong one: dated after it, every signal would be refused.
+   */
+  const lastSentRef = useRef(0);
+  const stamp = useCallback(() => {
+    const now = Date.now(), last = lastSentRef.current;
+    return (lastSentRef.current = last >= now && last - now < CALL_SIGNAL_MAX_AGE_MS ? last + 1 : now);
+  }, []);
   /** A restart offer is being made. */
   const restartBusyRef = useRef(false);
   /** The restart offers being answered, one after the other. */
@@ -653,6 +684,8 @@ export function useWebRTC({
     }
     askingCameraRef.current?.getTracks().forEach((t) => t.stop());
     askingCameraRef.current = null;
+    letScreenSoundGo(screenSoundRef);
+    setScreenSound(false);
 
     if (pcRef.current) {
       pcRef.current.close();
@@ -682,11 +715,11 @@ export function useWebRTC({
   /** Tells the peer what our picture is doing; theirs is the only way they can know. */
   const publishPicture = useCallback(
     (next: Picture | null) => {
-      const signal: CallSignal = { t: "v", ts: Date.now(), v: next ? 1 : 0 };
+      const signal: CallSignal = { t: "v", ts: stamp(), v: next ? 1 : 0 };
       if (next) signal.k = next === "screen" ? "s" : "c";
       publishCallSignal(JSON.stringify(signal));
     },
-    [publishCallSignal],
+    [publishCallSignal, stamp],
   );
 
   const applyRemotePicture = useCallback((signal: CallSignal) => {
@@ -777,7 +810,7 @@ export function useWebRTC({
       updateCallState("idle");
       // The contact is told, as a hang-up tells it: its side may still say "Reconnecting..." (or wait for a restart
       // offer) and would send restart offers to a call that is over here. One that never connected says why (`r: "u"`).
-      const signal: CallSignal = connected ? { t: "h", ts: Date.now() } : { t: "h", ts: Date.now(), r: "u" };
+      const signal: CallSignal = connected ? { t: "h", ts: stamp() } : { t: "h", ts: stamp(), r: "u" };
       publishCallSignal(JSON.stringify(signal));
       if (hangupTimerRef.current) clearTimeout(hangupTimerRef.current);
       hangupTimerRef.current = setTimeout(() => {
@@ -828,7 +861,7 @@ export function useWebRTC({
     pcRef.current = pc;
     giveUpRef.current = giveUp;
     return pc;
-  }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane, clearRestartGrace, restartable, clearReconnect, reconnects, callUp, assertKeepsToRelays]);
+  }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane, clearRestartGrace, restartable, clearReconnect, reconnects, callUp, assertKeepsToRelays, stamp]);
 
   /**
    * Makes the call's connection with `make` (its description set) and waits for its candidates (for a reflexive one
@@ -883,8 +916,8 @@ export function useWebRTC({
       // No candidate: no network yet. Nothing to send; the next try, or the browser's "online", finds one. Counted after
       // the relay filter: a restart offer left with none went out with `c: []` (agents#1601).
       if (params && (params.c?.length ?? 0) > 0) {
-        const ts = Math.max(Date.now(), lastRestartOfferRef.current + 1);
-        restartOfferRef.current = lastRestartOfferRef.current = ts;
+        const ts = stamp();
+        restartOfferRef.current = ts;
         const signal: CallSignal = { t: "r", ts, ...params, ...describeSelf() };
         traceLink("call", "call-ice-restart", { candidates: signal.c?.length ?? 0 });
         publishCallSignal(JSON.stringify(signal));
@@ -897,7 +930,7 @@ export function useWebRTC({
     if (current() && reconnectingRef.current) {
       restartRetryRef.current = setTimeout(() => { restartRetryRef.current = null; void restartIceRef.current(); }, ICE_RESTART_RETRY_MS);
     }
-  }, [reconnects, describeSelf, publishCallSignal]);
+  }, [reconnects, describeSelf, publishCallSignal, stamp]);
   restartIceRef.current = restartIce;
 
   /** The contact's answer to our restart offer: ICE goes on with its new credentials and candidates. */
@@ -929,14 +962,14 @@ export function useWebRTC({
         await waitForIceGathering(pc, ICE_RESTART_GATHER_MS, { fresh: true });
         if (!current()) return;
         const params = extractParamsFromSdp(pc.localDescription!.sdp, { maxCandidates: maxCandidatesRef.current, relayOnly: relayOnlyRef.current });
-        const signal: CallSignal = { t: "a", ts: Date.now(), ...params, ...describeSelf(), re: offer.ts };
+        const signal: CallSignal = { t: "a", ts: stamp(), ...params, ...describeSelf(), re: offer.ts };
         traceLink("call", "call-ice-restart-answer", { candidates: signal.c?.length ?? 0 });
         publishCallSignal(JSON.stringify(signal));
       } catch (error) {
         if (current()) onErrorRef.current?.(error);
       }
     });
-  }, [describeSelf, publishCallSignal]);
+  }, [describeSelf, publishCallSignal, stamp]);
 
   /** The browser has a network again: the side that restarts does so now, without waiting for ICE to notice. */
   useEffect(() => {
@@ -968,36 +1001,81 @@ export function useWebRTC({
       const request = ++pictureRequestRef.current;
 
       let track: MediaStreamTrack | null = null;
+      /** The shared screen's sound, when the browser gave one and this call's media can mix it in (`mixAudio`). */
+      let sound: MediaStreamTrack | null = null;
       try {
         if (next === "camera") {
           track = (await mediaRef.current.getUserMedia({ video: camera === undefined ? captureFrom("video") : exactly(camera) })).getVideoTracks()[0];
         } else if (next === "screen") {
-          const { getDisplayMedia } = mediaRef.current;
+          const { getDisplayMedia, mixAudio } = mediaRef.current;
           if (!getDisplayMedia) throw Object.assign(new Error("Screen sharing is not available here"), { name: "NotSupportedError" });
-          track = (await getDisplayMedia({ video: true, audio: false })).getVideoTracks()[0];
+          const shared = await captureScreen(getDisplayMedia);
+          track = shared.getVideoTracks()[0];
+          const [heard, ...more] = shared.getAudioTracks();
+          more.forEach((other) => other.stop());
+          if (heard && mixAudio) sound = heard;
+          else heard?.stop();
         }
       } catch (error) {
         yieldRequest(pictureRequestRef, request);
         throw error;
       }
+      const letGo = () => {
+        track?.stop();
+        sound?.stop();
+      };
       // The call ended while the prompt or the picker was open: what it gave is let go, and nobody is told.
       if (attemptRef.current !== attempt) {
-        track?.stop();
+        letGo();
         return;
       }
       // Something else was asked for while it opened (the camera turned off, another camera picked): that one wins.
       if (pictureRequestRef.current !== request) {
-        track?.stop();
+        letGo();
         return;
       }
 
       try {
         await sender.replaceTrack(track);
       } catch (error) {
-        track?.stop();
+        letGo();
         throw error;
       }
       // Hung up while the track was swapped (the Linux Desktop opens the device meanwhile): the call's tracks were stopped without this one.
+      if (attemptRef.current !== attempt || !localStreamRef.current) {
+        letGo();
+        return;
+      }
+
+      // The screen's sound of the share this picture replaces ends with it: the microphone alone goes out again.
+      if (screenSoundRef.current) {
+        const mic = localStreamRef.current.getAudioTracks()[0];
+        letScreenSoundGo(screenSoundRef);
+        setScreenSound(false);
+        await audioTransceiver(pc)?.sender.replaceTrack(mic ?? null).catch(() => {});
+      }
+      // This screen's sound goes mixed with the voice on the call's one audio section (no new offer). A mix that
+      // cannot be made, or a sender that will not take it, leaves the screen shared without its sound.
+      const voice = localStreamRef.current?.getAudioTracks()[0];
+      const audioSender = audioTransceiver(pc)?.sender;
+      const { mixAudio } = mediaRef.current;
+      if (sound && voice && audioSender && mixAudio && attemptRef.current === attempt) {
+        let mix: CallAudioMix | null = null;
+        try {
+          mix = mixAudio(voice, sound);
+          screenSoundRef.current = { sound, mix };
+          await audioSender.replaceTrack(mix.track);
+          // Hung up meanwhile: the call's end already let it go.
+          if (screenSoundRef.current?.sound === sound) setScreenSound(true);
+        } catch {
+          if (screenSoundRef.current?.sound === sound) screenSoundRef.current = null;
+          mix?.close();
+          sound.stop();
+          await audioSender.replaceTrack(voice).catch(() => {});
+        }
+      } else {
+        sound?.stop();
+      }
       if (attemptRef.current !== attempt || !localStreamRef.current) {
         track?.stop();
         return;
@@ -1133,8 +1211,9 @@ export function useWebRTC({
         const sdp = pc.localDescription!.sdp;
         const params = extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current, relayOnly: relayOnlyRef.current });
 
-        const offerTs = Date.now();
+        const offerTs = stamp();
         myOfferTimestampRef.current = offerTs;
+        myOfferAtRef.current = Date.now();
         myOfferFingerprintRef.current = params.f ?? "";
 
         const signal: CallSignal = {
@@ -1181,6 +1260,7 @@ export function useWebRTC({
       assertKeepsToRelays,
       callKey,
       ringOffer,
+      stamp,
     ],
   );
 
@@ -1208,7 +1288,7 @@ export function useWebRTC({
       if (!pc) return false;
 
       const params = extractParamsFromSdp(pc.localDescription!.sdp, { maxCandidates: maxCandidatesRef.current, relayOnly: relayOnlyRef.current });
-      const signal: CallSignal = { t: "a", ts: Date.now(), o: offer.ts, ...params, v: withVideo ? 1 : 0, ...(mediaRef.current.restartsIce ? { x: 1 as const } : {}) };
+      const signal: CallSignal = { t: "a", ts: stamp(), o: offer.ts, ...params, v: withVideo ? 1 : 0, ...(mediaRef.current.restartsIce ? { x: 1 as const } : {}) };
       if (withVideo) signal.k = "c";
       peerRestartsRef.current = offer.x === 1;
       peerFingerprintRef.current = offer.f ?? "";
@@ -1216,7 +1296,7 @@ export function useWebRTC({
       refreshVideoLane();
       return true;
     },
-    [createPeerConnection, publishCallSignal, refreshVideoLane, gathered],
+    [createPeerConnection, publishCallSignal, refreshVideoLane, gathered, stamp],
   );
 
   /**
@@ -1377,7 +1457,7 @@ export function useWebRTC({
       const duration = lastedSince(callStartedTickRef.current);
 
       if (sendSignal) {
-        const signal: CallSignal = unreachable ? { t: "h", ts: Date.now(), r: "u" } : { t: "h", ts: Date.now() };
+        const signal: CallSignal = unreachable ? { t: "h", ts: stamp(), r: "u" } : { t: "h", ts: stamp() };
         publishCallSignal(JSON.stringify(signal));
         hangupTimerRef.current = setTimeout(() => {
           publishCallSignal(null);
@@ -1402,7 +1482,7 @@ export function useWebRTC({
       callHadVideoRef.current = false;
       setFastPoll(false);
     },
-    [publishCallSignal, cleanupConnection, updateCallState, setFastPoll, addCallEventMessage],
+    [publishCallSignal, cleanupConnection, updateCallState, setFastPoll, addCallEventMessage, stamp],
   );
 
   const rejectCall = useCallback(() => {
@@ -1472,7 +1552,10 @@ export function useWebRTC({
     if (attemptRef.current !== attempt || microphoneRequestRef.current !== request) { track.stop(); return; }
     track.enabled = localStreamRef.current?.getAudioTracks()[0]?.enabled ?? true;
     try {
-      await sender.replaceTrack(track);
+      // While a screen's sound is mixed in, the mix stays on the sender and takes the new microphone in.
+      const mixed = screenSoundRef.current;
+      if (mixed) mixed.mix.setVoice(track);
+      else await sender.replaceTrack(track);
     } catch (error) {
       track.stop();
       throw error;
@@ -1610,7 +1693,9 @@ export function useWebRTC({
       receivedLineRef.current = addCallEventMessage?.("call_received", signalHasVideo(signal), undefined, signal.ts) || null;
       pendingOfferRef.current = signal;
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
-      if (answersOffer(signal, myOfferTimestampRef.current)) {
+      // An answer that names its offer (`o`) names its `ts`; one that does not (apps up to 1.0.2) is held by when it was
+      // heard here against when the offer went out, on this clock.
+      if (answersOffer(signal, signal.o !== undefined ? myOfferTimestampRef.current : myOfferAtRef.current)) {
         lastProcessedSignalRef.current = signal.ts;
         if (callStateRef.current === "offering") {
           handleAnswer(signal);
@@ -1627,7 +1712,7 @@ export function useWebRTC({
       if (callStateRef.current === "incoming") {
         setMissedAt(performance.now() - ringingSinceRef.current < BURST_RING_MS ? performance.now() : null);
         addCallEventMessage?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
-      } else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && callSignalHeardAt(signal) > myOfferTimestampRef.current) {
+      } else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && callSignalHeardAt(signal) > myOfferAtRef.current) {
         // Our call still rang there: the contact declined it (a side that rings sends nothing else).
         addCallEventMessage?.("call_rejected", callHadVideoRef.current);
         hangUp(false, false);
@@ -1800,6 +1885,7 @@ export function useWebRTC({
         localStreamRef.current = null;
       }
       askingCameraRef.current?.getTracks().forEach((t) => t.stop());
+      letScreenSoundGo(screenSoundRef);
 
       if (pcRef.current) {
         pcRef.current.close();
@@ -1823,6 +1909,8 @@ export function useWebRTC({
     /** We are not sending any picture: an audio call, or a camera turned off. */
     isVideoOff: picture === null,
     isScreenSharing: picture === "screen",
+    /** The shared screen's sound goes with it (a tab's or the system's). False while sharing a screen without it. */
+    screenSound: picture === "screen" && screenSound,
     /** The peer is sending a picture we can show. */
     remoteHasVideo: remotePicture !== null,
     /** The picture the peer is sending is its screen. */

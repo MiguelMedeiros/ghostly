@@ -382,6 +382,17 @@ describe("wallets", () => {
     expect(node.walletCreate).toHaveBeenCalledOnce();
   });
 
+  it("a wallet connection link given as --provider is refused without its secret", async () => {
+    // Found in a bug hunt: the refusal quoted the value whole, so a NWC link typed in the wrong place printed its secret.
+    const { ctx, node } = fake();
+    const secret = "b".repeat(64);
+    const link = `nostr+walletconnect://${"a".repeat(64)}?relay=wss%3A%2F%2Frelay.example&secret=${secret}`;
+    const error = asCliError(await callApi(ctx, "wallet.create", { type: "lightning", provider: link }).catch((e: unknown) => e));
+    expect({ code: error.code, message: error.message }).toEqual({ code: "bad_request", message: "No lightning source (a wallet connection link) on testnet (ghostly wallet list)" });
+    expect(JSON.stringify(error)).not.toContain(secret);
+    expect(node.walletCreate).not.toHaveBeenCalled();
+  });
+
   it("a source or a field left out, or one the wallet does not take, is refused naming the flag, before the engine is asked", async () => {
     // Found in a bug hunt: each was `engine` (exit 1) in the app's words ("Enter connection uri", "try again"), naming
     // no flag, or the flag was dropped without a word.
@@ -458,7 +469,8 @@ describe("wallets", () => {
     // More decimals than the token has is the person's value, refused before the engine, as the composer refuses it.
     const calls = node.requestPayment.mock.calls.length;
     await expect(request(["Alice", "0.0000001", "--method", "usdt"])).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/6 decimal places/) });
-    for (const typed of ["0", "0.0", "x", "1e3", ".5"]) expect(() => request(["Alice", typed, "--method", "usdt"]), typed).toThrow(/<amount> with --method usdt takes USDT above 0/);
+    // Named as the usage line names it (`chat request <chat> <sats>`): before, "<amount> with --method usdt …".
+    for (const typed of ["0", "0.0", "x", "1e3", ".5"]) expect(() => request(["Alice", typed, "--method", "usdt"]), typed).toThrow(/^<sats> with --method usdt is USDT above 0/);
     expect(node.requestPayment).toHaveBeenCalledTimes(calls);
     // `payment list` says the decimals of a token amount; a sats one carries none.
     const listed = await callApi(ctx, "payment.list", {}) as { payments: { id: string; amount: number; unit: string; decimals?: number }[] };
@@ -528,6 +540,20 @@ describe("real money", () => {
     expect(node.walletPayQuote).not.toHaveBeenCalled();
     await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", amount: 10 })).resolves.toMatchObject({ amount: 10, paid: true });
     expect(node.walletPayQuote).toHaveBeenCalledTimes(1);
+  });
+
+  it("pay's refusals say 1 sat, not 1 sats", async () => {
+    // Found in a bug hunt: "takes from 1 to 1 sats", "The invoice asks 1 sats" and "The fee may reach 1 sats" (a 1-sat
+    // fee reserve with --max-fee 0 is common).
+    const { ctx, node } = fake();
+    node.walletQuoteInvoice.mockResolvedValue({ quote: "q", mint: "m", amount: 1, feeReserve: 1 });
+    await expect(callApi(ctx, "pay", { target: "lntbs10n1pxyz", maxFee: 0 })).rejects.toMatchObject({ code: "refused", message: "The fee may reach 1 sat, more than the 0 allowed" });
+    await expect(callApi(ctx, "pay", { target: "lntbs10n1pxyz", amount: 2 })).rejects.toMatchObject({ code: "refused", message: "The invoice asks 1 sat, not the 2 given with --amount" });
+    Object.assign(node, { lnurlResolve: vi.fn(async () => ({ id: "l", domain: "example.com", minSat: 1, maxSat: 1 })) });
+    await expect(callApi(ctx, "pay", { target: "alice@example.com", amount: 2 })).rejects.toMatchObject({ code: "refused", message: "example.com takes from 1 to 1 sat" });
+    node.walletQuoteInvoice.mockResolvedValue({ quote: "q", mint: "m", amount: 10, feeReserve: 3 });
+    await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", maxFee: 2 })).rejects.toMatchObject({ message: "The fee may reach 3 sats, more than the 2 allowed" });
+    expect(node.walletPayQuote).not.toHaveBeenCalled();
   });
 });
 

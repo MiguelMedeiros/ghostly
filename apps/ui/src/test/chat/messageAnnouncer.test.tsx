@@ -1,6 +1,7 @@
 import { act, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANNOUNCE_CLEAR_MS, ANNOUNCE_WINDOW_MS, MessageAnnouncer, type Announceable } from "../../components/chat/MessageAnnouncer";
+import { isolate } from "../../lib/ownStatus";
 import { renderApp } from "../render";
 import { hideApps, showApps } from "../apps/showApps";
 import { fakeEngine, paymentView } from "../fakeEngine";
@@ -61,6 +62,18 @@ describe("a new message, read out to a screen reader", () => {
     expect(said.startsWith("Alice: word word")).toBe(true);
     expect(said.endsWith("…")).toBe(true);
     expect(said.length).toBeLessThan(100);
+  });
+
+  it("a long message is cut before an emoji it would cut in half, or a family emoji it would cut into its parts", () => {
+    const { update } = setup(HISTORY);
+    for (const [text, kept] of [[`${"a".repeat(78)}😀 and more`, "a".repeat(78)], [`${"a".repeat(75)}👨‍👩‍👧 and more`, "a".repeat(75)]]) {
+      update([...HISTORY, peer(text)]);
+      wait(ANNOUNCE_WINDOW_MS);
+      const said = region().textContent!;
+      expect(said).toBe(`Alice: ${kept}…`);
+      expect(said).not.toMatch(/\p{Cs}/u);
+      wait(ANNOUNCE_CLEAR_MS);
+    }
   });
 
   it("my own messages, and the chat's notes, are not read out", () => {
@@ -125,7 +138,7 @@ describe("a new message, read out to a screen reader", () => {
       const view = renderApp(<MessageAnnouncer chat="c" linkId="link-1" messages={HISTORY} nameOf={nameOf} />, { language: "zh" });
       view.rerender(<MessageAnnouncer chat="c" linkId="link-1" messages={[...HISTORY, peer(`🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${card.url}`, { card })]} nameOf={nameOf} />);
       wait(ANNOUNCE_WINDOW_MS);
-      expect(region()).toHaveTextContent(/^Alice：🧩 应用：Chess 1\.2\.0$/);
+      expect(region().textContent).toBe(`Alice：🧩 应用：${isolate("Chess")} ${isolate("1.2.0")}`);
     } finally { hideApps(); }
   });
 

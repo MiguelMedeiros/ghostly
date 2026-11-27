@@ -537,6 +537,50 @@ describe("the event stream", () => {
     expect(next.events).toEqual([]);
   });
 
+  /**
+   * The newest page is read when the chat's first event comes, so it already holds what that event carries (the
+   * one-shot's own message): no note yet, but no sign of being out of step either. A one-shot `send` to a chat of
+   * 100,000 messages read it whole for that (0.7 s and 80 MB more than the send).
+   */
+  it("an online one-shot's catch-up reads no history whole for the rows its waiting events carry", async () => {
+    const old = [message("c1", "m1"), message("c1", "m2")];
+    const first = await hub("perchat-own.jsonl");
+    first.h.baseline(state([link("c1")]), new Map([["c1", old]]));
+    first.h.release();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const h = new EventHub(join(dir, "perchat-own.jsonl"), () => 1000, "perchat-own.jsonl");
+    await h.open({ seen: false });
+    expect(await h.loadOwnNotes()).toBe(true);
+    const events: GhostlyEvent[] = [];
+    h.onEvent((e) => events.push(e));
+    const mine = message("c1", "me_new", { sender: "me", delivery: "waiting" });
+    // Its page as read now: the new row on top, and a row that came meanwhile with no event yet (it is out of step).
+    let page = [...old, mine];
+    const whole = vi.fn(async () => page);
+    h.perChat(state([link("c1")]), { newest: async () => ({ messages: page, more: true }), whole, files: async () => [] });
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [mine], deleted: [] });
+    await h.caughtUp();
+    expect(whole).not.toHaveBeenCalled();
+    expect(events.map((e) => e.id)).toEqual(["message.sent:c1:me_new"]);
+    h.release();
+
+    // A row the waiting events do not carry, and no note says: the page is not in step, read whole as before.
+    const again = new EventHub(join(dir, "perchat-own.jsonl"), () => 1000, "perchat-own.jsonl");
+    await again.open({ seen: false });
+    expect(await again.loadOwnNotes()).toBe(true);
+    const later: GhostlyEvent[] = [];
+    again.onEvent((e) => later.push(e));
+    const meanwhile = message("c1", "peer_meanwhile"), mine2 = message("c1", "me_two", { sender: "me", delivery: "waiting" });
+    page = [...old, mine, meanwhile, mine2];
+    again.perChat(state([link("c1")]), { newest: async () => ({ messages: page, more: true }), whole, files: async () => [] });
+    again.sink.post({ kind: "message-changes", linkId: "c1", messages: [mine2], deleted: [] });
+    await again.caughtUp();
+    expect(whole).toHaveBeenCalledTimes(1);
+    expect(later.map((e) => e.id)).toEqual(["message.received:c1:peer_meanwhile", "message.sent:c1:me_two"]);
+    again.release();
+  });
+
   it("says when the journal no longer holds what a listener asks for", async () => {
     const { h } = await hub("d.jsonl");
     const lines = [5, 6].map((seq) => JSON.stringify({ seq, id: `x:${seq}`, type: "x", at: 1 })).join("\n") + "\n";

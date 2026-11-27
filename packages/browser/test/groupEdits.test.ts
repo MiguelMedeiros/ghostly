@@ -311,6 +311,27 @@ describe("GroupEdits on its own", () => {
     edits.stop();
   });
 
+  it("a copy of an edit taken already (another hub's) takes no room in the member's window: a burst of EDIT_RECEIVE_LIMIT shows at once", async () => {
+    vi.useFakeTimers();
+    for (const copies of [2, 3]) {
+      const burst = Array.from({ length: EDIT_RECEIVE_LIMIT }, (_, n) => bobs(n));
+      const { edits, messages, tick } = setup(burst);
+      const results: string[] = [];
+      for (let n = 0; n < EDIT_RECEIVE_LIMIT; n++) {
+        for (let copy = 0; copy < copies; copy++) results.push(await edits.receive("g1", bob, { id: bobs(n).id, e: 1, ts: n, m: `done ${n}` }));
+      }
+      // Each one at once, its copies stale; but the last one's, which come with the window full of real edits and wait.
+      expect(results.filter(r => r === "applied")).toHaveLength(EDIT_RECEIVE_LIMIT);
+      expect(results.slice(0, -copies).filter(r => r !== "applied").every(r => r === "stale")).toBe(true);
+      expect(messages.map(m => m.text)).toEqual(burst.map((_, n) => `done ${n}`));
+      expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 2, ts: 99, m: "one more" })).toBe("waiting");
+      // Taken with the next window, the waiting copy found stale gives its room back to the one behind it.
+      tick(10_000); await vi.advanceTimersByTimeAsync(10_000);
+      expect(messages[0].text).toBe("one more");
+      edits.stop();
+    }
+  });
+
   it("holds GROUP_EDITS_HELD edits a group at most, the oldest going first, and none of a member who left meanwhile", async () => {
     vi.useFakeTimers();
     const rowsOfBob = Array.from({ length: GROUP_EDITS_HELD + 2 }, (_, n) => bobs(n));
@@ -871,6 +892,69 @@ describe("an edit that names me no more", { timeout: 120_000 }, () => {
     await new Promise(r => setTimeout(r, 1_100));
     await world.restart(carol.peer);
     expect(marks().lastMentionAt).toBe(edited.lastMentionAt);
+    for (const m of [alice, bob, carol]) m.edits.stop();
+  });
+
+  it.each(["mesh", "community"] as const)("in a %s group: an edit that names me shows no \"@\", nor after a restart, not even edited again or back", async (kind) => {
+    const world = new CommunityWorld();
+    vi.spyOn(Date, "now").mockImplementation(() => world.now);
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = kind === "mesh" ? await alice.peer.groups.create("Pings", "mesh") : await alice.peer.groups.create("Pings");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id) && world.view(m.peer, id)!.members.length === 3), 10 * 60_000);
+    await world.run(20_000);
+    const carolKey = world.view(carol.peer, id)!.myKey!;
+    const mention = () => world.view(carol.peer, id)!.lastMentionAt;
+    const edit = async (messageId: string, text: string, names: boolean) => {
+      expect(await bob.edits.edit(id, messageId, text, names ? [{ k: carolKey, o: 0, l: 6 }] : [])).toMatchObject({ error: null });
+      await world.until(() => textOf(carol.peer, messageId) === text, 60_000);
+    };
+    const { messageId } = await bob.peer.groups.send(id, "plain words");
+    await world.until(() => world.texts(carol.peer, id).includes("plain words"), MESH_GOSSIP_MS + 60_000);
+    expect(mention()).toBeUndefined();
+
+    await edit(messageId!, "@carol plain words", true);
+    expect(carol.peer.messages.find(m => m.id === messageId)!.mentioned).toBe(true);
+    expect(mention()).toBeUndefined();
+    await world.restart(carol.peer);
+    expect(mention()).toBeUndefined();
+
+    // An edit that keeps the mention it added, or one that takes it out and names me again, is still no new mention.
+    await edit(messageId!, "@carol plain words, edited", true);
+    await edit(messageId!, "plain words again", false);
+    await edit(messageId!, "@carol once more", true);
+    expect(mention()).toBeUndefined();
+    await world.restart(carol.peer);
+    expect(mention()).toBeUndefined();
+    for (const m of [alice, bob, carol]) m.edits.stop();
+  });
+
+  it.each(["mesh", "community"] as const)("in a %s group: a message that named me, its mention taken out and put back by edits, shows no \"@\" again, nor after a restart", async (kind) => {
+    const world = new CommunityWorld();
+    vi.spyOn(Date, "now").mockImplementation(() => world.now);
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = kind === "mesh" ? await alice.peer.groups.create("Pings", "mesh") : await alice.peer.groups.create("Pings");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id) && world.view(m.peer, id)!.members.length === 3), 10 * 60_000);
+    await world.run(20_000);
+    const carolKey = world.view(carol.peer, id)!.myKey!;
+    const mention = () => world.view(carol.peer, id)!.lastMentionAt;
+    const edit = async (messageId: string, text: string, names: boolean) => {
+      expect(await bob.edits.edit(id, messageId, text, names ? [{ k: carolKey, o: 0, l: 6 }] : [])).toMatchObject({ error: null });
+      await world.until(() => textOf(carol.peer, messageId) === text, 60_000);
+    };
+    const { messageId } = await bob.peer.groups.send(id, "@carol look", [{ k: carolKey, o: 0, l: 6 }]);
+    await world.until(() => world.texts(carol.peer, id).includes("@carol look"), MESH_GOSSIP_MS + 60_000);
+    expect(mention()).toBeGreaterThan(0);
+
+    await edit(messageId!, "look", false);
+    expect(mention()).toBeUndefined();
+    await edit(messageId!, "@carol look again", true);
+    expect(mention()).toBeUndefined();
+    await world.restart(carol.peer);
+    expect(mention()).toBeUndefined();
     for (const m of [alice, bob, carol]) m.edits.stop();
   });
 });

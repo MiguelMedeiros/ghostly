@@ -82,6 +82,23 @@ describe("Settings, Network: Pkarr relays", () => {
     expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { relays: [...RELAYS, "https://relay.example.org"] } });
     expect(screen.getByTestId("network-saved")).toBeInTheDocument();
   });
+
+  // Reset is an edit of the field: the defaults it puts back are not the value refused.
+  it("Reset takes a refused relay list's error away with the value refused", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS }, settings: { relays: RELAYS } }));
+    const field = screen.getByTestId("network-relays");
+    await user.clear(field);
+    await user.type(field, "https://relay.example.org nonsense");
+    await user.click(screen.getByTestId("network-save"));
+    expect(screen.getByTestId("network-error")).toHaveTextContent("nonsense");
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    expect(field).not.toHaveValue("https://relay.example.org nonsense");
+    expect(screen.queryByTestId("network-error")).toBeNull();
+    expect(field).not.toHaveAttribute("aria-invalid");
+    expect(field).not.toHaveAttribute("aria-describedby");
+  });
 });
 
 describe("Settings, Network: the transport line", () => {
@@ -169,6 +186,11 @@ describe("Settings, Network: Iroh relays", () => {
     expect(field).toHaveAttribute("aria-invalid", "true");
     expect(field).toHaveAccessibleDescription("Não é um endereço de relay: relay.example.org");
     expect(field).toHaveFocus();
+    // Reset puts the defaults back: no longer the value refused, so no longer said refused.
+    await user.click(screen.getByRole("button", { name: lookup("pt", "network.resetIroh")! }));
+    expect(field).toHaveValue(DEFAULTS.join("\n"));
+    expect(screen.queryByTestId("network-error")).toBeNull();
+    expect(field).not.toHaveAttribute("aria-invalid");
   });
 
   // A relay address past what a contact reads (`relayUrl`) is one: "not a relay address" sent the person looking for a

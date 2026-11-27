@@ -23,6 +23,16 @@
   white-space: normal;
 }
 :root[data-theme="light"] .rich-codeblock { background: rgb(0 0 0 / 0.05); }
+/* On a phone its Copy's 44px hit area (.tap-target, index.css) grows past the block: nothing inside draws a background
+   of its own to clip at the corners, and a phone's scrollbars float over the code. */
+@media (width < 768px) {
+  .rich-codeblock { overflow: visible; }
+  /* A text line's controls sit at a fraction of a pixel (the text size's line heights): 44px there took 43 whole ones. */
+  .rich-action.tap-target::after { min-width: 46px; min-height: 46px; }
+  /* The block's own Copy: its hit area starts at the block's top edge (the bar's 3px padding above the button) and grows
+     down over the bar and the code, never up over the line above, whose controls (a key's Copy, a link) it took. */
+  .rich-codeblock-bar .rich-action.tap-target::after { top: -3px; transform: translateX(-50%); }
+}
 .rich-codeblock-bar {
   display: flex;
   align-items: center;

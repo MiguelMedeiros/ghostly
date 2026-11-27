@@ -3,6 +3,7 @@ import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
 import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, askPeer, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
 import servicesEn from "../../ui/src/locales/en/services.json";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_CSP } from "@ghostly/core";
 
 // covers: extension.engine, services.open, payments.external
 
@@ -272,8 +273,19 @@ describe("viewer tabs", () => {
     expect(world.callsTo("debugger.sendCommand").map(([, method, params]) => [method, params])).toEqual([
       ["Fetch.enable", { patterns: [{ urlPattern: "https://*.invalid/*", requestStage: "Request" }] }],
       ["Page.enable", undefined],
+      ["Page.addScriptToEvaluateOnNewDocument", { source: CLIPBOARD_GUARD_SCRIPT }],
     ]);
     expect(world.tabs.get(tabId)!.url).toBe(`https://${SERVICE}.${PEER}.${TAG}.invalid/`);
+  });
+
+  it("runs the clipboard guard in each new document of the tab as it commits, from before the app's first page", async () => {
+    // DevTools runs it in every new document of the tab, frames included, before the app's first page.
+    await openViewer(world);
+    const sent = world.calls.findIndex(({ api, args }) => api === "debugger.sendCommand" && args[1] === "Page.addScriptToEvaluateOnNewDocument");
+    const navigated = world.calls.findIndex(({ api }) => api === "tabs.update");
+    expect(sent).toBeGreaterThanOrEqual(0);
+    expect(world.calls[sent].args[2]).toEqual({ source: CLIPBOARD_GUARD_SCRIPT });
+    expect(navigated).toBeGreaterThan(sent);
   });
 
   it("opens the same contact's app in another origin for another profile's chat with them", async () => {
@@ -327,7 +339,7 @@ describe("viewer tabs", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       postData: '{"name":"ç"}',
-    });
+    }, "XHR");
     expect(answer.method).toBe("Fetch.fulfillRequest");
     expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }, { name: "content-security-policy", value: expect.any(String) }, { name: "permissions-policy", value: expect.stringContaining("geolocation=()") }] });
     expect(bodyText(answer.params)).toBe("<h1>atlas</h1>");
@@ -340,7 +352,7 @@ describe("viewer tabs", () => {
     expect(request.init.maxResponseBytes).toBe(32 * 1024 * 1024);
   });
 
-  it("serves every answer with Ghostly's connection policy after the contact's own, the error page's too", async () => {
+  it("serves every answer with Ghostly's connection policy after the contact's own; the error page loads and frames nothing", async () => {
     const policy = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'; sandbox allow-scripts allow-same-origin allow-forms";
     const policies = (params: Record<string, unknown>) =>
       (params.responseHeaders as { name: string; value: string }[]).filter(({ name }) => name.toLowerCase() === "content-security-policy").map(({ value }) => value);
@@ -348,16 +360,25 @@ describe("viewer tabs", () => {
     const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
 
     engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"]]);
-    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+    // A page also gets the guard's (viewerClipboard.test.ts), and a contact's policy that would refuse it its hash.
+    expect(policies((await pauseRequest(world, tabId, { url }, "Document")).params)).toEqual([`${VIEWER_GUARD_CSP}, ${policy}`]);
 
-    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["Content-Security-Policy", "default-src * http: ws:"], ["content-security-policy", "img-src *"]]);
-    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([`default-src * http: ws:, img-src *, ${policy}`]);
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"], ["Content-Security-Policy", "default-src * http: ws:"], ["content-security-policy", "img-src *"]]);
+    expect(policies((await pauseRequest(world, tabId, { url }, "Document")).params)).toEqual([`default-src * http: ws: ${CLIPBOARD_GUARD_HASH}, img-src *, ${VIEWER_GUARD_CSP}, ${policy}`]);
 
+    // The error page is one the clipboard guard never runs in, and the app can frame it and read its window by index as
+    // it loads: it gets an origin of its own (an empty sandbox), and needs nothing but its own style.
+    const own = "default-src 'none'; style-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; base-uri 'none'; sandbox";
     const offline = await httpError("offline", "offline");
     engineControl().respond = async () => {
       throw offline;
     };
-    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([own]);
+    // The app can make it on purpose: a page it answers with a file to save.
+    engineControl().respond = async () => okResponse("PK", 200, [["content-type", "application/zip"], ["content-disposition", "attachment"]]);
+    const download = (await pauseRequest(world, tabId, { url: `${url}a.zip` }, "Document")).params;
+    expect(download.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "download" });
+    expect(policies(download)).toEqual([own]);
   });
 
   it("shows a page the contact's app answers as a file to save as the error page, not a download: the tab's own navigation has no sandbox", async () => {
@@ -389,7 +410,8 @@ describe("viewer tabs", () => {
     // What a tab shows goes through as before, and so does a redirect: its target is asked for as a page too.
     const served = (params: Record<string, unknown>, status = 200) => {
       expect(params.responseCode).toBe(status);
-      expect(bodyText(params)).toBe("#!/bin/sh\n");
+      // An HTML page with the clipboard guard first (viewerClipboard.test.ts).
+      expect(bodyText(params)).toMatch(/^(<script>[^]*<\/script>)?#!\/bin\/sh\n$/);
     };
     served(await page([["Content-Type", "text/html; charset=utf-8"]]));
     served(await page([["content-type", "text/plain"], ["content-disposition", "inline; filename=notes.txt"]]));
@@ -421,7 +443,9 @@ describe("viewer tabs", () => {
     const errorPage = sandboxes((await pauseRequest(world, tabId, { url })).params);
 
     // The contact's own sandbox may name allow-popups: Chrome takes the flags every policy allows, so Ghostly's decides.
-    for (const flags of [served.at(-1), errorPage.at(-1)]) expect(flags).toEqual(["allow-scripts", "allow-same-origin", "allow-forms"]);
+    expect(served.at(-1)).toEqual(["allow-scripts", "allow-same-origin", "allow-forms"]);
+    // The error page runs nothing and has an origin of its own: no flag at all.
+    expect(errorPage).toEqual([[]]);
   });
 
   it("opens no tab while Hide my IP from contacts is on, and says why", async () => {
@@ -436,6 +460,59 @@ describe("viewer tabs", () => {
     // A page that says anything but true counts as off.
     const shown = await openViewer(world, PEER, SERVICE, OTHER_TAG, undefined, "yes");
     expect(world.tabs.get(shown)!.url).toBe(`https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/`);
+  });
+
+  describe("Hide my IP from contacts as the peer has it now, not as the page that asks believes", () => {
+    // covers: settings.network.relay-only
+    // A page whose port to the peer dropped keeps its copy of the setting while it reconnects (up to 30 s): it asks with
+    // `relayOnly: false` after another tab turned the setting on, and the worker opens the tab.
+    const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
+    /** The contact's app, which sends whatever holds it to a server of the contact's once it runs. */
+    const app = async () => okResponse("<script>location.href = 'https://contact.example/'</script>", 200, [["content-type", "text/html"]]);
+
+    it("asks the contact for nothing and gives the tab only the refusal, in the profile's language", async () => {
+      world.storage.set("ghostly_app_settings", JSON.stringify({ language: "ar" }));
+      const { default: ar } = await import("../../ui/src/locales/ar/errors.json");
+      // Arabic's chunk transformed once here, so the peer's own `loadLocale` is not slower than `pauseRequest` waits.
+      await import("../../ui/src/locales/ar/index.ts");
+      engineControl().settings = { relayOnly: true };
+      engineControl().respond = app;
+      const tabId = await openViewer(world, PEER, SERVICE, TAG, undefined, false);
+
+      const answer = await pauseRequest(world, tabId, { url });
+      expect(engine().requests).toEqual([]);
+      expect(answer.method).toBe("Fetch.fulfillRequest");
+      expect(answer.params).toMatchObject({ responseCode: 403 });
+      expect(answer.params.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "relay-only" });
+      const html = bodyText(answer.params);
+      expect(html).toContain(ar.relayOnly.appInExtension);
+      expect(html).toContain('<html lang="ar" dir="rtl">');
+      expect(html).not.toContain("contact.example");
+    });
+
+    it("refuses the peer's http-request itself, whoever asks", async () => {
+      engineControl().settings = { relayOnly: true };
+      engineControl().respond = app;
+      expect(await askPeer(world)).toMatchObject({ ok: false, code: "relay-only", status: 403, message: "A contact's app does not open in the browser extension while Hide my IP from contacts is on" });
+      expect(engine().requests).toEqual([]);
+    });
+
+    it("serves the app as before while the setting is off, and again once it is turned off", async () => {
+      engineControl().settings = { relayOnly: false };
+      engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"]]);
+      const tabId = await openViewer(world, PEER, SERVICE, TAG, undefined, false);
+      const served = await pauseRequest(world, tabId, { url });
+      expect(served.params).toMatchObject({ responseCode: 200 });
+      // After the page's guards (`PAGE_GUARDS`), as any page of an app.
+      expect(bodyText(served.params)).toMatch(/<h1>atlas<\/h1>$/);
+
+      engineControl().settings = { relayOnly: true };
+      expect((await pauseRequest(world, tabId, { url })).params).toMatchObject({ responseCode: 403 });
+      engineControl().settings = {};
+      const again = await pauseRequest(world, tabId, { url });
+      expect(again.params).toMatchObject({ responseCode: 200 });
+      expect(engine().requests).toHaveLength(2);
+    });
   });
 
   describe("an open still in progress when the pages close every viewer (Hide my IP turned on, the lock screen)", () => {
@@ -668,7 +745,7 @@ describe("viewer tabs", () => {
     const { default: ar } = await import("../../ui/src/locales/ar/services.json");
     // Arabic's chunk transformed once here, so the peer's own `loadLocale` is not slower than `pauseRequest` waits.
     await import("../../ui/src/locales/ar/index.ts");
-    const named = (text: string) => text.replace("{{app}}", "&#60;b&#62;Atlas&#60;/b&#62;");
+    const named = (text: string) => text.replace("{{app}}", "⁨&#60;b&#62;Atlas&#60;/b&#62;⁩");
 
     // The contact's machine answered in place of their app, which is not running there (docs/PROTOCOL.md "Host errors").
     engineControl().respond = async () =>
@@ -691,7 +768,7 @@ describe("viewer tabs", () => {
       okResponse("This peer does not share that service.\n", 404, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", "unknown-service"]]);
     const gone = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` });
     expect(gone.params).toMatchObject({ responseCode: 404 });
-    expect(bodyText(gone.params)).toContain(">Atlas is no longer shared with you.<");
+    expect(bodyText(gone.params)).toContain(">⁨Atlas⁩ is no longer shared with you.<");
   });
 
   it("stops intercepting once the tab leaves the virtual origin, and only then", async () => {

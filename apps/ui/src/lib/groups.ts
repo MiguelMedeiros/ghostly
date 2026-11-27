@@ -46,7 +46,7 @@ const lookalikeForm = (s: string) => foldLookalikes(foldLookalikes(s.normalize("
  * (…k1p0aa)" are all "Alice". Look-alikes are folded both before NFKC (which turns Greek Ϲ into Σ) and after it (which
  * turns 𝚨 into Α). Only the comparison: the name is shown as chosen.
  */
-const sameNameForm = (nick: string) => lookalikeForm(
+export const sameNameForm = (nick: string) => lookalikeForm(
   lookalikeForm(nick).normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim(),
 ).normalize("NFC");
 
@@ -138,6 +138,30 @@ export const authorName = (group: FormerNamesOf & { formerNames?: GroupView["for
   const former = group.formerNames?.[key];
   return former ? othersName(formerName(group, key, former), t) : t("group.member.unnamed", { key: key.slice(0, 8) });
 };
+
+/**
+ * The members `authorName` reads to name `key`: `key`'s, and every other one whose name could be taken for it (its
+ * name's or, out of the roster, its former name's). `authorName` over these names `key` as over the whole roster, so
+ * the chat list keeps them, not a community's hundreds of members, of each group on every engine state.
+ */
+export function authorRoster<M extends Pick<GroupMemberView, "key" | "me" | "nick">>(members: readonly M[], key: string, formerNames?: GroupView["formerNames"]): M[] {
+  const author = members.find(m => m.key === key);
+  const name = author ? !author.me && author.nick : formerNames?.[key];
+  if (!name) return author ? [author] : [];
+  const form = knownNameForm(name);
+  return members.filter(m => m.key === key || (!m.me && m.nick && knownNameForm(m.nick) === form));
+}
+
+/** `sameNameForm` of names already read: `authorRoster` reads a whole roster's on every engine state. */
+const nameForms = new Map<string, string>();
+function knownNameForm(nick: string): string {
+  let form = nameForms.get(nick);
+  if (form === undefined) {
+    if (nameForms.size >= 10_000) nameForms.clear();
+    nameForms.set(nick, form = sameNameForm(nick));
+  }
+  return form;
+}
 
 /**
  * The name `key` went by when it was no longer in the roster. In a community, where anyone with the link comes in, it

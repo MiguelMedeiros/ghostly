@@ -260,6 +260,20 @@ function roomAt(wallet: Wallet, proofs: StoredProof[], extra = 0): number {
 }
 
 const MINT_QUOTE_MISMATCH = "The mint quoted another amount than this invoice's. Nothing was paid.";
+
+/**
+ * When a mint's invoice expires: the mint's word (seconds), else the invoice's own. A mint may give none (NUT-04), and
+ * an unpaid quote with none was asked about every minute for good, long after its invoice could be paid.
+ */
+function invoiceExpiry(expiry: number | null | undefined, invoice: string): number | null {
+  if (expiry) return expiry * 1000;
+  const decoded = decodeBolt11(invoice);
+  return decoded ? decoded.expiresAt * 1000 : null;
+}
+
+/** A stored quote's expiry; one kept with none before `invoiceExpiry` takes its invoice's. */
+const expiryOf = (quote: StoredQuote): number | null => quote.expiresAt ?? invoiceExpiry(null, quote.invoice);
+
 /** A melt quote that is not for this invoice (`invoice` lower case, as `decodeBolt11` gives it) and its amount. */
 const quoteMismatch = (quote: MeltQuoteBolt11Response, invoice: string, amount: number) =>
   quote.request.trim().toLowerCase().replace(/^lightning:/, "") !== invoice || quote.amount.toNumber() !== amount;
@@ -308,8 +322,11 @@ export interface WalletEvents {
   onTestMintNeeded(mint: string): Promise<void>;
   /** An invoice of ours was paid and its ecash is in the wallet. */
   onQuotePaid(quote: StoredQuote): void;
-  /** A Lightning payment the mint had left pending settled, one way or the other. */
-  onMeltResolved(melt: PendingMelt, paid: boolean): void;
+  /**
+   * A Lightning payment the mint had left pending settled, one way or the other. `fee`: what a failed one cost, kept by
+   * the mint (booked as a `fee` row under the melt quote); absent when it cost nothing.
+   */
+  onMeltResolved(melt: PendingMelt, paid: boolean, fee?: number): void;
   /**
    * A swap the mint had not answered is settled, after the call that made it was over: `done`, what it brought is in
    * the wallet with its records; otherwise the mint never made it, and what it held is free again.
@@ -682,7 +699,7 @@ export class CashuWallet {
       amount,
       invoice: response.request,
       createdAt: Date.now(),
-      expiresAt: response.expiry ? response.expiry * 1000 : null,
+      expiresAt: invoiceExpiry(response.expiry, response.request),
       paymentId,
       // A test mint says "paid" to every invoice: that is not someone paying this one.
       ...(paysItsOwnInvoices(mint) ? { held: true } : {}),
@@ -756,7 +773,7 @@ export class CashuWallet {
       amount,
       invoice: response.request,
       createdAt: Date.now(),
-      expiresAt: response.expiry ? response.expiry * 1000 : null,
+      expiresAt: invoiceExpiry(response.expiry, response.request),
       testCoins: true,
     };
     await this.putQuote(quote);
@@ -810,7 +827,7 @@ export class CashuWallet {
     const gone = new Set<string>();
 
     // A held quote is not asked about: its mint's "paid" means nothing. It only goes once it has expired.
-    for (const held of quotes.filter((q) => q.held && q.expiresAt && q.expiresAt + INVOICE_PACE.expiryGraceMs < Date.now())) {
+    for (const held of quotes.filter((q) => q.held && (expiryOf(q) ?? Infinity) + INVOICE_PACE.expiryGraceMs < Date.now())) {
       await committed((await store(STORES.quotes, "readwrite")).delete(held.quote));
       gone.add(held.quote);
     }
@@ -831,7 +848,7 @@ export class CashuWallet {
   private nextAsk(quote: StoredQuote, now: number): number {
     return Math.max(this.quoteAsk.at(quote.quote, 0), nextInvoiceAsk({
       createdAt: quote.createdAt,
-      expiresAt: quote.expiresAt,
+      expiresAt: expiryOf(quote),
       watchedUntil: this.quoteWatched.get(quote.quote),
       closed: !!quote.paymentId && !!this.events.requestClosed?.(quote.paymentId),
       paid: !!quote.paid,
@@ -889,7 +906,8 @@ export class CashuWallet {
     const { state } = answer;
 
     if (state === "UNPAID") {
-      if (quote.expiresAt && quote.expiresAt + 60_000 < Date.now()) {
+      const expiresAt = expiryOf(quote);
+      if (expiresAt && expiresAt + 60_000 < Date.now()) {
         await committed((await store(STORES.quotes, "readwrite")).delete(quote.quote));
       }
       return null;
@@ -1996,9 +2014,11 @@ export class CashuWallet {
         return current ? this.settleMelt(current) : null;
       });
       if (outcome === "paid" || outcome === "unpaid") {
-        this.takeFailedFee(melt.quote);
+        const fee = this.takeFailedFee(melt.quote);
         this.spentAway.delete(melt.quote);
-        this.events.onMeltResolved(melt, outcome === "paid");
+        // The fee goes with it: a Lightning card through the mints says it, as the Cashu card does from its fee row.
+        if (fee > 0) this.events.onMeltResolved(melt, false, fee);
+        else this.events.onMeltResolved(melt, outcome === "paid");
         this.events.onChange();
       }
     } catch (error) {

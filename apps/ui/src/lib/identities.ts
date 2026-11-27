@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { identityProvidersLoaded, loadedIdentityProviders, loadIdentityProviders, onIdentityProvidersLoaded } from "@ghostly/browser/proofs/load";
 import { availableSigners } from "@ghostly/browser/proofs/verify";
@@ -17,6 +17,7 @@ import { problemLine } from "./problemText";
 import { localProvider } from "./providerWords";
 import { useEngineState as usePlainEngineState, useEngineValue as usePlainEngineValue } from "./engineState";
 import type { Translate, TranslationKey } from "../contexts/I18nContext";
+import { useStoredSessions } from "../hooks/useStoredSessions";
 
 const subscribeProviders = (listener: () => void) => {
   void loadIdentityProviders().catch(() => {});
@@ -148,6 +149,9 @@ export const currentStatus = (r: ReceivedIdentityView, now = Date.now() / 1000):
 export const expiringSoon = (p: { issuedAt: number; expiresAt: number }, now = Date.now() / 1000) =>
   p.expiresAt > now && p.expiresAt - now < Math.min(7 * 86400, (p.expiresAt - p.issuedAt) / 4);
 
+/** When `expiringSoon` starts to hold (just after this time, in seconds). */
+export const expiringFrom = (p: { issuedAt: number; expiresAt: number }) => p.expiresAt - Math.min(7 * 86400, (p.expiresAt - p.issuedAt) / 4);
+
 /** Whole days left, at least 1 while it is still valid. */
 export const daysLeft = (expiresAt: number, now = Date.now() / 1000) => Math.max(1, Math.ceil((expiresAt - now) / 86400));
 
@@ -218,6 +222,30 @@ export function chatsByPeer(): Map<string, ChatSession> {
   const chats = new Map<string, ChatSession>();
   for (const s of listShownSessions()) if (!chats.has(s.peerPubKeyB64)) chats.set(s.peerPubKeyB64, s);
   return chats;
+}
+
+/** What names a contact and opens their chat: the chat's id and its names. */
+export type PeerChat = Pick<ChatSession, "id" | "label" | "nick">;
+const NO_CHATS: ReadonlyMap<string, PeerChat> = new Map();
+function peerChats(): ReadonlyMap<string, PeerChat> {
+  const chats = new Map<string, PeerChat>();
+  for (const [key, { id, label, nick }] of chatsByPeer()) chats.set(key, { id, label, nick });
+  return chats;
+}
+const samePeerChats = (next: ReadonlyMap<string, PeerChat>, before: ReadonlyMap<string, PeerChat>) => next.size === before.size
+  && [...next].every(([key, c]) => { const b = before.get(key); return !!b && b.id === c.id && b.label === c.label && b.nick === c.nick; });
+
+/**
+ * `chatsByPeer` for what names contacts beside their identities, as the chat list does: read again when `source` (what
+ * holds the contacts to name) changes and when a chat's names do (`session-updated`, and the chat list's pace), so a
+ * contact who renamed themselves, or a nickname set for them, shows there too. A chat change that names no one anew
+ * (a message, a pin) draws nothing, and nothing is read on a draw that changed neither. Empty while `wanted` is false.
+ */
+export function usePeerChats(wanted: boolean, source: unknown): ReadonlyMap<string, PeerChat> {
+  const names = useStoredSessions(peerChats, samePeerChats);
+  // `names` and `source` are when to read: a chat saved just before the state that shows it is read with that state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => (wanted ? peerChats() : NO_CHATS), [wanted, source, names]);
 }
 /** A contact's name as the chat list shows it; undefined when they have none. */
 export const contactName = (chat: Pick<ChatSession, "label" | "nick"> | undefined): string | undefined => chat?.label || chat?.nick || undefined;

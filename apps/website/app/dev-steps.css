@@ -646,10 +646,24 @@ html.js:not(.calm) .psx {
   transform: translateY(0) scale(0.985);
   transition-duration: 0.06s;
 }
-/* At either end Previous or Next stays focusable (aria-disabled, not disabled), so a keyboard keeps its place. */
+/* At either end Previous or Next stays focusable (aria-disabled, not disabled), so a keyboard keeps its place. Its
+   content, edge and fill fade, not the button: an opacity on it would fade its focus ring to about 2.5:1 as well. */
 .psx-btn[aria-disabled] {
-  opacity: 0.4;
+  border-color: color-mix(in srgb, var(--line-2) 40%, transparent);
+  background: rgba(255, 255, 255, 0.008);
   cursor: default;
+}
+.psx-btn[aria-disabled] > * {
+  opacity: 0.4;
+}
+/* Next fades its gradient under 60% of the page's colour, as it looked at 40% opacity; its dark word stays as it is. */
+.psx-btn--next[aria-disabled] {
+  background:
+    linear-gradient(color-mix(in srgb, var(--bg) 60%, transparent) 0 0),
+    linear-gradient(100deg, var(--cyan), var(--green));
+}
+.psx-btn--next[aria-disabled] > * {
+  opacity: 1;
 }
 .psx-btn svg {
   width: 18px;

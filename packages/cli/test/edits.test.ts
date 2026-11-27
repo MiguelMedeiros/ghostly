@@ -21,6 +21,7 @@ function fake(result: { error: string | null; refused?: boolean; missing?: boole
     chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => messages),
     getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
+    messagesByWireId: vi.fn(async (_linkId: string, wireId: string) => messages.filter((m) => m.wireId === wireId)),
     editMessage: vi.fn(async () => result),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
@@ -58,20 +59,22 @@ describe("ghostly edit", () => {
     await expect(callApi(ctx, "chat.edit", { chat: "Alice", message: "me_w", text: "nsec1qyqszqgpqyqszqgpqyqszqgp\u200bqyqszqgpqyqszqgpqyqszqgpqyqstywftw" })).rejects.toMatchObject({ code: "confirm" });
   });
 
-  it("a refused edit reads the one message by its id; only a wire id needs the history", async () => {
+  it("a refused edit reads the one message by its id, a wire id by its rows, never the history", async () => {
     const refused = fake({ error: "Only your own text messages can be edited", refused: true }, [row({ id: "peer_x", sender: "peer" })]);
     await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "peer_x", text: "x" })).rejects.toMatchObject({ code: "refused" });
-    expect(refused.node.getMessages).not.toHaveBeenCalled();
+    expect(refused.node.messagesByWireId).not.toHaveBeenCalled();
     await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "W".repeat(22), text: "x" })).rejects.toMatchObject({ code: "refused" });
-    expect(refused.node.getMessages).toHaveBeenCalledOnce();
+    expect(refused.node.messagesByWireId).toHaveBeenCalledWith("chat-one", "W".repeat(22));
+    expect(refused.node.getMessages).not.toHaveBeenCalled();
   });
 
-  it("a refused edit reads the one message by its id; only a wire id needs the history", async () => {
+  it("a refused edit reads the one message by its id, a wire id by its rows, never the history", async () => {
     const refused = fake({ error: "Only your own text messages can be edited", refused: true }, [row({ id: "peer_x", sender: "peer" })]);
     await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "peer_x", text: "x" })).rejects.toMatchObject({ code: "refused" });
-    expect(refused.node.getMessages).not.toHaveBeenCalled();
+    expect(refused.node.messagesByWireId).not.toHaveBeenCalled();
     await expect(callApi(refused.ctx, "chat.edit", { chat: "Alice", message: "W".repeat(22), text: "x" })).rejects.toMatchObject({ code: "refused" });
-    expect(refused.node.getMessages).toHaveBeenCalledOnce();
+    expect(refused.node.messagesByWireId).toHaveBeenCalledWith("chat-one", "W".repeat(22));
+    expect(refused.node.getMessages).not.toHaveBeenCalled();
   });
 
   it("a refusal tells a missing message by the engine's answer, reading nothing again", async () => {
@@ -138,6 +141,7 @@ describe("ghostly group edit", () => {
       chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
       groupMessages: vi.fn(async () => messages),
       getMessage: vi.fn(async (_linkId: string, id: string) => messages.find((m) => m.id === id)),
+      messagesByWireId: vi.fn(async (_linkId: string, wireId: string) => messages.filter((m) => m.wireId === wireId)),
       editMessage: vi.fn(async () => result),
       groupTaken: vi.fn(() => 1),
     };

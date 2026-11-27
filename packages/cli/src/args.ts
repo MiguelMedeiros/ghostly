@@ -230,9 +230,9 @@ export function checkSettingKey(key: string, kinds: Record<string, SettingKind>)
 /** A value of another kind than its key takes (`online maybe`): a usage error too, before the profile opens. */
 export function checkSettingValue(key: string, kind: SettingKind, value: unknown, typed: string): void {
   if (kind === "boolean" && typeof value !== "boolean") throw new CliError("usage", `${key} takes true or false, not ${shownValue(typed)}: ${SETTINGS_SET}`);
-  // Not echoed: a TURN password may be in it.
-  if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("usage", `${key} takes a JSON list of strings: ${SETTINGS_SET}`);
-  if (kind === "ice" && !(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("usage", `${key} takes a JSON list of ICE servers: ${SETTINGS_SET}`);
+  // Not echoed: a TURN password may be in it. An example instead: a list of addresses was "a JSON list of ICE servers".
+  if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("usage", `${key} takes a JSON list of strings, like '["https://relay.example.org"]': ${SETTINGS_SET}`);
+  if (kind === "ice" && !(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("usage", `${key} takes a JSON list of ICE servers, each an object, like '[{"urls":"stun:stun.example.org:3478"}]' (a TURN one also has "username" and "credential"): ${SETTINGS_SET}`);
 }
 
 /** Words as a sentence lists them: "a", "a or b", "a, b or c". */

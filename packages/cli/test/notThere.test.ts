@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { noFile } from "../src/apiKit";
+import { noProfile } from "../src/profiles";
 import { chatViewOf } from "./support/chatView";
 // covers: headless.services, headless.identities, headless.chat
 
@@ -32,6 +34,7 @@ function fake() {
     retryMessage: vi.fn(async () => {}),
     shareIdentityProof: vi.fn(async () => {}), recheckIdentityProof: vi.fn(async () => {}),
     checkPayment: vi.fn(async () => {}), reclaimPayment: vi.fn(async () => {}), payRequest: vi.fn(async () => {}), lightningSetReceive: vi.fn(async () => {}), lightningRename: vi.fn(async () => {}),
+    saveMessage: vi.fn(async () => ({ error: "That message is not in this chat" })),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
   return { ctx, node };
@@ -122,6 +125,35 @@ describe("a payment, a proof or a Lightning card that is not there", () => {
     await expect(callApi(ctx, "chat.payRequest", { chat: "Alice", payment: "got-1" })).rejects.toMatchObject({ code: "not_found",
       message: '"got-1" is a payment you received, not a request: chat pay-request pays a request the contact made of you (ghostly payment list --chat chat-one)' });
     expect(node.payRequest).not.toHaveBeenCalled();
+  });
+
+  it("a secret given as the id is described, not said back", async () => {
+    const { ctx } = fake();
+    // A private key pasted in the wrong place: the refusal says what it looks like, as a refused flag's value does.
+    const nsec = `nsec1${"q".repeat(58)}`, said = "(a private key)";
+    const refusals: [string, Record<string, unknown>, string][] = [
+      ["service.remove", { service: nsec }, `No service ${said} (ghostly service list)`],
+      ["identity.remove", { id: nsec }, `No identity proof ${said} (ghostly identity list)`],
+      ["identity.share", { chat: "Alice", id: nsec }, `No identity proof ${said} (ghostly identity list)`],
+      ["identity.withdraw", { chat: "Alice", id: nsec }, `No identity proof ${said} shared in this chat (ghostly identity contact chat-one)`],
+      ["identity.recheck", { chat: "Alice", id: nsec }, `No identity proof ${said} from this contact (ghostly identity contact chat-one)`],
+      ["payment.check", { chat: "Alice", payment: nsec }, `No payment ${said} in this chat (ghostly payment list --chat chat-one)`],
+      ["payment.reclaim", { payment: nsec }, `No payment ${said} (ghostly payment list)`],
+      ["chat.payRequest", { chat: "Alice", payment: nsec }, `No request ${said} in this chat (ghostly payment list --chat chat-one)`],
+      ["lightning.default", { card: nsec }, `No Lightning card ${said} on testnet (ghostly wallet list)`],
+      ["chat.retry", { chat: "Alice", message: nsec }, `No message ${said} in this chat (ghostly chat history Alice)`],
+      ["saved.remove", { chat: "Alice", message: nsec }, `No saved message ${said} in this chat (ghostly saved list shows the saved ones)`],
+    ];
+    for (const [method, params, message] of refusals) {
+      const error = await callApi(ctx, method, params).catch((e: Error) => e);
+      expect(error, method).toMatchObject({ code: "not_found", message });
+      expect((error as Error).message, method).not.toContain(nsec);
+    }
+    expect(noFile(nsec).message).toBe(`No file ${said} (ghostly file list <chat|group>)`);
+    // A short id is still quoted as given.
+    expect(noFile("f-1", { group: false, ref: "Alice" }).message).toBe('No file "f-1" in this chat (ghostly file list Alice)');
+    expect(noProfile(nsec).message).toBe(`No profile ${said} (ghostly profile list, or ghostly profile create <name>)`);
+    expect(noProfile("nobody").message).toBe('No profile "nobody" (ghostly profile list, or ghostly profile create nobody)');
   });
 
   it("one that is there goes to the engine as before", async () => {

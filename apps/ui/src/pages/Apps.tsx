@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppStoreSummary, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -19,13 +19,14 @@ import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
 import { NAME, withName } from "../components/apps/aroundName";
 import { useAppsState } from "../lib/apps/flag";
-import { appStopped, refreshInstalledApps, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../lib/apps/installed";
+import { appStopped, refreshInstalledApps, refreshInstalledAppsAfter, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../lib/apps/installed";
 import { useTryAgain } from "../lib/apps/tryAgain";
 import { kept } from "../lib/apps/kept";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
 import { appErrorCode, appErrorText, appErrorView, appStoreProblemText } from "../lib/apps/errors";
 import { date } from "../lib/identities";
-import { listText } from "../lib/listText";
+import { listParts } from "../lib/listText";
+import { isolate } from "../lib/ownStatus";
 
 /*
  * Apps (WISP 1200 § Discovery, § Stores, § Updates), a page beside the chat list as Wallets and Identities are: the
@@ -66,7 +67,9 @@ const InstalledRow = memo(function InstalledRow({ app, onDetails, onOpen }: { ap
   const color = { muted: "text-text-muted", warning: "text-test-money-ink", danger: "text-danger-ink" }[hint.tone];
   // Named with all it shows, in its order, then "details": "Chess 1.2.0 Stopped: details". A voice saying what is on
   // screen finds it (Label in Name), and a screen reader hears the line under the title (Stopped, an update that asks).
-  const shown = [app.title, app.version, hint.lead && `${hint.lead} ·`, hint.text].filter(Boolean).join(" ");
+  // The title, version and line (a tagline is the app's words) are isolated, each in its own direction: in Arabic
+  // "Hunt!" read as "!Hunt".
+  const shown = [isolate(app.title), isolate(app.version), hint.lead && `${hint.lead} ·`, hint.text && isolate(hint.text)].filter(Boolean).join(" ");
   // Open goes when the app stops (an update check found it revoked or removed): its focus would drop to the page. The
   // ref's cleanup runs while the button is still there; the row's name, which now says why, takes the focus, never
   // taken from where the person went meanwhile.
@@ -82,7 +85,7 @@ const InstalledRow = memo(function InstalledRow({ app, onDetails, onOpen }: { ap
   return (
     // Open goes under the name when both don't fit (a large text size on a phone), as in a built-in app's row.
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="installed-app" data-ref={app.ref}>
-      <button ref={details} type="button" onClick={() => onDetails(app.ref)} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      <button ref={details} type="button" onClick={() => onDetails(app.ref)} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] max-md:min-h-11 text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         aria-label={t("apps.page.details", { title: shown })}>
         <AppIcon installed={app} />
         <span className="min-w-0">
@@ -98,7 +101,7 @@ const InstalledRow = memo(function InstalledRow({ app, onDetails, onOpen }: { ap
           <HintLine testId="installed-app-hint" className={color} lead={hint.lead} text={hint.text} />
         </span>
       </button>
-      {app.run.status === "ok" && <Button ref={openRef} data-testid="installed-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={() => onOpen(app)}>{t("apps.page.open")}</Button>}
+      {app.run.status === "ok" && <Button ref={openRef} data-testid="installed-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: isolate(app.title) })} onClick={() => onOpen(app)}>{t("apps.page.open")}</Button>}
     </div>
   );
 });
@@ -131,8 +134,8 @@ const BuiltInRow = memo(function BuiltInRow({ app, busy, onOpen, onRemove }: { a
       </div>
       {!asking && (
         <div className="flex items-center gap-2 ms-auto">
-          <Button ref={remove} data-testid="built-in-app-remove" disabled={busy} aria-label={t("apps.builtIn.removeNamed", { title: app.title })} onClick={() => setAsking(true)}>{t("apps.builtIn.remove")}</Button>
-          <Button variant="primary" data-testid="built-in-app-open" disabled={busy} aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={() => onOpen(app)}>{t("apps.page.open")}</Button>
+          <Button ref={remove} data-testid="built-in-app-remove" disabled={busy} aria-label={t("apps.builtIn.removeNamed", { title: isolate(app.title) })} onClick={() => setAsking(true)}>{t("apps.builtIn.remove")}</Button>
+          <Button variant="primary" data-testid="built-in-app-open" disabled={busy} aria-label={t("apps.builtIn.openNamed", { title: isolate(app.title) })} onClick={() => onOpen(app)}>{t("apps.page.open")}</Button>
         </div>
       )}
       {asking && (
@@ -149,6 +152,16 @@ const BuiltInRow = memo(function BuiltInRow({ app, busy, onOpen, onRemove }: { a
     </div>
   );
 });
+
+/**
+ * A line naming apps ("It lists apps you installed: Chess!, Notes (beta)."): each title keeps its own direction, the
+ * language's "and" between them. Shared with the sentence, "Chess!" read "!Chess" in Arabic, and an Arabic title took
+ * an English line's commas and period into its run.
+ */
+function withTitles(text: string, titles: readonly string[], t: Translate) {
+  return text.split(NAME).flatMap((part, i) => [i > 0 && listParts(titles, t).map((piece, j) =>
+    piece.item ? <bdi key={`title-${i}-${j}`}>{piece.text}</bdi> : <Fragment key={`and-${i}-${j}`}>{piece.text}</Fragment>), part]);
+}
 
 /** How many listings a store's block shows at a time: a page a phone draws in a frame or two. */
 const LISTING_PAGE = 50;
@@ -173,8 +186,20 @@ const ListingRow = memo(function ListingRow({ listing, app, removed, storeName, 
   onInstall: (listing: AppListing) => void;
 }) {
   const { t } = useI18n();
+  // Install goes when the store takes that version down or the app is installed in another tab: its focus would drop
+  // to the page. The ref's cleanup runs while the button is still there; the row, which now says why, takes the focus,
+  // never taken from where the person went meanwhile.
+  const row = useRef<HTMLLIElement>(null);
+  const installHadFocus = useRef(false);
+  const installRef = useCallback((button: HTMLButtonElement) => () => { installHadFocus.current = document.activeElement === button; }, []);
+  useLayoutEffect(() => {
+    if (!installHadFocus.current) return;
+    installHadFocus.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body) row.current?.focus({ preventScroll: true });
+  });
   return (
-    <li tabIndex={focusable ? -1 : undefined} data-testid="app-listing" data-ref={listing.ref}
+    <li ref={row} tabIndex={focusable || app || removed ? -1 : undefined} data-testid="app-listing" data-ref={listing.ref}
       className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
       {/* Install (or Installed) goes under the name when both don't fit, rather than leaving it a letter. */}
       <span className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
@@ -190,7 +215,7 @@ const ListingRow = memo(function ListingRow({ listing, app, removed, storeName, 
         </span>
       </span>
       {app ? <span className="ms-auto text-xs text-text-muted">{t("apps.store.installed")}</span>
-        : !removed && <Button data-testid="app-listing-install" className="ms-auto" aria-label={t("apps.install.installNamed", { title: listing.title })} onClick={() => onInstall(listing)}>{t("apps.install.install")}</Button>}
+        : !removed && <Button ref={installRef} data-testid="app-listing-install" className="ms-auto" aria-label={t("apps.install.installNamed", { title: isolate(listing.title) })} onClick={() => onInstall(listing)}>{t("apps.install.install")}</Button>}
     </li>
   );
 });
@@ -300,7 +325,7 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
     <div data-testid="app-store" data-key={store.key}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
         <button type="button" aria-expanded={open} onClick={toggle} disabled={!read}
-          className="flex-[1_1_12rem] min-w-0 text-start cursor-pointer disabled:cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          className="flex-[1_1_12rem] min-w-0 max-md:min-h-11 text-start cursor-pointer disabled:cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <span className="flex items-center gap-1.5">
             {/* Its link wraps whole: cut, a phone showed only its host, and the owner, repository and file that tell two
                 stores apart were the part cut. */}
@@ -323,9 +348,9 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
           <div className="flex flex-wrap items-center gap-2 ms-auto">
             {/* A store read again or removed can stop an installed app (a removal) or change who lists it: both lists again.
                 Each named with its store: every page has two stores once one is added, and two bare Removes. */}
-            <Button data-testid="app-store-refresh" disabled={busy} loading={pending === "refresh"} aria-label={t(read ? "apps.store.refreshNamed" : "apps.store.readNamed", { name: storeName })}
+            <Button data-testid="app-store-refresh" disabled={busy} loading={pending === "refresh"} aria-label={t(read ? "apps.store.refreshNamed" : "apps.store.readNamed", { name: isolate(storeName) })}
               onClick={() => void work(refresh, undefined, "refresh")}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
-            <Button ref={remove} variant="danger" data-testid="app-store-remove" disabled={busy} aria-label={t("apps.store.removeNamed", { name: storeName })} onClick={() => setAsking(true)}>{t("apps.store.remove")}</Button>
+            <Button ref={remove} variant="danger" data-testid="app-store-remove" disabled={busy} aria-label={t("apps.store.removeNamed", { name: isolate(storeName) })} onClick={() => setAsking(true)}>{t("apps.store.remove")}</Button>
           </div>
         )}
         {asking && (
@@ -334,12 +359,12 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
             <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.store.removeTitle", { name: NAME }), storeName)}</p>
             {takenDown.length > 0 && (
               <p data-testid="app-store-remove-taken-down" className="text-xs text-danger-ink">
-                {t(takenDown.length === 1 ? "apps.store.removeTakenDownOne" : "apps.store.removeTakenDown", { titles: listText(takenDown.map((a) => a.title), t) })}
+                {withTitles(t(takenDown.length === 1 ? "apps.store.removeTakenDownOne" : "apps.store.removeTakenDown", { titles: NAME }), takenDown.map((a) => a.title), t)}
               </p>
             )}
             {(vouched.length > 0 || !takenDown.length) && (
-              <p className="text-xs text-text-secondary">
-                {vouched.length ? t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: listText(vouched, t) }) : t("apps.store.removeNone")}
+              <p data-testid="app-store-remove-listed" className="text-xs text-text-secondary">
+                {vouched.length ? withTitles(t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: NAME }), vouched, t) : t("apps.store.removeNone")}
               </p>
             )}
             <div className="flex flex-wrap justify-end gap-2">
@@ -354,7 +379,7 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
         <div className="border-t border-border px-4 py-2">
           <input type="search" data-testid="app-store-filter" value={filter} dir={draftDirection(filter)} onChange={(e) => { setFilter(e.target.value); setLimit(LISTING_PAGE); setAdded(null); }}
             placeholder={t("apps.store.filter")} aria-label={t("apps.store.filter")}
-            className="w-full rounded-lg border-none bg-search-bg px-2.5 py-1.5 text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" />
+            className="w-full max-md:min-h-11 rounded-lg border-none bg-search-bg px-2.5 py-1.5 text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" />
           <SearchStatus testId="app-store-found" text={!filter.trim() ? "" : matching.length ? t("apps.store.count", { count: matching.length }) : t("apps.store.noMatch")} />
         </div>
       )}
@@ -369,7 +394,7 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
           {matching.length > limit && (
             <li>
               <button type="button" data-testid="app-store-more" onClick={() => { setAdded(limit); setLimit(limit + LISTING_PAGE); }}
-                className="w-full cursor-pointer px-4 py-2.5 text-xs font-medium text-accent hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+                className="w-full max-md:min-h-11 cursor-pointer px-4 py-2.5 text-xs font-medium text-accent hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
                 {t("apps.store.showMore", { count: matching.length - limit })}
               </button>
             </li>
@@ -504,7 +529,8 @@ export function Apps() {
     void reloadStores();
     // The update check, as the page opens (WISP 1200 § Updates): nothing goes out while no app is installed. The engine
     // tells every page that it ran (`apps-checked`), and the installed apps are read again for that, not here a second time.
-    void engine.call("appCheckUpdates").then(() => reloadStores(), () => {});
+    // The stores are read again only after a check that checked an app: with none installed it read no store.
+    void engine.call("appCheckUpdates").then((results) => { if (results.length) void reloadStores(); }, () => {});
   }, [available, reloadStores]);
 
   // The rows' callbacks stay the same across the page's draws (a toast, a screen opening), so a row is drawn again only
@@ -517,7 +543,7 @@ export function Apps() {
   // Removed, never opened: nothing to export, and the store still has it. It is not offered again.
   const removeBuiltIn = useCallback(async (app: BuiltInAppOffer) => {
     setRemoving(true);
-    try { await engine.call("appUninstall", { ref: app.ref }); setGone({ app: app.ref }); await refreshInstalledApps(); } catch (e) { fail(e); } finally { setRemoving(false); }
+    try { await refreshInstalledAppsAfter(async () => { await engine.call("appUninstall", { ref: app.ref }); setGone({ app: app.ref }); }); } catch (e) { fail(e); } finally { setRemoving(false); }
   }, [fail]);
 
   if (state === "checking") return null;

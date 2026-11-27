@@ -1,6 +1,6 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { DeleteChatDialog } from "./DeleteChatDialog";
-import { chatOnCall, useChatOnCall } from "../lib/chatsOnCall";
+import { chatOnCall, declineRingIn, useChatOnCall } from "../lib/chatsOnCall";
 import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
 import { useChatsFound } from "../hooks/useChatsFound";
@@ -17,7 +17,7 @@ import type { Translate } from "../locales/translate";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
-import { groupPath, groupReadAt, groupRouteId, invitationRow } from "../lib/groups";
+import { authorRoster, groupPath, groupReadAt, groupRouteId, invitationRow } from "../lib/groups";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useLabelsFit } from "../hooks/useLabelsFit";
 import { Menu, MenuItem } from "./Menu";
@@ -69,9 +69,15 @@ import { draftDirection } from "../lib/documentLanguage";
 import { useEngineValue } from "../lib/engineState";
 
 const NO_GROUPS: ListedGroup[] = [];
-/** A group as the list reads it (`ListedGroup`): a member typing, coming online or reconnecting draws nothing. */
-const listedGroup = ({ members, typing: _typing, community: _community, ...group }: GroupView): ListedGroup =>
-  ({ ...group, members: members.map(({ key, role, me, nick }) => ({ key, role, me, nick })) });
+/**
+ * A group as the list reads it (`ListedGroup`): a member typing, coming online or reconnecting draws nothing, nor does a
+ * change to a member the row does not name. Only the reaction line shown names one (`SameGroupRow`), after the latest message.
+ */
+const listedGroup = ({ members, typing: _typing, community: _community, ...group }: GroupView): ListedGroup => {
+  const by = group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction.by : undefined;
+  const reactors = by ? authorRoster(members, by, group.formerNames).map(({ key, me, nick }) => ({ key, me, nick })) : [];
+  return { ...group, memberCount: members.length, reactors };
+};
 /** What the list reads of the engine's state itself, for `useEngineValue`: its groups, and whether they came yet. */
 const listOfState = (state: typeof engine.state) => ({ groups: state?.groups?.map(listedGroup) ?? NO_GROUPS, groupsLoaded: !!state?.groupsLoaded });
 
@@ -166,8 +172,9 @@ export function Sidebar() {
   const [showNewChat, setShowNewChat] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
-  // "shortcut": opened by the installed app's `#/new`, its Chat row focused, so one press makes the chat.
-  const [newMenuOpen, setNewMenuOpen] = useState<boolean | "shortcut">(false);
+  // Opened, its Chat row has the focus: one press makes the chat (the installed app's `#/new` too), the arrows reach the
+  // rest. On a phone, and at 200 % zoom, it is a sheet hung at the body's end, which the focus left on New ▾ never reached.
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
   const newMenuRef = useRef<HTMLDivElement>(null), newMoreRef = useRef<HTMLButtonElement>(null);
   const closeNewMenu = () => setNewMenuOpen(false);
   // Its groups only, as it reads them, compared by content: the engine sends its whole state anew on every change (up to
@@ -283,7 +290,7 @@ export function Sidebar() {
     // Replaced, so Back never lands on it again (and opens it again).
     navigate("/", { replace: true });
     if (shortcut === "/scan") { setScanOnOpen(true); setShowNewChat(true); return; }
-    setNewMenuOpen("shortcut");
+    setNewMenuOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [location.pathname]);
 
@@ -358,7 +365,7 @@ export function Sidebar() {
   const newChat = () => void createPairedChat().then(id => nav.conversation(chatPath(id)), () => {});
   // The list's New menu; on the rail only the `#/new` shortcut opens it, from the rail's New.
   const newMenu = (rail = false) => (
-    <Menu id="sidebar-new-menu" testId="sidebar-new-menu" open={!!newMenuOpen} onClose={closeNewMenu} anchorRef={newMenuRef} focusFirst={newMenuOpen === "shortcut"} {...(rail && { portal: true, align: "start" as const })}>
+    <Menu id="sidebar-new-menu" testId="sidebar-new-menu" open={newMenuOpen} onClose={closeNewMenu} anchorRef={newMenuRef} focusFirst {...(rail && { portal: true, align: "start" as const })}>
       <MenuItem onClick={() => { closeNewMenu(); newChat(); }} hint={t("sidebar.newMenu.chatHint")}
         icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg>}>
         {t("sidebar.newMenu.chat")}
@@ -502,7 +509,7 @@ export function Sidebar() {
             <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 max-md:min-h-11 max-md:min-w-11 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.newChatShort")}</span></button>
             {/* On a phone 32px wide, and a thumb's 44px where a tap lands: that reaches past its end, over the gap and
                 Join's start, so New keeps all of its own and the words still fit beside the logo on a 375px phone. */}
-            <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={!!newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
+            <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
               className="relative inline-flex min-h-10 w-6 max-md:min-h-11 max-md:w-8 max-md:after:absolute max-md:after:inset-y-0 max-md:after:start-0 max-md:after:-end-3 max-md:after:content-[''] shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
             </button>
@@ -642,7 +649,7 @@ export function Sidebar() {
         name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
         callOn={deleteOnCall}
-        onConfirm={() => { const id=confirmDeleteId; if (chatOnCall(id)) return; deleteSession(id); setChatFolder(id, undefined); void clearExtensionNotices(id); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
+        onConfirm={() => { const id=confirmDeleteId; if (chatOnCall(id)) return; declineRingIn(id); deleteSession(id); setChatFolder(id, undefined); void clearExtensionNotices(id); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
       {!isMobile && <AccountBar rail={collapsed} />}
 
       {/* Resize Handle */}

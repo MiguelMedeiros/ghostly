@@ -49,6 +49,11 @@ the extension, runs the whole Playwright suite with every gate on, and removes t
 on Ctrl-C too. Safe to run twice in a row. It exits non-zero if either the contracts or the browsers failed, and
 prints how long each phase took.
 
+The container names are fixed, so one machine runs one stack at a time: while another checkout's stack runs, or
+something else holds one of its ports, `e2e:full` waits (up to 20 minutes, `e2e/infra/free.mjs`) rather than
+removing that stack or failing on "address already in use". If the room never comes, it ends `NOT RUN` with the
+reason, and leaves the other stack alone.
+
 To work on one suite, keep the environment up and run what you want against it:
 
 ```bash
@@ -327,7 +332,9 @@ npm run test:e2e:desktop-macos     # about 15 s once built
   e2e-driver --config apps/desktop/tauri.e2e.conf.json`. The feature compiles in `apps/desktop/src/e2e_driver.rs`: an HTTP
   server on 127.0.0.1 (only when the app starts with `GHOSTLY_E2E_DRIVER=<port>`, and only for requests carrying
   `GHOSTLY_E2E_DRIVER_TOKEN`) that runs a script in a window (`eval_with_callback`) and answers with its value. A
-  release build with the feature does not compile. The same build reads an empty clipboard, never the Mac's.
+  release build with the feature does not compile. The same build reads an empty clipboard, never the Mac's. It
+  bundles the UI without `npm run build`'s `tsc -b`, a minute of CI's Mac job that `npm run typecheck` already does in
+  Frontend lint and types.
   `support/desktopMac.ts` (`openMacDesktop`, `MacDriver`) speaks to it and implements `DesktopApp`, so
   `matrix/people.ts`'s `desktopPerson(name, { open })` drives it like the Linux one; `MacDriver.in(label)` reaches
   another window, such as the one a shared app opens in.
