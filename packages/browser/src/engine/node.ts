@@ -251,6 +251,11 @@ import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayP
  */
 const RELAY_RETRY_MS = 30_000;
 /**
+ * The group frames a blocked contact's chat drops (`setContactBlocked`): its invitation, and its accept of one made
+ * before the block, which would let it into the group. A group both are in already goes on (its signaling, a leave).
+ */
+const BLOCKED_GROUP_FRAMES = new Set(["group-invite", "group-accept"]);
+/**
  * A chat's relayed HyperDHT listener went with the relay connection (`relayHolds`): for this long the chat keeps first
  * claim on a listener, and another chat does not take the slot it held. A socket closed with no close reaching the relay
  * (a network switch, a NAT that forgot it) leaves the old connection holding the chat's key until the relay's ping drops
@@ -1539,7 +1544,8 @@ export class GhostlyNode implements EngineImplementation {
     // A blocked contact's: no record either, as live (`onPaymentRequest`).
     receivePaymentRequest: async (linkId, request) => { if (!this.blockedChat(this.links.get(linkId)?.stored)) await this.desk.onPaymentRequest(linkId, request, true); },
     taken: (linkId, id) => db.hasMessage(linkId, `peer_${id}`),
-    changed: () => this.emitState(),
+    // A chat's hold (the contact's word on each session, a pickup, a read that failed): its chat's view alone is built again.
+    changed: (linkId) => { if (linkId && this.links.has(linkId)) this.chatChanged(linkId); else this.emitState(); },
     fetch: (...request) => (this.options.holdFetch ?? globalThis.fetch)(...request),
     loopbackStorage: () => this.options.holdLoopback === true,
     // Hide my IP from contacts: a pickup reaches only this person's own bucket (no storage is the app's own), never one a
@@ -1869,8 +1875,8 @@ export class GhostlyNode implements EngineImplementation {
         else this.reactionNotes.delete(chat);
       }
       await this.messagesChanged(chat, [id]);
-      // A group's reaction line is that group's view.
-      if (chat.startsWith("group:")) this.groupChanged(chat.slice("group:".length)); else this.emitState();
+      // A group's reaction line is that group's view, a chat's its chat's: a 1:1 reaction built every chat's and group's.
+      this.historyChanged(chat);
     },
     // Someone reacted to a message of mine: a quiet notice, never a message's sound or an unread count.
     notify: (chat, key) => this.feedback("reaction", `${chat}:${key}`, chat),
@@ -2071,8 +2077,9 @@ export class GhostlyNode implements EngineImplementation {
     },
     // The group's "@" in the list as it is without the mention, as a removal's (`forgetGroupMessage`): the row stays.
     unmentioned: async (chat, row) => {
-      await this.groups.unmark(chat.slice("group:".length), row, true);
-      this.emitState();
+      const groupId = chat.slice("group:".length);
+      await this.groups.unmark(groupId, row, true);
+      this.groupChanged(groupId);
     },
     edge: (groupId, member) => {
       const link = this.links.get(this.memberEdges(groupId).get(member) ?? "")?.link;
@@ -2097,7 +2104,8 @@ export class GhostlyNode implements EngineImplementation {
     // Its quotes cost no read of the group each (`QuoteSweeps`): a member can post and remove at the pace of edits.
     this.quoteSweeps.add(chat, id, id);
     await this.messagesChanged(chat, [id]);
-    this.emitState();
+    // Its group's view alone is built again (its last message, its marks, its pin): a removal built every chat's and group's.
+    this.groupChanged(groupId);
   }
 
   private groupRemovalRows(chat: string): StoredMessage[] {
@@ -2527,6 +2535,9 @@ export class GhostlyNode implements EngineImplementation {
     // one's newest message alone: an offline one, and one that leaves their sessions unstarted (`deferGroups`), where
     // only an admission over a contact chat touches one, from its chain and secrets.
     await this.groups.load(this.limitedMode, !!this.options.offline || !!this.options.deferGroups);
+    // A mute saved for a group no longer held here (an older version kept one asked after the group ended) goes, or
+    // the group would start muted when joined again. Not in limited mode, whose copy stays as it was stored.
+    if (!this.limitedMode) await this.dropUnheldGroupMutes();
     this.groupsLoaded = true;
     this.groupsLoadedNow();
     this.emitState();
@@ -3789,7 +3800,17 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
-  async setContactBlocked({ peerPubKeyZ32, blocked }: { peerPubKeyZ32: string; blocked: boolean }): Promise<void> {
+  setContactBlocked(params: { peerPubKeyZ32: string; blocked: boolean }): Promise<void> {
+    // One at a time: each reads the list the one before kept. Two at once (a script, the CLI) both read it before the
+    // subscription was replaced, and the later one saved over the other's key.
+    const run = this.blocking.then(() => this.applyContactBlocked(params));
+    this.blocking = run.catch(() => {});
+    return run;
+  }
+
+  private blocking: Promise<void> = Promise.resolve();
+
+  private async applyContactBlocked({ peerPubKeyZ32, blocked }: { peerPubKeyZ32: string; blocked: boolean }): Promise<void> {
     // Only a key in its one spelling, and only true or false: before, the word "false" blocked, and a word or a key named
     // again went in the list once more each time (which moves to the person's other devices), telling the contact again.
     if (!isZ32Key(peerPubKeyZ32)) throw new Error("Name the contact's key");
@@ -4076,7 +4097,9 @@ export class GhostlyNode implements EngineImplementation {
     this.reactionNotesWhole.delete(linkId);
     this.events.onMessages(linkId, []);
     // Its mute goes too, as the page's does: joined again under the id, it is not muted. Not through
-    // `setGroupWakeMuted`, which would hand the members of a group just left a new token.
+    // `setGroupWakeMuted`, which would hand the members of a group just left a new token. A mute asked for before
+    // this, still waiting, is dropped by the count.
+    this.groupEnds.set(groupId, (this.groupEnds.get(groupId) ?? 0) + 1);
     const muted = this.settings.wakeMutedGroups;
     if (muted?.includes(groupId)) {
       const next = muted.filter(id => id !== groupId);
@@ -4088,13 +4111,42 @@ export class GhostlyNode implements EngineImplementation {
     this.awaitingSoon();
   }
 
-  private async setGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
-    const list = this.settings.wakeMutedGroups ?? [];
-    if (list.includes(groupId) === muted) return;
+  private setGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
+    // A group no longer held here (left, deleted) is not muted: nothing is saved, and joined again it starts unmuted,
+    // as one whose mute went when it ended. An unmute goes on: it clears a mute left over for it.
+    if (muted && !this.groups.holds(groupId)) return Promise.resolve();
+    // One at a time: each reads the list the one before kept. Two at once both read it before the subscription was
+    // replaced, and the later one saved over the other's group.
+    // A group that ends before its turn (or during its own wait) is not muted: joined again, it would come back muted.
+    const ends = this.groupEnds.get(groupId);
+    const run = this.groupMuting.then(() => this.groupEnds.get(groupId) === ends ? this.applyGroupWakeMuted(groupId, muted, ends) : undefined);
+    this.groupMuting = run.catch(() => {});
+    return run;
+  }
+
+  private groupMuting: Promise<void> = Promise.resolve();
+  /** How many times each group ended here (`groupHistoryGone`): a mute asked for before its group's end is dropped. */
+  private groupEnds = new Map<string, number>();
+
+  /** At start, once the groups are read: the mutes of groups not held here go (`setGroupWakeMuted` saves none now). */
+  private async dropUnheldGroupMutes(): Promise<void> {
+    const muted = this.settings.wakeMutedGroups ?? [];
+    const next = muted.filter(id => this.groups.holds(id));
+    if (next.length === muted.length) return;
+    this.settings = { ...this.settings, wakeMutedGroups: next };
+    if (!next.length) delete this.settings.wakeMutedGroups;
+    await db.putSettings(this.settings);
+  }
+
+  private async applyGroupWakeMuted(groupId: string, muted: boolean, ends: number | undefined): Promise<void> {
+    if ((this.settings.wakeMutedGroups ?? []).includes(groupId) === muted) return;
     // Members told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
     // Those whose edges a group on hubs dropped hold it too, with no edge left to tell them.
     if (muted && ([...this.links.values()].some(live => live.stored.group === groupId && this.meshEdge(live.stored) && live.stored.wakeToken) || this.settings.wakeHeldBy?.[groupId]?.length)) await this.rotateWake();
-    const next = muted ? [...list, groupId] : list.filter(id => id !== groupId);
+    if (this.groupEnds.get(groupId) !== ends) return;
+    // Read after the wait: a muted group that ended meanwhile (`groupHistoryGone`) took its mute with it.
+    const list = this.settings.wakeMutedGroups ?? [];
+    const next = muted ? [...list.filter(id => id !== groupId), groupId] : list.filter(id => id !== groupId);
     this.settings = { ...this.settings, wakeMutedGroups: next.length ? next : undefined };
     if (!next.length) delete this.settings.wakeMutedGroups;
     await db.putSettings(this.settings);
@@ -4436,7 +4488,7 @@ export class GhostlyNode implements EngineImplementation {
     // The data link is reliable and ordered: sent means delivered.
     if (!live.stored.profile && !error && via === "datalink" && timestamp > live.peerAck) {
       live.peerAck = timestamp;
-      this.emitState();
+      this.chatChanged(linkId);
     }
     return { error, messageId: `me_${timestamp}` };
   }
@@ -4758,7 +4810,7 @@ export class GhostlyNode implements EngineImplementation {
           live.stored = { ...live.stored, removedRefs: withRemovedRef(live.stored.removedRefs, edit.id) };
           this.pinRemoved(linkId, edit.id);
           await this.writeDeletions(linkId, { removedRefs: live.stored.removedRefs });
-          this.emitState();
+          this.chatChanged(linkId);
         }
       }
       return true;
@@ -5367,7 +5419,8 @@ export class GhostlyNode implements EngineImplementation {
     // Its quotes cost no read of the chat each (`QuoteSweeps`): a contact can send and remove, or name ids that never were.
     if (removed) this.quoteSweeps.add(linkId, messageId, replyRef(message ?? { id: messageId, linkId }));
     await this.messagesChanged(linkId, [messageId]);
-    this.emitState();
+    // Its chat's view alone is built again (its last message, its pin): a delete built every chat's and group's view.
+    this.chatChanged(linkId);
     await withdrawn;
   }
 
@@ -6797,7 +6850,7 @@ export class GhostlyNode implements EngineImplementation {
     const patch = { pin, ...(out && { pinOut: out }) };
     live.stored = { ...live.stored, ...patch };
     await db.patchLink(linkId, patch);
-    this.emitState();
+    this.chatChanged(linkId);
   }
 
   /** Says my pin the contact has not confirmed, once both sides offer `pin/1`; again after a while with no receipt. */
@@ -6844,7 +6897,7 @@ export class GhostlyNode implements EngineImplementation {
       if (live.stored.pin !== pin) return;
       live.stored = { ...live.stored, pin: { ...pin, messageId: row.id } };
       await db.patchLink(linkId, { pin: live.stored.pin });
-      this.emitState();
+      this.chatChanged(linkId);
       return;
     }
   }
@@ -9767,9 +9820,10 @@ export class GhostlyNode implements EngineImplementation {
           live.pairingProgress = progress;
           this.chatChanged(linkId);
         },
-        // A blocked contact's group invitation is dropped; the signaling of groups we are both in still goes through.
-        onGroupFrame: stored.profile ? frame => frame.t === "group-invite" && this.blockedChat(live.stored) ? undefined : this.groups.handleContactFrame(linkId, frame) : undefined,
-        onGroupsSupport: () => this.emitState(),
+        // A blocked contact's group invitation is dropped, and so is its accept of one made before the block (it would let
+        // the contact into the group); the signaling of groups we are both in still goes through.
+        onGroupFrame: stored.profile ? frame => BLOCKED_GROUP_FRAMES.has(frame.t as string) && this.blockedChat(live.stored) ? undefined : this.groups.handleContactFrame(linkId, frame) : undefined,
+        onGroupsSupport: () => this.chatChanged(linkId),
         // The contact takes texts again: those paced out wait for no backoff check (minutes after the contact was away).
         onTextRoom: () => void this.outboxes.get(linkId)?.flush().catch(() => {}),
         onDhtDelivery: view => {
@@ -9791,7 +9845,7 @@ export class GhostlyNode implements EngineImplementation {
           }
           // Every read of the mailbox says so: the pages hear only of one that changed what the chat shows.
           const shown = JSON.stringify(view);
-          if (shown !== dhtShown) { dhtShown = shown; this.emitState(); }
+          if (shown !== dhtShown) { dhtShown = shown; this.chatChanged(linkId); }
         },
         onHold: (state) => this.hold.peerSaid(linkId, state),
         // A blocked contact's proofs are not taken: nothing of the contact changes while it is blocked.
@@ -9838,10 +9892,16 @@ export class GhostlyNode implements EngineImplementation {
           if (live.goneListener && this.contactUnread(live)) this.listenAgain(live);
           this.chatChanged(linkId);
         },
+        // Said with the contact's policy on every session's start (`TransportSwitch.begin`): one that says what is kept
+        // writes nothing, and a change builds this chat's view alone. A reconnect wave at 2,000 chats wrote each row and
+        // built every chat's and group's view once per chat (9.8 s of state builds in 15 s; bug hunt, 2026-11-27).
         onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {
           const patch = { peerDescriptors, peerTransports, peerFallback };
+          const kept = live.stored;
+          if (kept.peerFallback === peerFallback && JSON.stringify(kept.peerTransports) === JSON.stringify(peerTransports)
+            && JSON.stringify(kept.peerDescriptors) === JSON.stringify(peerDescriptors)) return;
           await db.patchLink(linkId, patch);
-          live.stored = { ...live.stored, ...patch }; this.emitState();
+          live.stored = { ...live.stored, ...patch }; this.chatChanged(linkId);
         },
         onPairingState: state => {
           live.pairing = state;
@@ -9852,7 +9912,7 @@ export class GhostlyNode implements EngineImplementation {
           if (EXTERNAL_IDENTITIES_ENABLED && state.status === "ready") void this.proofsFor(linkId).then(p => p.resendWithdrawals()).catch(() => {});
           else live.proofs?.stop();
           this.observeTransport(linkId);
-          this.emitState();
+          this.chatChanged(linkId);
         },
         onStatus: (status) => {
           const was = live.status, synced = live.lastSyncAt;
@@ -9935,7 +9995,9 @@ export class GhostlyNode implements EngineImplementation {
           }
           if (stored.profile && state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
           this.observeTransport(linkId);
-          this.emitState();
+          // Its chat's view alone is built again: a daemon back, or the relays, plays this and the pairing state on every
+          // chat, and each built every chat's and group's view (119 states, 9.4 s of a core in 15 s at 2,000 chats).
+          this.chatChanged(linkId);
         },
         // A blocked contact keeps the name and picture it had here.
         onPeerAvatar: (avatar) => {
@@ -10048,8 +10110,10 @@ export class GhostlyNode implements EngineImplementation {
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: false }), undefined, linkId),
         // A deleted chat's link, still up while the ends of its files get out (`removeLink`), makes it no files again.
         // A blocked contact's files frames go unanswered, as if this app were closed: an offer is neither taken nor
-        // declined (a decline would tell the contact), and nothing of it is written.
-        onFilesFrame: (frame) => this.links.get(linkId) !== live || this.blockedChat(live.stored) ? Promise.resolve() : this.fileDesk.handle(linkId, frame),
+        // declined (a decline would tell the contact), and nothing of it is written. Its answers about a file I send there
+        // still come in: dropped, each file sent to it stayed "transferring" for good, the contact waiting for its bytes.
+        onFilesFrame: (frame) => this.links.get(linkId) !== live || (this.blockedChat(live.stored) && !this.fileDesk.answersMine(linkId, frame))
+          ? Promise.resolve() : this.fileDesk.handle(linkId, frame),
         onFilesSession: (open) => { if (this.links.get(linkId) !== live) return; this.fileDesk.session(linkId, open); if (open) this.sayWithdrawnFiles(linkId); },
         onFileAnnounced: stored.profile && !stored.group ? (file, packet) => this.fileAnnounced(linkId, file, packet) : undefined,
         onFileFailed: (id, reason, direction) =>
@@ -10949,7 +11013,8 @@ export class GhostlyNode implements EngineImplementation {
     });
     if (!patched) return;
     await this.messagesChanged(message.linkId, [message.id]);
-    this.emitState();
+    // Its "@" or its file is its group's view alone: a whole copy built every chat's and group's.
+    this.historyChanged(message.linkId);
   }
 
   /**
@@ -10969,11 +11034,11 @@ export class GhostlyNode implements EngineImplementation {
         if (this.reactionNotes.get(linkId) === reacted) {
           if (before) this.reactionNotes.set(linkId, before);
           else this.reactionNotes.delete(linkId);
-          this.emitState();
+          this.historyChanged(linkId);
         }
       } else {
         const fresh = noteAfterChange(reacted, row);
-        if (fresh) { this.reactionNotes.set(linkId, fresh); this.emitState(); }
+        if (fresh) { this.reactionNotes.set(linkId, fresh); this.historyChanged(linkId); }
       }
     }
     const onChanges = this.events.onMessageChanges;

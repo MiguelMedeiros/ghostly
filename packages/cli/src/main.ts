@@ -9,7 +9,7 @@ import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaem
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { callRef } from "./commands/calls";
-import { fileHere, here, inRange,INPUT_BYTES, listAtMost, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
+import { fileHere, here, inRange,INPUT_BYTES, listAtMost, localStat, noteTerminalRead, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError, secretFileError, SINGLE_DEVICE } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -628,6 +628,8 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
  * answered "The daemon went away".
  */
 async function readStdin(onData?: () => void): Promise<string> {
+  // A reader that refuses a terminal says so before it gets here; the others say how to end what is typed.
+  noteTerminalRead();
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of process.stdin) {

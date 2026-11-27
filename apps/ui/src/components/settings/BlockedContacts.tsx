@@ -3,15 +3,16 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
 import { useEngineValue } from "../../lib/engineState";
 import { focusLost } from "../../lib/focus";
+import { contactName, usePeerChats } from "../../lib/identities";
 import { isolate } from "../../lib/ownStatus";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { Row, Section } from "../layout";
 import { Button } from "../wallet/ui";
 
 /**
- * Settings → Privacy, **Blocked contacts**: each contact blocked here (a chat's ⋮ → Block contact), named as its chat
- * is ("Contact · <tag>" when it has no name, or no chat is left), with Unblock. The list is the profile's settings, so it is
- * the same on the person's other devices.
+ * Settings → Privacy, **Blocked contacts**: each contact blocked here (a chat's ⋮ → Block contact), named as the chat
+ * list names its chat ("Contact · <tag>" when it has no name, or no chat is left), with Unblock. The list is the
+ * profile's settings, so it is the same on the person's other devices.
  */
 export function BlockedContacts() {
   const { t } = useI18n();
@@ -19,11 +20,15 @@ export function BlockedContacts() {
     const chat = state?.links.find((link) => link.peerPubKeyZ32 === key);
     return { key, name: chat?.label?.trim() || chat?.peerNick?.trim() || "" };
   }));
+  // A name given in the chat's header is kept in the page's stored chat, not in the engine's link: read as the chat
+  // list reads it, and again when it changes (`usePeerChats`). The link's names stay for a chat only the engine has.
+  const chats = usePeerChats(blocked.length > 0, blocked);
   // Unnamed, as the chat list says it: "Contact · <tag>". A name the chat or the contact chose is drawn in its own <bdi>,
   // as Devices draws a device's: "Ana (2)" in an Arabic page otherwise reads ")Ana (2". The fallback is the app's words.
   const lines = blocked.map((line) => {
-    const name = line.name || t("common.unnamedContact", { key: contactTag(line.key) });
-    return { ...line, name, shown: line.name ? <bdi>{line.name}</bdi> : name };
+    const own = contactName(chats.get(line.key))?.trim() || line.name;
+    const name = own || t("common.unnamedContact", { key: contactTag(line.key) });
+    return { ...line, name, shown: own ? <bdi>{own}</bdi> : name };
   });
   const [unblocking, setUnblocking] = useState<string | null>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());

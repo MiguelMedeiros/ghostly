@@ -1,4 +1,4 @@
-import { createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import { identityFromSeedB64 } from "@ghostly/core";
 import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
@@ -152,7 +152,8 @@ async function place(partial: string, path: string): Promise<void> {
   try {
     const source = await open(partial, "r"), buffer = new Uint8Array(FRAME_BYTES);
     try {
-      for (let read; (read = (await source.read(buffer, 0, buffer.length)).bytesRead);) await target.write(buffer.subarray(0, read));
+      // Each read written whole (`writeAll`): one write taking part of it (the stick filling) left a backup cut short.
+      for (let read; (read = (await source.read(buffer, 0, buffer.length)).bytesRead);) await writeAll(target, buffer.subarray(0, read), undefined, path);
     } finally { await source.close(); }
     await target.sync();
     await target.close();
@@ -280,8 +281,21 @@ export const BACKUP_METHODS: Record<string, Method> = {
       writing = true;
       out = await open(partial, "wx", 0o600);
       const handle = out;
+      // Frames are held up to FRAME_BYTES and written together, and sealed or chained at once (`nodeFrames`): a write
+      // and a WebCrypto call per frame, two frames for each small file, took 16 s for 50,000 of them.
+      let held: Uint8Array[] = [], heldBytes = 0;
+      const flush = async () => {
+        if (!held.length) return;
+        const chunk = held.length === 1 ? held[0] : Buffer.concat(held);
+        held = [];
+        heldBytes = 0;
+        // A write may take only part of the chunk (a disk filling): the rest goes on, and the disk's error with it. One
+        // that takes nothing is a full disk, said as one naming --out, not "The backup's file took no more bytes".
+        await writeAll(handle, chunk, undefined, path);
+      };
+      const sink = { write: async (chunk: Uint8Array) => { held.push(chunk); heldBytes += chunk.length; if (heldBytes >= FRAME_BYTES) await flush(); } };
       let writer: BackupWriter;
-      try { writer = await BackupWriter.start({ write: async (chunk) => { await handle.write(chunk); } }, unsealed ? null : passphrase!); } catch (error) { throw localFileError(error, path) ?? new CliError("bad_request", error instanceof Error ? error.message : String(error)); }
+      try { writer = await BackupWriter.start(sink, unsealed ? null : passphrase!, undefined, 2, nodeFrames); } catch (error) { throw localFileError(error, path) ?? new CliError("bad_request", error instanceof Error ? error.message : String(error)); }
       const put = (record: BackupRecord) => writer.json(JSON.stringify(record));
       await writer.json(head);
       await put({ t: "file", kind: "store", size: storeSize });
@@ -300,6 +314,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
       for (const { json } of records) await writer.json(json);
       await put({ t: "end", files: copied, bytes: copiedBytes });
       const written = await writer.finish();
+      await flush();
       await handle.sync();
       await handle.close();
       out = null;
@@ -363,6 +378,11 @@ const nodeFrames: FrameCrypto = {
     decipher.setAAD(additionalData);
     decipher.setAuthTag(sealed.subarray(sealed.length - TAG_BYTES));
     return Buffer.concat([decipher.update(sealed.subarray(0, sealed.length - TAG_BYTES)), decipher.final()]);
+  },
+  seal: (key, iv, additionalData, plain) => {
+    const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
+    cipher.setAAD(additionalData);
+    return Buffer.concat([cipher.update(plain), cipher.final(), cipher.getAuthTag()]);
   },
   gunzip: (bytes, limit) => {
     try { return gunzipSync(bytes, { maxOutputLength: Math.max(1, limit) }); } catch (error) {
@@ -529,6 +549,20 @@ export function passphraseForms(given: string): string[] {
   return [...new Set([given, core, `\uFEFF${core}`, `${core}\n`, `${core}\r`, asUtf16])];
 }
 
+/**
+ * Writes all of `chunk` to `handle` (at `position` when given, else where the file is). One `FileHandle.write` may
+ * take only part of it, a disk filling as it writes, and says so only in `bytesWritten`: the rest is written by the
+ * next call, where the disk's ENOSPC comes. A write that takes nothing is the same full disk, as ENOSPC says it,
+ * naming `file` when given.
+ */
+async function writeAll(handle: FileHandle, chunk: Uint8Array, position?: number, file?: string): Promise<void> {
+  for (let at = 0; at < chunk.length;) {
+    const { bytesWritten } = await handle.write(chunk, at, chunk.length - at, position === undefined ? null : position + at);
+    if (!bytesWritten) throw localFileError(Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC", syscall: "write" }), file)!;
+    at += bytesWritten;
+  }
+}
+
 /** One restore with one passphrase (none for a backup made without one). */
 async function restoreWith(home: string, name: string, file: string, passphrase?: string, stop?: AbortSignal, copy = false): Promise<ProfilePaths> {
   if (profileExists(home, name)) throw new CliError("refused", `Profile ${name} exists: restore into a new name`);
@@ -558,7 +592,8 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
     // A file's frames are held up to FRAME_BYTES and written together: one write per frame, however small, cost ~35 µs.
     let out: { handle: FileHandle; left: number; store: boolean; held: Uint8Array[]; heldBytes: number } | null = null, files = 0, bytes = 0, ended = false, stored = false;
     const flush = async (file: NonNullable<typeof out>) => {
-      if (file.held.length) await file.handle.write(file.held.length === 1 ? file.held[0] : Buffer.concat(file.held));
+      // Whole, or the restore fails: the last file's last write has no write after it to meet a full disk.
+      if (file.held.length) await writeAll(file.handle, file.held.length === 1 ? file.held[0] : Buffer.concat(file.held));
       file.held = [];
       file.heldBytes = 0;
     };

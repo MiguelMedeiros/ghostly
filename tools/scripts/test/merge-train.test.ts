@@ -2516,6 +2516,29 @@ describe("one pull request alone", () => {
       }
       expect(repo.landed).toContain("#11");
     });
+
+    it("keeps one parked before in flight once it flies again, when another parked one's hold ends after", async () => {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      await repo.run();
+      repo.pulls.get(11)!.labels.push(HOLD);
+      repo.add(12, { behind: true });
+      expect((await repo.run()).inFlight).toBe(12);
+      const rebase = repo.pulls.get(12)!.sha;
+      repo.pulls.get(12)!.labels.push(HOLD);
+      await repo.run();
+      expect(repo.alone(12)).toMatchObject({ sha: rebase, parked: true });
+      repo.pulls.get(12)!.labels = repo.pulls.get(12)!.labels.filter((l) => l !== HOLD);
+      expect((await repo.run()).inFlight).toBe(12);
+      expect(repo.alone(12)).not.toHaveProperty("parked");
+      // 11's hold ends while 12's CI runs: 12 stays in flight, on the same rebase.
+      repo.pulls.get(11)!.labels = repo.pulls.get(11)!.labels.filter((l) => l !== HOLD);
+      expect((await repo.run()).inFlight).toBe(12);
+      expect(repo.pulls.get(12)!.sha).toBe(rebase);
+      repo.settle();
+      await repo.run();
+      expect(repo.landed[0]).toBe("#12");
+    });
   });
 
   it("sends a lone pull request that changes a workflow and is behind dev to a coordinator, with no rebase push", async () => {

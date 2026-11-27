@@ -1,5 +1,6 @@
 import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SCREEN_WITH_SOUND } from "../src/screenCapture";
 import { SCREEN_SHARE_ERROR_MS, screenShareErrorMessage } from "../src/useWebRTC";
 import { FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices, type FakeTrack } from "./fakes";
 import { renderCall, settle } from "./harness";
@@ -70,7 +71,7 @@ describe("sharing the screen in a voice call", () => {
 
     const screen = await share(call);
 
-    expect(devices.getDisplayMedia).toHaveBeenCalledExactlyOnceWith({ video: true, audio: false });
+    expect(devices.getDisplayMedia).toHaveBeenCalledExactlyOnceWith(SCREEN_WITH_SOUND);
     expect(sender.replaceTrack).toHaveBeenLastCalledWith(screen);
     expect(screen.contentHint).toBe("detail");
     expect(call.result.current.isScreenSharing).toBe(true);

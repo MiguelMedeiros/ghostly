@@ -149,6 +149,8 @@ class EngineClient {
   private connecting: Promise<void> | null = null;
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; text?: SentText }>();
+  /** Per chat, the rows this page's last texts were answered with: a text lost later is never taken for one of them. */
+  private readonly answeredRows = new Map<string, string[]>();
   private readonly stateListeners = new Set<() => void>();
   private readonly messageListeners = new Set<MessagesListener>();
   private readonly attentionListeners = new Set<(event: AttentionEvent) => void>();
@@ -341,9 +343,11 @@ class EngineClient {
     const connection = this.connection;
     if (!connection) throw new Error("Ghostly is starting…");
     const id = this.nextId++;
-    const text = method === "sendMessage" ? sentText(params[0] as Parameters<EngineApi["sendMessage"]>[0]) : undefined;
+    const text = method === "sendMessage" ? sentText(params[0] as Parameters<EngineApi["sendMessage"]>[0])
+      : method === "sendGroupMessage" ? sentGroupText(params[0] as Parameters<EngineApi["sendGroupMessage"]>[0]) : undefined;
     return new Promise<Result<M>>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, ...(text && { text }) });
+      const answered = text ? (result: unknown) => { this.noteAnswered(text.linkId, result); resolve(result as Result<M>); } : resolve as (v: unknown) => void;
+      this.pending.set(id, { resolve: answered, reject, ...(text && { text }) });
       connection.send({ kind: "request", id, method, params: params[0] } as Parameters<EngineConnection["send"]>[0]);
     });
   }
@@ -363,13 +367,21 @@ class EngineClient {
           if (open && (this.held.has(open) || this.asked.has(open))) this.reread.add(open);
           this.asked.clear();
           this.held.clear();
+          const lostAt = Date.now();
+          const texts: { resolve: (v: unknown) => void; reject: (e: Error) => void; text: SentText }[] = [];
           for (const { resolve, reject, text } of this.pending.values()) {
-            const lost = new Error("Lost the Ghostly peer");
-            if (!text) { reject(lost); continue; }
-            // The peer stores a text before its send answers, and the next peer sends what it stored: one kept is sent,
-            // not handed back to be sent twice. Only a text not in the chat failed.
-            void this.keptRow(text).then((messageId) => messageId ? resolve({ error: null, messageId }) : reject(lost), () => reject(lost));
+            if (text) texts.push({ resolve, reject, text });
+            else reject(new Error("Lost the Ghostly peer"));
           }
+          // The peer stores a text before its send answers, and the next peer sends what it stored: one kept is sent,
+          // not handed back to be sent twice. Only a text not in the chat failed. One at a time, in the order they were
+          // sent, and no row taken twice: of two "ok" in flight, the one that did not go comes back to the field.
+          void texts.reduce(async (before, { resolve, reject, text }) => {
+            await before;
+            const lost = new Error("Lost the Ghostly peer");
+            const messageId = await this.keptRow(text, lostAt).catch(() => undefined);
+            if (messageId) resolve({ error: null, messageId }); else reject(lost);
+          }, Promise.resolve());
           this.pending.clear();
           this.reconnect(500);
         },
@@ -398,10 +410,22 @@ class EngineClient {
     });
   }
 
-  /** The id of the row a text cut off by the peer going away was kept under, read from the next peer; none when not kept. */
-  private async keptRow({ linkId, text, timestamp }: SentText): Promise<string | undefined> {
-    const { messages } = await this.call("messagePage", { linkId, after: timestamp - 1, before: timestamp + 1 });
-    return messages.find((m) => m.sender === "me" && m.timestamp === timestamp && m.text === text)?.id;
+  /**
+   * The id of the row a text cut off by the peer going away was kept under, read from the next peer; none when not kept.
+   * `lostAt`: when the peer went, the latest a group text's row can be dated.
+   */
+  private async keptRow({ linkId, text, from, until }: SentText, lostAt: number): Promise<string | undefined> {
+    const last = until ?? lostAt;
+    const { messages } = await this.call("messagePage", { linkId, after: from - 1, before: last + 1, limit: 100 });
+    const taken = this.answeredRows.get(linkId) ?? [];
+    return messages.find((m) => m.sender === "me" && m.timestamp >= from && m.timestamp <= last && m.text === text && !taken.includes(m.id))?.id;
+  }
+
+  /** A text's send answered with its row (or a lost one found kept): that row is this send's, and no later one's. */
+  private noteAnswered(linkId: string, result: unknown): void {
+    const messageId = (result as { messageId?: unknown } | null)?.messageId;
+    if (typeof messageId !== "string") return;
+    this.answeredRows.set(linkId, [...(this.answeredRows.get(linkId) ?? []), messageId].slice(-ANSWERED_KEPT));
   }
 
   /**
@@ -581,17 +605,36 @@ function sessionWord(method: string, params: unknown): { key: string; kept: bool
   }
 }
 
-/** A text sent at the page's own time (`sendMessage`'s `timestamp`): what finds its row in the chat. */
+/**
+ * A text sent, and the times its row can carry: what finds that row in the chat. A chat's is dated at the page's own time
+ * (`sendMessage`'s `timestamp`); a group's at the peer's, after the page asked and before the peer went (no `until`).
+ */
 interface SentText {
   linkId: string;
   text: string;
-  timestamp: number;
+  from: number;
+  until?: number;
 }
 
 function sentText(params: Parameters<EngineApi["sendMessage"]>[0]): SentText | undefined {
   const { linkId, text, timestamp } = params ?? {};
   return typeof linkId === "string" && typeof text === "string" && text.trim() && Number.isSafeInteger(timestamp)
-    ? { linkId, text: text.trim(), timestamp: timestamp! } : undefined;
+    ? { linkId, text: text.trim(), from: timestamp!, until: timestamp! } : undefined;
+}
+
+/** The rows of a chat's last texts kept per chat (`answeredRows`). */
+const ANSWERED_KEPT = 20;
+
+/**
+ * How long before the page's call a group text's row may be dated: a community dates its rows by the clock its last
+ * tick read, moved on since (`CommunityGroups.sendTime`), which runs behind this one by what that tick awaited.
+ */
+const GROUP_ROW_SLACK_MS = 2_000;
+
+/** A group text is saved before its send answers too (`GroupSession.sendText`), and the next peer says it (`resume`). */
+function sentGroupText(params: Parameters<EngineApi["sendGroupMessage"]>[0]): SentText | undefined {
+  const { groupId, text } = params ?? {};
+  return typeof groupId === "string" && typeof text === "string" && text.trim() ? { linkId: `group:${groupId}`, text: text.trim(), from: Date.now() - GROUP_ROW_SLACK_MS } : undefined;
 }
 
 /** A state the peer sent, whole: what it left out (`PostedState`) is what this page has from the state before. */

@@ -224,12 +224,17 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   const canShareScreen = typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getDisplayMedia === "function";
   return (
     <div className="relative flex shrink-0 items-center">
+      {/* A phone with its label, in the call's colour (as Answer): a camera alone read as "start a video call". The label
+          folds away in a header under 640 px, the phone in its pill staying: under it, beside Share link's label, it
+          left a long group name 35 px in Portuguese at 540. In forced colors the tint is dropped: its border, see-through until then, keeps the pill, in the room it always
+          took, so nothing beside it moves. */}
       <button ref={button} type="button" onClick={press} {...working(asking)} {...(blocked && { "aria-disabled": true })} data-testid="group-call-join"
         title={t("calls.group.join")} aria-label={t("calls.group.join")} aria-describedby={problem ? `${id}-problem` : undefined}
-        className={`flex cursor-pointer items-center justify-center rounded-full p-2 text-text-secondary transition-colors hover:bg-surface-hover hover:text-accent aria-disabled:opacity-40 max-md:h-[44px] max-md:w-[44px] max-md:p-0 ${focus}`}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+        className={`inline-flex min-h-9 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-transparent bg-accent/15 px-[11px] text-sm font-semibold text-accent transition-colors hover:bg-accent/20 hover:text-accent-hover aria-disabled:opacity-40 forced-colors:border-[color:ButtonText] forced-colors:aria-disabled:border-[color:GrayText] max-md:min-h-[44px] max-md:min-w-[44px] max-md:px-[9px] ${focus}`}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
         </svg>
+        <span className="whitespace-nowrap @max-[640px]/group-head:hidden">{t("calls.group.join")}</span>
       </button>
       {unsupported && <InfoButton open={!!problem} onToggle={press} controls={`${id}-problem`} testId="group-call-unsupported-info" />}
       {/* On a phone Join call is not the header's last button: from its edge the box ran past the screen's side. It

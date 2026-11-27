@@ -7,6 +7,7 @@ import { BaseKeyProvider, ExternalE2EEKeyProvider, KeyProviderEvent, type KeyInf
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CALL_KEY_SLOTS, callKeySlot, GroupCallKeyProvider, PREVIOUS_KEY_MS } from "../../hooks/groupCallKeys";
 import { GROUP_CALL_MUTED_ABOVE, joinsMuted, NO_CALL_KEY, NO_RELAY, NO_SEALING, NOT_SEALED, useGroupCall, type LivekitModule, type UseGroupCallOptions } from "../../hooks/useGroupCall";
+import { SCREEN_WITH_SOUND } from "@ghostly/react";
 import { chooseDevice } from "../../lib/mediaDevices";
 import { FakeTrack } from "../../../../../packages/react/test/fakes";
 
@@ -15,7 +16,7 @@ import { FakeTrack } from "../../../../../packages/react/test/fakes";
  * keeps LiveKit's shape where the hook reads it (participants, publications, active speakers, room events).
  */
 
-const Source = { Microphone: "microphone", Camera: "camera", ScreenShare: "screen_share" } as const;
+const Source = { Microphone: "microphone", Camera: "camera", ScreenShare: "screen_share", ScreenShareAudio: "screen_share_audio" } as const;
 type SourceName = (typeof Source)[keyof typeof Source];
 
 const RoomEvent = {
@@ -311,6 +312,9 @@ async function joined(over: Partial<UseGroupCallOptions> = {}) {
   return hook;
 }
 
+/** How a shared screen's sound is published: as the screen's own, and as a sound rather than a voice. */
+const SOUND = { source: Source.ScreenShareAudio, dtx: false, red: false };
+
 /** A `getDisplayMedia` answering with one fake screen track, and the screen's own audio when `withAudio`. */
 function displayMedia({ withAudio = false } = {}) {
   const screen = new FakeTrack("video");
@@ -504,8 +508,9 @@ describe("useGroupCall", () => {
     const { screen, getDisplayMedia } = displayMedia();
     const { result } = await joined();
     await act(() => result.current.toggleScreen());
-    expect(getDisplayMedia).toHaveBeenCalledWith({ video: true, audio: false });
-    expect(room().localParticipant.publishTrack).toHaveBeenCalledWith(screen, { source: Source.ScreenShare });
+    // the screen's sound is asked for too: a tab's, or the system's where the browser offers it
+    expect(getDisplayMedia).toHaveBeenCalledExactlyOnceWith({ video: true, audio: { restrictOwnAudio: true }, systemAudio: "include" });
+    expect(room().localParticipant.publishTrack).toHaveBeenCalledExactlyOnceWith(screen, { source: Source.ScreenShare });
     expect(result.current.local.screen).toBe(true);
     expect(result.current.local.tracks.screen).toBe(screen);
 
@@ -538,6 +543,117 @@ describe("useGroupCall", () => {
     const { result } = await joined();
     await act(() => result.current.toggleScreen());
     expect(result.current.error).toMatchObject({ action: "screen", message: "Screen sharing is not available here" });
+  });
+
+  it("shares the screen's sound with it, as its ScreenShareAudio, and takes both down together", async () => {
+    const { screen, audio } = displayMedia({ withAudio: true });
+    const { result } = await joined();
+    const me = room().localParticipant;
+    await act(() => result.current.toggleScreen());
+    // as a sound, not a voice: no DTX, no RED
+    expect(me.publishTrack.mock.calls).toEqual([[screen, { source: Source.ScreenShare }], [audio, SOUND]]);
+    expect(result.current.local).toMatchObject({ screen: true, screenSound: true });
+    // your own screen's sound is never handed out to play here
+    expect(result.current.local.tracks).not.toHaveProperty("screenAudio");
+
+    // the button
+    await act(() => result.current.toggleScreen());
+    expect(me.unpublishTrack).toHaveBeenCalledWith(screen, true);
+    expect(me.unpublishTrack).toHaveBeenCalledWith(audio, true);
+    expect(audio.stop).toHaveBeenCalled();
+    expect(me.getTrackPublication(Source.ScreenShareAudio)).toBeUndefined();
+    expect(result.current.local).toMatchObject({ screen: false, screenSound: false });
+
+    // the browser's "Stop sharing" bar
+    await act(() => result.current.toggleScreen());
+    expect(me.getTrackPublication(Source.ScreenShareAudio)).toBeDefined();
+    await act(async () => screen.unplug());
+    await waitFor(() => expect(result.current.local.screen).toBe(false));
+    expect(me.getTrackPublication(Source.ScreenShareAudio)).toBeUndefined();
+  });
+
+  // LiveKit finds a publication only once its publish is done: an unpublish of a raw track still going out finds nothing.
+  it.each([["the picture", Source.ScreenShare], ["its sound", Source.ScreenShareAudio]] as const)(
+    "a share stopped while %s is still going out leaves nothing published, and sends no sound after it",
+    async (_, held) => {
+      displayMedia({ withAudio: true });
+      const { result } = await joined();
+      const me = room().localParticipant;
+      const publish = me.publishTrack.getMockImplementation()!;
+      let release!: () => void;
+      me.publishTrack.mockImplementation(async (track, options) => {
+        if (options.source === held) await new Promise<void>((resolve) => (release = resolve));
+        return publish(track, options);
+      });
+      let started!: Promise<void>;
+      act(() => { started = result.current.toggleScreen(); });
+      await waitFor(() => expect(me.publishTrack.mock.calls.map(([, o]) => o.source)).toContain(held));
+
+      await act(() => result.current.toggleScreen());
+      await act(async () => { release(); await started; });
+
+      expect(me.getTrackPublication(Source.ScreenShare)).toBeUndefined();
+      expect(me.getTrackPublication(Source.ScreenShareAudio)).toBeUndefined();
+      expect(me.publishTrack.mock.calls.map(([, o]) => o.source)).toEqual(held === Source.ScreenShare ? [Source.ScreenShare] : [Source.ScreenShare, Source.ScreenShareAudio]);
+      expect(result.current.local).toMatchObject({ screen: false, screenSound: false });
+    },
+  );
+
+  it("a share that came without its sound goes out as the picture alone, and says so", async () => {
+    const { screen } = displayMedia();
+    const { result } = await joined();
+    await act(() => result.current.toggleScreen());
+    expect(room().localParticipant.publishTrack).toHaveBeenCalledExactlyOnceWith(screen, { source: Source.ScreenShare });
+    expect(result.current.local).toMatchObject({ screen: true, screenSound: false });
+    expect(result.current.error).toBeNull();
+  });
+
+  it("a browser that will not be asked for the sound is asked again for the picture alone; a closed picker is not opened again", async () => {
+    const { screen, getDisplayMedia } = displayMedia();
+    getDisplayMedia.mockRejectedValueOnce(new TypeError("Unknown constraint"));
+    const { result } = await joined();
+    await act(() => result.current.toggleScreen());
+    expect(getDisplayMedia.mock.calls).toEqual([[SCREEN_WITH_SOUND], [{ video: true, audio: false }]]);
+    expect(result.current.local).toMatchObject({ screen: true, screenSound: false });
+    expect(result.current.local.tracks.screen).toBe(screen);
+    expect(result.current.error).toBeNull();
+
+    await act(() => result.current.toggleScreen());
+    getDisplayMedia.mockClear();
+    getDisplayMedia.mockRejectedValueOnce(Object.assign(new Error("Permission denied"), { name: "NotAllowedError" }));
+    await act(() => result.current.toggleScreen());
+    expect(getDisplayMedia).toHaveBeenCalledOnce();
+  });
+
+  it("a sound the room will not take leaves the picture shared, without its sound", async () => {
+    const { screen, audio } = displayMedia({ withAudio: true });
+    const { result } = await joined();
+    const me = room().localParticipant;
+    const publish = me.publishTrack.getMockImplementation()!;
+    me.publishTrack.mockImplementation(async (track, options) => {
+      if (options.source === Source.ScreenShareAudio) throw new Error("refused");
+      return publish(track, options);
+    });
+    await act(() => result.current.toggleScreen());
+    expect(result.current.local).toMatchObject({ screen: true, screenSound: false });
+    expect(result.current.local.tracks.screen).toBe(screen);
+    expect(audio.stop).toHaveBeenCalled();
+    expect(screen.stop).not.toHaveBeenCalled();
+    expect(result.current.error).toBeNull();
+  });
+
+  it("hands out someone else's screen sound with their screen, to be played", async () => {
+    const { result } = await joined();
+    let ana!: FakeParticipant;
+    act(() => {
+      ana = room().join("ana", "Ana");
+      ana.publish(Source.ScreenShare, "video");
+      ana.publish(Source.ScreenShareAudio, "audio");
+      room().emit(RoomEvent.TrackSubscribed);
+    });
+    const shown = result.current.participants[0];
+    expect(shown).toMatchObject({ screen: true, screenSound: true });
+    expect(shown.tracks.screenAudio).toBe(ana.getTrackPublication(Source.ScreenShareAudio)!.track!.mediaStreamTrack);
   });
 
   it("leaving disconnects and stops every local track, the shared screen too", async () => {
@@ -628,8 +744,8 @@ describe("useGroupCall, moderated by the group's admin (WISP 602 § Moderation)"
     expect(result.current.local.mic).toBe(true);
   });
 
-  it("a camera or screen taken away goes off and does not come back from its button", async () => {
-    const { screen, getDisplayMedia } = displayMedia();
+  it("a camera or screen taken away goes off, the screen's sound with it, and does not come back from its button", async () => {
+    const { screen, audio, getDisplayMedia } = displayMedia({ withAudio: true });
     const { result } = await joined();
     const me = room().localParticipant;
     await act(() => result.current.toggleCamera());
@@ -641,6 +757,8 @@ describe("useGroupCall, moderated by the group's admin (WISP 602 § Moderation)"
     await waitFor(() => expect(result.current.local).toMatchObject({ mic: true, camera: false, screen: false, byAdmin: { mic: false, camera: true, screen: true } }));
     expect(camera.stop).toHaveBeenCalled();
     expect(screen.stop).toHaveBeenCalled();
+    expect(audio.stop).toHaveBeenCalled();
+    expect(me.getTrackPublication(Source.ScreenShareAudio)).toBeUndefined();
     me.setCameraEnabled.mockClear();
     getDisplayMedia.mockClear();
     await act(() => result.current.toggleCamera());
@@ -762,7 +880,7 @@ describe("useGroupCall, a sealed call (WISP 602 § End-to-end encryption)", () =
     expect(room().setE2EEEnabled).toHaveBeenCalledTimes(1);
   });
 
-  it("every publish path goes out on a sealed, joined room: microphone, camera, screen; the screen's own audio never goes out", async () => {
+  it("every publish path goes out on a sealed, joined room: microphone, camera, screen and the screen's sound", async () => {
     const { screen, audio } = displayMedia({ withAudio: true });
     const { result } = await joined({ e2ee: key(4, 7) });
     await act(() => result.current.toggleCamera());
@@ -772,12 +890,12 @@ describe("useGroupCall, a sealed call (WISP 602 § End-to-end encryption)", () =
     await act(() => result.current.toggleMic());
     await act(() => result.current.toggleScreen());
     await act(() => result.current.toggleScreen());
-    expect(published.map((p) => p.what)).toEqual(["mic", "camera", "publish screen_share video", "mic", "publish screen_share video"]);
+    expect(published.map((p) => p.what)).toEqual([
+      "mic", "camera", "publish screen_share video", "publish screen_share_audio audio", "mic", "publish screen_share video", "publish screen_share_audio audio",
+    ]);
     expect(published.filter((p) => !p.sealed)).toEqual([]);
-    // the screen's audio was asked for nowhere and is stopped at once
-    expect(audio.stop).toHaveBeenCalled();
-    expect(room().localParticipant.publishTrack.mock.calls.map(([track]) => track)).not.toContain(audio);
-    expect(room().localParticipant.publishTrack.mock.calls[0][0]).toBe(screen);
+    expect(room().localParticipant.publishTrack.mock.calls.slice(0, 2)).toEqual([[screen, { source: Source.ScreenShare }], [audio, SOUND]]);
+    expect(result.current.status).toBe("connected");
   });
 
   it("Hide my IP turned on during a sealed call joins again sealed: a new key provider with the key and worker, E2EE before the connect, mic and camera after", async () => {

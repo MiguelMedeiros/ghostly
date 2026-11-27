@@ -102,6 +102,20 @@ describe("an app card for an installed app taken down", () => {
     expect(opened).not.toHaveBeenCalled();
   });
 
+  it.each([["Join", CARD, "app-card-install"], ["line saying to ask for a link", { ...CARD, url: undefined }, "app-card-ask"]] as const)("removed by a store: Uninstall on the card's details screen leaves the focus on the card's %s, not the page", async (_name, card, testId) => {
+    run = REMOVED;
+    let apps = [installed()];
+    fakeEngine.on("appList", () => apps).on("appUninstall", () => { apps = []; });
+    const { user } = renderApp(<AppCardView card={card} mine={false} contact="Ana" linkId="link-1" peerKey="peer" />);
+    const view = screen.getByTestId("app-card");
+    await user.click(await within(view).findByTestId("app-card-run-anyway"));
+    await user.click(within(await screen.findByTestId("app-details")).getByTestId("app-uninstall-open"));
+    await user.click(within(await screen.findByTestId("app-uninstall")).getByTestId("app-uninstall-confirm"));
+    await waitFor(() => expect(screen.queryByTestId("app-uninstall")).not.toBeInTheDocument());
+    // The card's Run anyway went with the app: what the card now offers has the focus.
+    expect(document.activeElement).toBe(within(view).getByTestId(testId));
+  });
+
   it("an app that may run still says Installed with Open", async () => {
     run = { status: "ok" };
     const { row, card, user } = await pageAndCard();
@@ -110,6 +124,74 @@ describe("an app card for an installed app taken down", () => {
     expect(within(card).queryByTestId("app-card-run-anyway")).not.toBeInTheDocument();
     await user.click(within(card).getByTestId("app-card-open"));
     expect(opened).toHaveBeenCalledWith(REF, "link-1", { runAnyway: false });
+  });
+});
+
+/*
+ * An app uninstalled elsewhere (the Apps page, another tab, another card of it) while the details screen its card's Run
+ * anyway opened is still up: the screen goes, and stays gone once the app is installed again. The focus that was on it
+ * goes to what the card now offers, as for an Uninstall on that screen, never from where the person is.
+ */
+describe("an app card whose details screen is open when its app is uninstalled elsewhere", () => {
+  let apps: InstalledAppView[];
+  beforeEach(() => {
+    run = REMOVED;
+    apps = [installed()];
+    fakeEngine.on("appList", () => apps).on("appUninstall", () => { apps = []; });
+  });
+  /** Gone from the list, as another tab's Uninstall leaves it, then read again. */
+  const goneElsewhere = () => act(async () => { apps = []; await refreshInstalledApps(); });
+  const installedAgain = () => act(async () => { apps = [installed()]; await refreshInstalledApps(); });
+
+  it.each([["Join", CARD, "app-card-install"], ["line saying to ask for a link", { ...CARD, url: undefined }, "app-card-ask"]] as const)("the screen goes, the focus on it goes to the card's %s, and it does not open again on a reinstall", async (_name, card, testId) => {
+    const { user } = renderApp(<AppCardView card={card} mine={false} contact="Ana" linkId="link-1" peerKey="peer" />);
+    const view = screen.getByTestId("app-card");
+    await user.click(await within(view).findByTestId("app-card-run-anyway"));
+    const details = await screen.findByTestId("app-details");
+    expect(details).toContainElement(document.activeElement as HTMLElement);
+    await goneElsewhere();
+    expect(screen.queryByTestId("app-details")).not.toBeInTheDocument();
+    expect(within(view).getByTestId("app-card-check")).toHaveTextContent("Not checked yet");
+    expect(document.activeElement).toBe(within(view).getByTestId(testId));
+    await installedAgain();
+    expect(within(view).getByTestId("app-card-check")).toHaveTextContent(/^Stopped$/);
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(screen.queryByTestId("app-details")).not.toBeInTheDocument();
+    // Its Run anyway opens the screen again, as before.
+    await user.click(within(view).getByTestId("app-card-run-anyway"));
+    expect(await screen.findByTestId("app-details")).toBeInTheDocument();
+  });
+
+  it("uninstalled on the Apps page's own screen of it: the page gives the focus to its Add, and the card takes none", async () => {
+    const { user, card } = await pageAndCard();
+    await user.click(within(card).getByTestId("app-card-run-anyway"));
+    await screen.findByTestId("app-details");
+    // The Apps page's screen of the same app, over the card's: the focus is on it now, where Uninstall is pressed.
+    await user.click(within(screen.getByTestId("installed-app")).getAllByRole("button")[0]);
+    await waitFor(() => expect(screen.getAllByTestId("app-details")).toHaveLength(2));
+    const shown = screen.getAllByTestId("app-details");
+    const page = shown[shown.length - 1];
+    await user.click(within(page).getByTestId("app-uninstall-open"));
+    await user.click(within(await screen.findByTestId("app-uninstall")).getByTestId("app-uninstall-confirm"));
+    await waitFor(() => expect(screen.queryByTestId("installed-app")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId("app-details")).not.toBeInTheDocument());
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(document.activeElement).toBe(screen.getByTestId("apps-add"));
+    await installedAgain();
+    await screen.findByTestId("installed-app");
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(screen.queryByTestId("app-details")).not.toBeInTheDocument();
+  });
+
+  it("the focus somewhere else on the page is left where it is", async () => {
+    const { user } = renderApp(<><button type="button" data-testid="elsewhere">Elsewhere</button><AppCardView card={CARD} mine={false} contact="Ana" linkId="link-1" peerKey="peer" /></>);
+    const view = screen.getByTestId("app-card");
+    await user.click(await within(view).findByTestId("app-card-run-anyway"));
+    await screen.findByTestId("app-details");
+    act(() => screen.getByTestId("elsewhere").focus());
+    await goneElsewhere();
+    expect(screen.queryByTestId("app-details")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByTestId("elsewhere"));
   });
 });
 

@@ -14,7 +14,7 @@ import {
   bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inCall, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type CallScope, type Lookup, type Method, type Params, type RefPlace,
 } from "./apiKit";
-import { FILE_METHODS } from "./files";
+import { FILE_METHODS, fileKept, waitForFile } from "./files";
 import { checkShownName } from "./profiles";
 import { ended, foldsAnyway, goesOn, nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn, textsIn } from "./statusCards";
@@ -900,8 +900,13 @@ const METHODS: Record<string, Method> = {
       if (to[i]!.group) continue;
       watch(async () => {
         const sent = await node(ctx).getMessage(to[i]!.id, messageId);
-        if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
-        else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, to[i]!.id, sent?.text ?? "", to[i]!.ref, ms, error); });
+        // A file's copy waits as `file send --wait sent` does, and a timeout says the copy is kept and goes on: it said
+        // only that the wait timed out, and a bot forwarded the file again.
+        if (sent?.file) {
+          const { file } = sent;
+          await waitForFile(ctx, { chat: to[i]!.id, file: file.id, timeout: ms / 1000 }, undefined, to[i]!.ref)
+            .catch((error: unknown) => { throw fileKept(ctx, error, { linkId: to[i]!.id, ref: to[i]!.ref, messageId, file }); });
+        } else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, to[i]!.id, sent?.text ?? "", to[i]!.ref, ms, error); });
       }, () => undefined, () => {});
     }
     for (const { ended, now, done } of waits) {
@@ -1081,9 +1086,14 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.verify"(ctx, params) {
     const link = chatOf(ctx, params, undefined, "only a chat has a code to compare");
-    const code = str(params, "code", true).replace(/\s+/g, "").toLowerCase();
-    const mine = link.pairing?.code?.replace(/\s+/g, "").toLowerCase();
+    // Whatever is between the groups (spaces, hyphens, colons, dots: as the contact wrote it) is nothing: the right code
+    // with hyphens was refused as a code that does not match, the warning of an attack for a way of writing it.
+    const bare = (text: string) => text.replace(/[\s:.\u2010-\u2015-]+/g, "").toLowerCase();
+    const code = bare(str(params, "code", true));
+    const shown = link.pairing?.code, mine = shown ? bare(shown) : undefined;
     if (!mine) throw new CliError("unavailable", "This chat shows no comparison code yet (it needs a live session)");
+    // A code of another length is one typed short or long, not a contact's that differs: said as that, not as an attack.
+    if (code.length !== mine.length) throw new CliError("bad_request", `The code given has ${code.length} characters, and the one this chat shows has ${mine.length} (${shown!.trim().split(/\s+/).length} groups, as chat show prints comparisonCode): check it was typed whole`);
     if (code !== mine) throw new CliError("refused", "The code does not match the one this side shows: do not trust this chat until you know why");
     await node(ctx).confirmPair({ linkId: link.id, code: link.pairing!.code! });
     return chatJson(findChat(state(ctx).links, link.id));
@@ -1355,6 +1365,8 @@ const METHODS: Record<string, Method> = {
         await forgetHold(ctx, str(args ?? {}, "linkId", true));
         if (removedPeer) await closeServicesOf(ctx, removedPeer);
       }
+      // A contact blocked mid-call: its hang-up is not heard any more, so the call ends here (`endBlocked`).
+      if (method === "setContactBlocked" && args?.blocked === true) await ctx.calls.endBlocked();
       // A transport chosen during a hold ends it, as `chat transport` does: its time running out takes nothing back.
       if ((method === "setChatTransport" || method === "setDeliveryMode") && typeof args?.linkId === "string") await releaseHold(ctx, args.linkId, "lifted", true);
       return result;

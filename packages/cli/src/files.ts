@@ -127,6 +127,19 @@ function fileWaitsLive(ctx: ApiContext, linkId: string, ref: string, size: numbe
   return link && !nobodyJoined(link) ? fileWaitsNote(dhtOnlyOf(link, ctx), ref) : undefined;
 }
 
+/**
+ * A wait for a file of mine in a 1:1 chat that ended short (`file send --wait sent`, a forwarded file's copy): the file
+ * is kept in the chat, going on as a text does (waits.ts), said so with its ids. In a chat on the DHT only it does not go
+ * by itself: said why, and what ends it (`fileWaitsLive`). Anything else is the error as it was.
+ */
+export function fileKept(ctx: ApiContext, error: unknown, at: { linkId: string; ref: string; messageId: string; file: { id: string; size: number } }): unknown {
+  if (!(error instanceof CliError) || error.code !== "timeout") return error;
+  const note = fileWaitsLive(ctx, at.linkId, at.ref, at.file.size);
+  // Said already where the transfer stands (`file wait`'s timeout), it is not said twice.
+  const why = !note ? ` and ${goesOn(ctx, at.linkId)}` : error.message.includes(note) ? "" : `. ${note}`;
+  return new CliError("timeout", `${error.message}. It is kept here${why}`, { ...error.details, chat: at.linkId, messageId: at.messageId, file: at.file.id });
+}
+
 /** The chat or the group a file command names (`findChatOrGroup`). */
 const chatOrGroupOf = (ctx: ApiContext, params: Params, { links, groups }: EngineState = state(ctx)) => findChatOrGroup(links, groups, str(params, "chat", true));
 
@@ -383,7 +396,7 @@ function endedFile(fileId: string, where: { chat: string } | { group: string } |
  * daemon's stop ends it as well (`waitForState`), for `file send --wait`, which answers with what it knows then. A
  * transfer that waits in a chat on the DHT only says why, naming the chat as `ref` does (`fileWaitsLive`).
  */
-async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSignal, ref = str(params, "chat")) {
+export async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSignal, ref = str(params, "chat")) {
   const fileId = str(params, "file", true);
   const { linkId, where } = fileChat(ctx, params, fileId);
   const stored = await fileStore.get(fileId);
@@ -513,16 +526,11 @@ export const FILE_METHODS: Record<string, Method> = {
     // The message's id, as a group's file and `send` answer it: what `message delete`, `react`, `pin` and `--reply` take.
     // The engine names a sent file's row after its time (node.ts `sendFile`), the one given here.
     const messageId = `me_${timestamp}`;
-    // A wait that ends short (its time, or the daemon's stop: a restart) leaves the file in the chat, going on as a text
-    // does (waits.ts): said so, with its ids. A stop ended the connection under it before, with no id to look for. In a
-    // chat on the DHT only it does not go by itself: said why, and what ends it (`fileWaitsLive`).
+    // A wait that ends short (its time, or the daemon's stop: a restart) leaves the file in the chat (`fileKept`). A stop
+    // ended the connection under it before, with no id to look for.
     const ref = str(params, "chat", true);
     if (wait === "sent") await waitForFile(ctx, { chat: link.id, file: file.id, timeout: seconds }, ctx.stopping, ref).catch((error: unknown) => {
-      if (!(error instanceof CliError) || error.code !== "timeout") throw error;
-      const note = fileWaitsLive(ctx, link.id, ref, file.size);
-      // Said already where the transfer stands (`file wait`'s timeout), it is not said twice.
-      const why = !note ? ` and ${goesOn(ctx, link.id)}` : error.message.includes(note) ? "" : `. ${note}`;
-      throw new CliError("timeout", `${error.message}. It is kept here${why}`, { ...error.details, chat: link.id, messageId, file: file.id });
+      throw fileKept(ctx, error, { linkId: link.id, ref, messageId, file });
     });
     return {
       chat: link.id, messageId, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}),

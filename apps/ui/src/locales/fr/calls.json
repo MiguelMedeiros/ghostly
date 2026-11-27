@@ -56,6 +56,8 @@
     "removedInfo": "Le nœud du groupe ne vous laisse pas revenir dans cet appel sans l'accord de l'admin. Vous restez dans le groupe.",
     "retry": "Réessayer",
     "screenOf": "Écran de {{name}}",
+    "showScreen": "Afficher en grand l'écran de {{name}}",
+    "showYourScreen": "Afficher en grand votre écran",
     "unreachable": "Impossible de joindre l'appel du groupe"
   },
   "incomingAudio": "Appel audio entrant...",
@@ -103,7 +105,9 @@
   "shareScreen": "Partager l'écran",
   "sharing": {
     "both": "Vous et {{name}} partagez vos écrans",
+    "noSound": "Partagé sans le son",
     "peer": "{{name}} partage son écran",
+    "withSound": "Son partagé",
     "you": "Vous partagez votre écran"
   },
   "stopSharing": "Arrêter le partage",

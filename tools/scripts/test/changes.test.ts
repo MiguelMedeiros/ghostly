@@ -99,6 +99,35 @@ describe("changelog fragments", () => {
     expect(fragment("Fixed", "- First, with #1 and <!-- inline -->.\n  - A sub-item.").problems).toEqual([]);
   });
 
+  it("refuses a line of the text that is not in a list item: a bold group, a heading's underline", () => {
+    const x = "docs/changelog/unreleased/x.md";
+    const item = (text: string) => `${x}: the line "${text}" is not in a list item: start it with "- ", or indent it under its item`;
+    const rule = (text: string) => `${x}: the line "${text}" would be a heading or a rule in the changelog: write it as a list item ("- ...")`;
+    expect(fragment("For users / Chat", "- Chat part.\n\n**Calls**\n\n- Calls part.").problems).toEqual([item("**Calls**")]);
+    expect(fragment("Fixed", "- A fix.\n\nMore\n---").problems).toEqual([item("More"), rule("---")]);
+    expect(fragment("Fixed", "- A fix.\n  More\n  ===").problems).toEqual([rule("  ===")]);
+    expect(fragment("Fixed", "- A fix.\n\n- - -").problems).toEqual([rule("- - -")]);
+    // One space (or a no-break space) is not enough: after a blank line the item's text needs two columns.
+    expect(fragment("For users / Chat", "- Chat part.\n\n **Calls**\n\n- Calls part.").problems).toEqual([item(" **Calls**")]);
+    expect(fragment("For users / Chat", "- Chat part.\n\n **Calls**").problems).toEqual([item(" **Calls**")]);
+    // Only spaces and tabs make a line blank: a no-break space alone is text at the margin, and it ends the list.
+    expect(fragment("For users / Chat", "- Chat part.\n\n \n\n  **Calls**").problems).toEqual([item(" ")]);
+    // An item's text starts right after "- ": with "-  " a line under it needs three columns, and two leave it.
+    expect(fragment("For users / Chat", "- One.\n-  Chat part.\n\n  **Calls**").problems).toEqual([item("-  Chat part.")]);
+    expect(fragment("For users / Chat", "-  Chat part.\n\n  **Calls**").problems).toEqual([`${x}: the text is one or more list items ("- ...")`]);
+    expect(fragment("Fixed", "- A fix,\n  over two lines.\n\n  A second paragraph.\n\t**Bold** in it.\n- Another, with **bold** -- and = in it.").problems).toEqual([]);
+  });
+
+  it("reads a lone carriage return as the end of a line, as Markdown does", () => {
+    const saved = "---\rsection: For users / Chat\r---\r- Chat part.\r\r## 9.9.8\r\r- Fake release.\r";
+    expect(parseFragment("docs/changelog/unreleased/x.md", saved).problems).toEqual([
+      `docs/changelog/unreleased/x.md: the line "## 9.9.8" would be a heading or a note in the changelog: write it as a list item ("- ...")`,
+    ]);
+    expect(fragment("For users / Chat", "- Chat part.\r\r**Calls**\r\r- Calls part.").problems).toEqual([
+      `docs/changelog/unreleased/x.md: the line "**Calls**" is not in a list item: start it with "- ", or indent it under its item`,
+    ]);
+  });
+
   it("passes every entry waiting in docs/changelog/unreleased/", () => {
     expect(readFragments(root).flatMap((f: { problems: string[] }) => f.problems)).toEqual([]);
   });

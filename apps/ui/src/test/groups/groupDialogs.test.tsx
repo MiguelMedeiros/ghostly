@@ -9,6 +9,7 @@ import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { compose } from "../ime";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
+import { saveSession } from "../../lib/storage";
 
 // covers: groups.create, groups.invite, groups.remove-member, groups.admin-change, groups.link.enable, groups.link.replace, groups.hubs
 
@@ -384,6 +385,19 @@ describe("GroupMembersDialog", () => {
   it("Invite is a thumb's height on a phone, as a member's Remove is", () => {
     members_(groupView({ status: "active", isAdmin: true, members }), [paired({ id: "link-carol", label: "Carol" })]);
     expect(screen.getByTestId("group-invite")).toHaveClass("max-md:min-h-11", "max-md:px-3");
+  });
+
+  it("names each contact to invite by the name its chat was given on this device, as the chat list does", () => {
+    // The chat header's rename keeps the name in the page's stored chat; the engine's link has none, or the contact's own.
+    const CAROL = "carol".padEnd(52, "y"), DAN = "dan".padEnd(52, "y");
+    saveSession({ id: "chat-carol", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: CAROL, encKeyB64: "a2V5", participationSeedB64: "cGFydA", messages: [], createdAt: 1, label: "Carol from work" });
+    saveSession({ id: "chat-dan", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: DAN, encKeyB64: "a2V5", participationSeedB64: "cGFydA", messages: [], createdAt: 2, label: "Uncle Dan" });
+    members_(groupView({ status: "active", isAdmin: true, members }), [
+      paired({ id: "link-carol", peerPubKeyZ32: CAROL }),
+      paired({ id: "link-dan", peerPubKeyZ32: DAN, peerNick: "Daniel" }),
+    ]);
+    expect(screen.getAllByTestId("group-invite-contact").map(row => row.querySelector("span")?.textContent)).toEqual(["Carol from work", "Uncle Dan"]);
+    expect(screen.getAllByTestId("group-invite").map(button => button.getAttribute("aria-label"))).toEqual(["Invite ⁨Carol from work⁩", "Invite ⁨Uncle Dan⁩"]);
   });
 
   it("says nothing of why when every contact can be invited", () => {

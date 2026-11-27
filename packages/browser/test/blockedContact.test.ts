@@ -161,6 +161,8 @@ describe("a blocked contact", () => {
     // files/3: the offer reaches no file desk, so it is neither taken nor declined (a decline would tell the contact).
     const desk = vi.spyOn(node["fileDesk"], "handle");
     await peer.onFilesFrame({ t: "pf-offer", id: "wBlockedFile1", name: "a.pdf", mime: "application/pdf", size: 2048, ts: Date.now() });
+    // An answer that names no file I send there is no answer to mine: unanswered too (it would hear a pf-abort).
+    for (const t of ["pf-accept", "pf-wait", "pf-got", "pf-done", "pf-refuse"]) await peer.onFilesFrame({ t, id: "wNotMine00001", offset: 0 });
     expect(desk).not.toHaveBeenCalled();
     // files/2: refused before anything is stored.
     expect(peer.onFileIncoming({ id: "f2", name: "b.txt", size: 4, mime: "text/plain", timestamp: Date.now() })).toBe("refused");
@@ -196,6 +198,23 @@ describe("a blocked contact", () => {
     await peer.onAppRangeTask?.({} as never);
     expect(events.onAppFrame).not.toHaveBeenCalled();
     expect(asked).not.toHaveBeenCalled();
+  });
+
+  it("joins no group of mine by accepting an invitation made before the block; unblocked, its accept comes in", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const peer = linkOf(chat.id).options.events;
+    const contactFrame = vi.spyOn(node["groups"], "handleContactFrame").mockResolvedValue();
+    const accept = { t: "group-accept", g: "g".repeat(22), key: createIdentity().pubKeyZ32 };
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    await peer.onGroupFrame(accept);
+    expect(contactFrame).not.toHaveBeenCalled();
+    // The signaling of a group both are in still goes through.
+    await peer.onGroupFrame({ t: "group-signal", g: "g".repeat(22) });
+    expect(contactFrame).toHaveBeenCalledTimes(1);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    await peer.onGroupFrame(accept);
+    expect(contactFrame).toHaveBeenLastCalledWith(chat.id, accept);
   });
 
   it("cannot be called: its answer would be dropped, so its chat says why and no call rings it for nothing", async () => {
@@ -324,6 +343,43 @@ describe("setContactBlocked's input", () => {
     expect((await db.getSettings()).blockedContacts).toEqual([chat.peerPubKeyZ32]);
     expect(rotated).toHaveBeenCalledTimes(1);
     expect(shared).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps both of two blocks asked at once while the subscription is replaced", async () => {
+    const chat = row({ wakeToken: "t" }), other = row();
+    const { node, rotated } = await watched(chat, other);
+    rotated.mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    await Promise.all([chat, other].map(({ peerPubKeyZ32 }) => node.setContactBlocked({ peerPubKeyZ32, blocked: true })));
+    expect((await db.getSettings()).blockedContacts).toEqual([chat.peerPubKeyZ32, other.peerPubKeyZ32]);
+    expect([viewOf(node, chat.id).blocked, viewOf(node, other.id).blocked]).toEqual([true, true]);
+  });
+
+  it("keeps each of blocks and unblocks asked at once while the list is saved", async () => {
+    const chat = row(), other = row(), third = row();
+    const { node } = await watched(chat, other, third);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    await node.setContactBlocked({ peerPubKeyZ32: other.peerPubKeyZ32, blocked: true });
+    // A save that takes a while: the next call reads the list the one before keeps.
+    const put = db.putSettings.bind(db);
+    vi.spyOn(db, "putSettings").mockImplementation(async (settings) => { await new Promise((resolve) => setTimeout(resolve, 20)); return put(settings); });
+    await Promise.all([
+      node.setContactBlocked({ peerPubKeyZ32: third.peerPubKeyZ32, blocked: true }),
+      node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false }),
+      node.setContactBlocked({ peerPubKeyZ32: other.peerPubKeyZ32, blocked: false }),
+    ]);
+    expect((await db.getSettings()).blockedContacts).toEqual([third.peerPubKeyZ32]);
+    expect([chat, other, third].map(({ id }) => viewOf(node, id).blocked)).toEqual([undefined, undefined, true]);
+  });
+
+  it("a refused call does not hold up the next one", async () => {
+    const chat = row();
+    const { node } = await watched(chat);
+    const [refused, blocked] = await Promise.allSettled([
+      node.setContactBlocked({ peerPubKeyZ32: "zzz", blocked: true }),
+      node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true }),
+    ]);
+    expect([refused.status, blocked.status]).toEqual(["rejected", "fulfilled"]);
+    expect((await db.getSettings()).blockedContacts).toEqual([chat.peerPubKeyZ32]);
   });
 
   it("refuses what is not a contact's key: nothing is kept", async () => {

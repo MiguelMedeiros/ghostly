@@ -233,7 +233,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           {/* The chat's connection control, the same as in its header: on a phone held upright, 44 px to tap as there. */}
-          <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" callOn={callOn} declineRingIn={declineRingIn} phone={phoneHeader} />
+          <ChatConnection peerKey={peerKey} contact={named ? name : undefined} myKey={myKey} status={status} testIdPrefix="app-" callOn={callOn} declineRingIn={declineRingIn} phone={phoneHeader} />
           {/* Named for what it does next ("Full width", "Show the chat"), so it is no toggle: "Show the chat, pressed" was
               read with the chat hidden. */}
           {!withBack && (
