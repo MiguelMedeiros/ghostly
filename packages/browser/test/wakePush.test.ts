@@ -655,6 +655,8 @@ describe("private groups: a mention wakes a member whose app is closed", () => {
   async function addEdge(node: GhostlyNode, group: string, peer: string, link: Stub | null, stored: Partial<StoredLink> = {}) {
     // The edges here stand for members the roster has (no group session runs in these tests): a group's traffic goes to those only.
     vi.spyOn(node["groups"], "inRoster").mockReturnValue(true);
+    // And for a group held here, which a mute is saved for (`groupMuteNotHeld.test.ts` has the groups no longer held).
+    vi.spyOn(node["groups"], "holds").mockReturnValue(true);
     return addChat(node, link, { profile: undefined, group, groupPeer: peer, ...stored });
   }
   const edgeLink = (overrides: Record<string, unknown> = {}) => stubLink({ groupsSupport: true, sendGroupFrame: vi.fn(), ...overrides });

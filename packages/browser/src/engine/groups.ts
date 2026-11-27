@@ -998,6 +998,9 @@ export class Groups {
     return view && this.pinned(view);
   }
 
+  /** Whether this profile holds the group: listed here (`view`), as it is until it is left or deleted (`historyGone`). */
+  holds(groupId: string): boolean { return !!this.view(groupId); }
+
   private pinned(view: GroupView): GroupView {
     // The pinned message was deleted for everyone: nothing of it stays, its pin neither (agents#1646). The pin is kept
     // as it came, so the same pin said again (a catch-up) is no newer, and shown as unpinned.

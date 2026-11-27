@@ -2535,6 +2535,9 @@ export class GhostlyNode implements EngineImplementation {
     // one's newest message alone: an offline one, and one that leaves their sessions unstarted (`deferGroups`), where
     // only an admission over a contact chat touches one, from its chain and secrets.
     await this.groups.load(this.limitedMode, !!this.options.offline || !!this.options.deferGroups);
+    // A mute saved for a group no longer held here (an older version kept one asked after the group ended) goes, or
+    // the group would start muted when joined again. Not in limited mode, whose copy stays as it was stored.
+    if (!this.limitedMode) await this.dropUnheldGroupMutes();
     this.groupsLoaded = true;
     this.groupsLoadedNow();
     this.emitState();
@@ -4109,6 +4112,9 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private setGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
+    // A group no longer held here (left, deleted) is not muted: nothing is saved, and joined again it starts unmuted,
+    // as one whose mute went when it ended. An unmute goes on: it clears a mute left over for it.
+    if (muted && !this.groups.holds(groupId)) return Promise.resolve();
     // One at a time: each reads the list the one before kept. Two at once both read it before the subscription was
     // replaced, and the later one saved over the other's group.
     // A group that ends before its turn (or during its own wait) is not muted: joined again, it would come back muted.
@@ -4121,6 +4127,16 @@ export class GhostlyNode implements EngineImplementation {
   private groupMuting: Promise<void> = Promise.resolve();
   /** How many times each group ended here (`groupHistoryGone`): a mute asked for before its group's end is dropped. */
   private groupEnds = new Map<string, number>();
+
+  /** At start, once the groups are read: the mutes of groups not held here go (`setGroupWakeMuted` saves none now). */
+  private async dropUnheldGroupMutes(): Promise<void> {
+    const muted = this.settings.wakeMutedGroups ?? [];
+    const next = muted.filter(id => this.groups.holds(id));
+    if (next.length === muted.length) return;
+    this.settings = { ...this.settings, wakeMutedGroups: next };
+    if (!next.length) delete this.settings.wakeMutedGroups;
+    await db.putSettings(this.settings);
+  }
 
   private async applyGroupWakeMuted(groupId: string, muted: boolean, ends: number | undefined): Promise<void> {
     if ((this.settings.wakeMutedGroups ?? []).includes(groupId) === muted) return;
