@@ -66,6 +66,17 @@ describe("a nickname from a peer", () => {
     expect(link.messages[0].nick).toBe("Casper");
   });
 
+  it("goes in a record cut to 64 bytes, between whole characters", () => {
+    const family = "👨‍👩‍👧‍👦"; // 25 bytes
+    const accented = "e" + String.fromCodePoint(0x301); // 3 bytes
+    const read = (nick: string) => parseLinkRecords({ pubKeyZ32: id.pubKeyZ32, timestampMicros: 5_000_000n,
+      records: buildLinkRecords(id.pubKeyZ32, { messages: [], ackTimestamp: 0, nick }, key).records }, key).nick;
+    expect(read("名".repeat(64))).toBe("名".repeat(21));
+    expect(read(family.repeat(9))).toBe(family.repeat(2));
+    expect(read(accented.repeat(30))).toBe(accented.repeat(21));
+    expect(read("Casper")).toBe("Casper");
+  });
+
   it("is cut and stripped when it arrives in a hello frame", () => {
     const hello = encodeControl({ t: "hello", v: 1, svc: undefined, nick: `${RLO}${"n".repeat(200)}` });
     const frame = decodeControl(hello);
