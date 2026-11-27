@@ -79,6 +79,15 @@ describe("a chat's header on a phone", () => {
     expect(document.activeElement).toBe(control);
   });
 
+  it("names the contact in the connection's panel as the header does, by the name given on this device", async () => {
+    const { user, engine } = openChat();
+    // The contact shared a name of their own; the chat was named here, which the engine's link does not carry.
+    engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "connecting" }, dataLink: "idle",
+      peerParticipationKey: "saved", liveDialer: "contact", peerNick: "Bea" } as never)] });
+    await user.click(await screen.findByTestId("connection-options"));
+    expect(screen.getByTestId("connection-not-live")).toHaveTextContent("Cérebro (Mac)'s app connects to this one: this app answers.");
+  });
+
   it("gives the name its room before the status's emoji: it does not shrink beside it, and is cut only alone", async () => {
     viewport(375, 667);
     const { engine } = openChat();

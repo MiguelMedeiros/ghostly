@@ -1607,6 +1607,18 @@ describe("the connection Details of a contact with no name", () => {
     panel({ liveDialer: "contact", peerNick: "Bea" });
     expect(lines("connection-not-live").slice(1)).toEqual(["Bea's app connects to this one: this app answers.", "No attempt of Bea's has reached this app yet."]);
   });
+
+  // A name given to the chat on this device is kept in the page's stored chat, not in the engine's link: the panel said
+  // "Your contact's app…" (or the contact's own "Bea's") while the header and the chat's lines said "Mom".
+  it("names the contact as the chat does, a name given on this device first", () => {
+    const view = renderApp(<ChatConnection peerKey="peer" contact="Mom" />);
+    act(() => view.engine.update({ links: [linkView({ availableTransports: ["webrtc/1", "iroh/1"], ...onDht, liveDialer: "contact", peerNick: "Bea",
+      transportWait: { transport: "iroh/1", by: "contact", reason: "starting", failures: 0 } as Wait,
+      transportHistory: [{ at: 1, kind: "chose", cause: "contact", target: "iroh/1" }] })] }));
+    expect(lines("connection-not-live").slice(1)).toEqual(["Mom's app connects to this one: this app answers.", "No attempt of Mom's has reached this app yet."]);
+    expect(screen.getByTestId("connection-waiting-why")).toHaveTextContent("Mom chose Iroh. Mom's Iroh is starting.");
+    expect(screen.getByTestId("connection-history-event")).toHaveTextContent("Mom chose Iroh");
+  });
 });
 
 // On a phone the panel's own buttons kept the desktop's 36 px (Details 53 × 36, Verify 40-44 × 36, Connection history
