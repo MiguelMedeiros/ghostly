@@ -417,6 +417,27 @@ describe("setContactBlocked's input", () => {
     expect((await db.getSettings()).blockedContacts).toEqual([b.peerPubKeyZ32]);
   });
 
+  it("a block that cannot be saved leaves one saved at the same time, and one made while the wake rotates is kept", async () => {
+    const a = row(), b = row(), c = row({ wakeToken: "t" }), d = row();
+    const { node, rotated } = await watched(a, b, c, d);
+    // A's write fails, B's (made in the meantime, so it saves A too) goes through: both stay, as on the device.
+    vi.spyOn(db, "putSettings").mockRejectedValueOnce(new DOMException("full", "QuotaExceededError"));
+    const [failed, saved] = await Promise.allSettled([node.setContactBlocked({ peerPubKeyZ32: a.peerPubKeyZ32, blocked: true }), node.setContactBlocked({ peerPubKeyZ32: b.peerPubKeyZ32, blocked: true })]);
+    expect([failed.status, saved.status]).toEqual(["rejected", "fulfilled"]);
+    expect(node.getSettings().blockedContacts).toEqual([a.peerPubKeyZ32, b.peerPubKeyZ32]);
+    expect((await db.getSettings()).blockedContacts).toEqual([a.peerPubKeyZ32, b.peerPubKeyZ32]);
+    // C waits for the wake to rotate while D is blocked: C's list is read after the wait, so D stays.
+    let release!: () => void;
+    rotated.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    const first = node.setContactBlocked({ peerPubKeyZ32: c.peerPubKeyZ32, blocked: true });
+    await node.setContactBlocked({ peerPubKeyZ32: d.peerPubKeyZ32, blocked: true });
+    release();
+    await first;
+    const all = [a, b, d, c].map((r) => r.peerPubKeyZ32);
+    expect(node.getSettings().blockedContacts).toEqual(all);
+    expect((await db.getSettings()).blockedContacts).toEqual(all);
+  });
+
   it("a stored list with no key left in it is no list", async () => {
     await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true, blockedContacts: ["zzz", "zzz"] });
     const { node } = await watched(row());
