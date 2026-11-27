@@ -343,6 +343,36 @@ describe("setContactBlocked's input", () => {
     expect(shared).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps both of two blocks or unblocks asked at once, while the subscription is replaced or the list saved", async () => {
+    const chat = row({ wakeToken: "t" }), other = row(), third = row();
+    const { node, rotated } = await watched(chat, other, third);
+    rotated.mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    await Promise.all([chat, other].map(({ peerPubKeyZ32 }) => node.setContactBlocked({ peerPubKeyZ32, blocked: true })));
+    expect((await db.getSettings()).blockedContacts).toEqual([chat.peerPubKeyZ32, other.peerPubKeyZ32]);
+    expect([viewOf(node, chat.id).blocked, viewOf(node, other.id).blocked]).toEqual([true, true]);
+    // A save that takes a while: the second call reads the list the first one keeps.
+    const put = db.putSettings.bind(db);
+    vi.spyOn(db, "putSettings").mockImplementation(async (settings) => { await new Promise((resolve) => setTimeout(resolve, 20)); return put(settings); });
+    await Promise.all([
+      node.setContactBlocked({ peerPubKeyZ32: third.peerPubKeyZ32, blocked: true }),
+      node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false }),
+      node.setContactBlocked({ peerPubKeyZ32: other.peerPubKeyZ32, blocked: false }),
+    ]);
+    expect((await db.getSettings()).blockedContacts).toEqual([third.peerPubKeyZ32]);
+    expect([chat, other, third].map(({ id }) => viewOf(node, id).blocked)).toEqual([undefined, undefined, true]);
+  });
+
+  it("a refused call does not hold up the next one", async () => {
+    const chat = row();
+    const { node } = await watched(chat);
+    const [refused, blocked] = await Promise.allSettled([
+      node.setContactBlocked({ peerPubKeyZ32: "zzz", blocked: true }),
+      node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true }),
+    ]);
+    expect([refused.status, blocked.status]).toEqual(["rejected", "fulfilled"]);
+    expect((await db.getSettings()).blockedContacts).toEqual([chat.peerPubKeyZ32]);
+  });
+
   it("refuses what is not a contact's key: nothing is kept", async () => {
     const { node } = await watched(row());
     const key = createIdentity().pubKeyZ32;
