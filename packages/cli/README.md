@@ -354,7 +354,8 @@ unless `--show-secret`.
   `file.stage`, `file.done`, `file.failed` (each with `chat`, or `group` for a group's file, `file`, `messageId`), `chat.held` and
   `chat.released` (`chat disconnect --hold`), `identity.received` and `identity.status` (what a contact
   showed, as checked here: `identity` with `status`, and `error`, why it is not verified, or null; each change of
-  status is a new `identity.status`, even back to one it had before), `identity.approval` and `identity.progress` (a signer waits on a link or a code; `request`: the id the `identity.add` call gave, when it gave one), `group.deleted` (`{group, messageId}`: a group's message deleted, not the group), `group.removed`, `payment.created` and
+  status is a new `identity.status`, even back to one it had before; one a newer proof of the same identity replaced
+  is told `withdrawn`), `identity.approval` and `identity.progress` (a signer waits on a link or a code; `request`: the id the `identity.add` call gave, when it gave one), `group.deleted` (`{group, messageId}`: a group's message deleted, not the group), `group.removed`, `payment.created` and
   `payment.updated` (`payment`: id, chat, kind request|payment, direction in|out, amount, memo, state pending|
   settled|failed, network, method, and `group` for a group's payment, whichever member's link it went over), `call.incoming`, `call.outgoing`, `call.connected` and `call.ended` (voice
   calls: see [Calls](#calls)), `app.opened` (`chat`, `app`, `version`), `app.closed` (`chat`, `app`, and `offline`

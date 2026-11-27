@@ -2258,6 +2258,9 @@ export class Apps {
    */
   checkUpdates(): Promise<AppCheckResult[]> {
     this.checking ??= this.checkNow().then((results) => {
+      // No app installed: nothing was read, and nothing told (each Apps page visit asks for a check, and every page
+      // would read its installed apps again for nothing).
+      if (!results) return [];
       // A version found removed or revoked stops where it runs: the pages hear of every check, the scheduled one too.
       try { this.host.checked?.(results); } catch { /* a page's listener */ }
       return results;
@@ -2265,9 +2268,10 @@ export class Apps {
     return this.checking;
   }
 
-  private async checkNow(): Promise<AppCheckResult[]> {
+  /** The check's results, or null when no app is installed (nothing read). */
+  private async checkNow(): Promise<AppCheckResult[] | null> {
     const apps = await this.installed();
-    if (!apps.length) return [];
+    if (!apps.length) return null;
     await this.refreshStores();
     const stores = await this.stores();
     // A few apps at a time: each waits on its publisher's files (and its sources' peeks), so one after the other a

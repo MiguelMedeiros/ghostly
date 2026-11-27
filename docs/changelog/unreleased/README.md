@@ -22,6 +22,8 @@ section: For users / Chat
 - The text is one or more list items, written for the people who read release notes. Plain English, no em dashes, and
   no line that starts with `#` or `<!--`: the release would copy it as a heading or a note.
 - Entries of one section go in the files' name order.
+- Only a `<slug>.md` file right in this folder is an entry (a lowercase `.md`, not `.MD` or `.markdown`, and not in
+  a subfolder): the bump would leave any other out of the release, so the check refuses it.
 - `release: <major>.<minor>` (optional, after `section`) holds the entry for that release, for a change that ships
   behind a flag until then. A bump to an older version leaves the file here (`release: 1.2` stays through every
   1.1.x patch), and the bump to 1.2.0 or later takes it. Without it, the next release takes the entry. A release that

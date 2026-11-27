@@ -1248,6 +1248,25 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     for (const id of ids) w.a.files.cancel("out", id);
   });
 
+  it("a file its sender pauses while it is being opened here stays paused, and is not asked for", async () => {
+    // Only a pause here was looked at once it opened: paused by its sender meanwhile, it read as arriving and a
+    // `pf-accept` went, which the sender answered with its paused offer again.
+    const w = wire({ openMs: 200 });
+    w.attach();
+    send(w, file("open-pause", 1024 ** 3));
+    await until(() => state(w.b, "in", "open-pause") === "queued");
+    w.a.files.pause("out", "open-pause");
+    await until(() => state(w.b, "in", "open-pause") === "paused");
+    const since = w.b.sent.length;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(w.b.records.get("in:open-pause")).toMatchObject({ state: "paused", pausedBy: "peer" });
+    expect(w.b.sent.slice(since).filter((f) => f.t === "pf-accept" && f.id === "open-pause")).toEqual([]);
+    // Resumed, it is asked for and arrives.
+    w.a.files.resume("out", "open-pause");
+    await until(() => state(w.b, "in", "open-pause") === "active");
+    w.a.files.cancel("out", "open-pause");
+  });
+
   it("files sent all at once still arrive three at a time when opening where each is written takes a while", async () => {
     // Opening a received file reads the database first: the offers behind it, and the files queued behind one that
     // ended, came in meanwhile and each went, until ten sent 1 MiB windows at once and the session's receive queue

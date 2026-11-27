@@ -62,6 +62,14 @@ describe("quarantine marks", () => {
     ]);
   });
 
+  it("gives a quarantine line to the first tag under it only, not to a second test's tag", () => {
+    const text = ["// quarantine: #5 until 2026-11-30", 'test("flaky one @quarantine", async () => {});', "", 'test("another", { tag: "@quarantine" }, async () => {});'].join("\n");
+    expect(specMarks("e2e/web/a.spec.ts", text)).toEqual({
+      entries: [{ where: "e2e/web/a.spec.ts:2", issue: 5, until: "2026-11-30" }],
+      errors: ["e2e/web/a.spec.ts:4: @quarantine without a `// quarantine: #<issue> until <YYYY-MM-DD>` line above it"],
+    });
+  });
+
   it("counts @quarantine in a title or a describe as the tag, and refuses it without its line", () => {
     const text = ['test("a title that says @quarantine in words", async () => {});', "", "", "", "", "", 'test.describe(`slow @quarantine`, () => {});'].join("\n");
     expect(specMarks("e2e/web/a.spec.ts", text).errors).toEqual([

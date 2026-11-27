@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { oldAnchorTarget } from "./oldAnchor";
 
 /**
  * Links made for the old full list keep landing somewhere useful. A `#wisp-…` of a draft the page no longer
@@ -18,10 +19,8 @@ export function OldAnchors({ drafts }: { drafts: Record<string, string> }) {
         return;
       }
       if (!id || document.getElementById(id)) return;
-      const slug = id.startsWith("wisp-") ? drafts[id.slice(5)] : undefined;
-      if (slug) window.location.replace(`/wisps/${slug}`);
-      else if (id === "inventory") window.location.replace("/roadmap#inventory-title");
-      else if (id.startsWith("candidate-")) window.location.replace(`/roadmap#${id}`);
+      const target = oldAnchorTarget(id, drafts);
+      if (target) window.location.replace(target);
     };
     follow();
     window.addEventListener("hashchange", follow);
