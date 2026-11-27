@@ -52,7 +52,8 @@ describe("a call on keeps the idle lock away", () => {
     awake(30_000);
     const call = callOn();
     keys.push(call.key);
-    awake(3 * MINUTE);
+    // Ends between two 30 s checks (the last at 3:30, the end at 3:50): the time counts from the end, not that check.
+    awake(3 * MINUTE + 20_000);
     expect(locked()).toBe("false");
     call.end();
     awake(59_000);
