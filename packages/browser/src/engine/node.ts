@@ -3808,9 +3808,13 @@ export class GhostlyNode implements EngineImplementation {
     // A contact told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
     if (blocked && chats.some(({ stored }) => stored.wakeToken)) await this.rotateWake();
     const next = blocked ? [...list, peerPubKeyZ32] : list.filter(key => key !== peerPubKeyZ32);
-    this.settings = { ...this.settings, blockedContacts: next };
+    // Kept here only once it is saved: a block the device could not write held for this session alone, and a second
+    // try found it already there and saved nothing.
+    const settings: Settings = { ...this.settings, blockedContacts: next };
+    if (!next.length) delete settings.blockedContacts;
+    await db.putSettings(settings);
+    this.settings = { ...this.settings, blockedContacts: settings.blockedContacts };
     if (!next.length) delete this.settings.blockedContacts;
-    await db.putSettings(this.settings);
     for (const live of chats) {
       // An offer heard before the block rings no more, and holds no handoff back.
       if (blocked) this.offersWaiting.delete(live.stored.id);

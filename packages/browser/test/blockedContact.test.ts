@@ -384,6 +384,25 @@ describe("setContactBlocked's input", () => {
     expect((await db.getSettings()).blockedContacts).toEqual([other.peerPubKeyZ32]);
   });
 
+  it("a block or unblock the device cannot save changes nothing here, and trying again saves it", async () => {
+    const chat = row();
+    const { node } = await watched(chat);
+    const full = () => vi.spyOn(db, "putSettings").mockRejectedValueOnce(new DOMException("full", "QuotaExceededError"));
+    full();
+    await expect(node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true })).rejects.toThrow("full");
+    expect(node.getSettings().blockedContacts).toBeUndefined();
+    expect(viewOf(node, chat.id).blocked).toBeUndefined();
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    expect((await db.getSettings()).blockedContacts).toEqual([chat.peerPubKeyZ32]);
+    expect(viewOf(node, chat.id).blocked).toBe(true);
+    full();
+    await expect(node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false })).rejects.toThrow("full");
+    expect(node.getSettings().blockedContacts).toEqual([chat.peerPubKeyZ32]);
+    expect(viewOf(node, chat.id).blocked).toBe(true);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    expect((await db.getSettings()).blockedContacts).toBeUndefined();
+  });
+
   it("a stored list with no key left in it is no list", async () => {
     await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true, blockedContacts: ["zzz", "zzz"] });
     const { node } = await watched(row());

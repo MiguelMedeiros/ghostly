@@ -33,7 +33,9 @@
     "blocked": "Vous avez bloqué ce contact",
     "body": "Cette personne ne peut plus vous appeler ni rien vous envoyer, et rien ne l’en avertit. La conversation reste. Débloquez-la depuis ce menu ou dans Réglages → Confidentialité et sécurité.",
     "confirm": "Bloquer",
-    "title": "Bloquer {{name}} ?"
+    "failed": "Contact non bloqué",
+    "title": "Bloquer {{name}} ?",
+    "unblockFailed": "Contact non débloqué"
   },
   "compat": {
     "burned": "La discussion a été détruite",
