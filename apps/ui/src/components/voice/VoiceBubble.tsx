@@ -540,7 +540,8 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
             onPointerCancel={onScrubEnd}
             onKeyDown={onWaveKey}
           />
-          {/* One line under the waveform, all inside the bubble: what it is and how long; while it plays, the speed in the mic's place. */}
+          {/* One line under the waveform, all inside the bubble: what it is and how long; while it plays, the speed in the mic's place.
+              The status wraps: cut with …, "Waiting for Ana to accept · 86.0 MB" lost its end (its size, how far it is). */}
           <div className="flex items-center gap-1 mt-1 min-h-[18px] chat-text-media-meta text-text-primary/75" data-testid="voice-meta">
             {active ? (
               <SpeedPill rate={rate} locale={locale} onGone={() => playRef.current?.focus()} />
@@ -558,10 +559,10 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
                 <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
               </svg>
             )}
-            <span data-testid="voice-time" className={`tabular-nums ${unplayed ? "text-accent-hover font-medium" : ""}`}>
+            <span data-testid="voice-time" className={`tabular-nums shrink-0 whitespace-nowrap ${unplayed ? "text-accent-hover font-medium" : ""}`}>
               {active ? formatVoiceDuration(position * 1000) : formatVoiceDuration(file.voice.duration)}
             </span>
-            {status && <span data-testid="voice-status" className={`min-w-0 truncate ${failed ? "text-danger-ink" : ""}`}>· <bdi>{status}</bdi></span>}
+            {status && <span data-testid="voice-status" className={`min-w-0 [overflow-wrap:anywhere] ${failed ? "text-danger-ink" : ""}`}>· <bdi>{status}</bdi></span>}
             {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="voice-why" danger={!!reason} />}
           </div>
         </div>
