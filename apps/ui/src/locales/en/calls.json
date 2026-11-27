@@ -41,6 +41,7 @@
     "leftMany": "{{names}} left",
     "muted": "Muted",
     "mutedByAdmin": "Muted by the admin",
+    "mutedForYou": "{{name}} is muted for you",
     "noCallKey": "Can't join yet: the call's key isn't here",
     "noCallKeyInfo": "This group's calls are sealed end to end, and their key hasn't reached this device yet. Try again in a moment.",
     "noRelay": "Can't join while Hide my IP is on",
@@ -58,7 +59,9 @@
     "screenOf": "{{name}}'s screen",
     "showScreen": "Show {{name}}'s screen large",
     "showYourScreen": "Show your screen large",
-    "unreachable": "Couldn't reach the group's call"
+    "unreachable": "Couldn't reach the group's call",
+    "volumeNote": "Only you hear the change. At 0 they're muted for you.",
+    "volumeOf": "{{name}}'s volume"
   },
   "incomingAudio": "Incoming audio call...",
   "incomingVideo": "Incoming video call...",
