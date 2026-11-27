@@ -55,6 +55,8 @@ type Listener = (event: GhostlyEvent) => void;
 type Seen = Map<string, Map<string, string>>;
 
 interface ChatShape { stage: string | null; live: boolean; transport: string | null; name: string | null; typing: boolean; typingKind: string; typingStatus: string | null; pin: PinView | null; peer: string | null }
+/** A contact's proof as `identity.received` and `identity.status` tell it. */
+interface ReceivedJson { id: string; provider: string; subject: string; status: string; verified: unknown; error: string | null }
 interface GroupShape { status: string | null; members: string[]; typing: Record<string, { kind: string; status?: string }>; pin: PinView | null }
 
 /**
@@ -106,7 +108,8 @@ export class EventHub {
   private groups = new Map<string, GroupShape>();
   private payments = new Map<string, string>();
   private transfers = new Map<string, string>();
-  private received = new Map<string, string>();
+  /** Each chat's proofs from the contact, by id, as the last event told them. */
+  private received = new Map<string, Map<string, ReceivedJson>>();
   /** File id to the message that carries it, for `file.*` events. */
   private fileMessages = new Map<string, string>();
   /** `file.*` events whose message was not seen yet: they wait for it a moment (the engine stores it right after). */
@@ -723,6 +726,7 @@ export class EventHub {
       // The contact's key (`peer`) goes with it: `listen --from <key>` cannot ask the daemon for a chat that is gone.
       const peer = this.chats.get(id)?.peer;
       this.chats.delete(id);
+      this.received.delete(id);
       this.liveThisRun.delete(id);
       if (!quiet) this.emit("chat.removed", `chat.removed:${id}:${this.now()}`, { chat: id, ...(peer ? { peer } : {}) });
     }
@@ -777,16 +781,24 @@ export class EventHub {
     }
     for (const link of state.links) {
       if (last.get(link.id) === link) continue;
+      const before = this.received.get(link.id), shown = new Map<string, ReceivedJson>();
       for (const identity of link.identities?.received ?? []) {
-        const key = `${link.id}:${identity.id}`, shape = identity.status, before = this.received.get(key);
-        this.received.set(key, shape);
-        if (quiet || before === shape) continue;
+        const key = `${link.id}:${identity.id}`, shape = identity.status, was = before?.get(identity.id)?.status;
+        const json = { id: identity.id, provider: identity.provider, subject: identity.subject, status: identity.status, verified: identity.verified, error: identity.error ?? null };
+        shown.set(identity.id, json);
+        if (quiet || was === shape) continue;
         // A proof can come back to a status it had (a record removed and restored, a re-share after a withdraw): each
         // change is a new fact, so its id carries the time and the sequence, as a typing change does.
-        const id = before === undefined ? `identity.received:${key}:${shape}` : `identity.status:${key}:${shape}:${this.now()}:${this.seq + 1}`;
-        this.emit(before === undefined ? "identity.received" : "identity.status", id, {
-          chat: link.id, identity: { id: identity.id, provider: identity.provider, subject: identity.subject, status: identity.status, verified: identity.verified, error: identity.error ?? null },
-        });
+        const id = was === undefined ? `identity.received:${key}:${shape}` : `identity.status:${key}:${shape}:${this.now()}:${this.seq + 1}`;
+        this.emit(was === undefined ? "identity.received" : "identity.status", id, { chat: link.id, identity: json });
+      }
+      if (shown.size) this.received.set(link.id, shown); else this.received.delete(link.id);
+      // A newer proof of the same identity replaces the older one, which leaves the chat's list: the engine's timeline
+      // says it stopped, withdrawn, and so does its owner's side. One that had ended already (withdrawn, revoked,
+      // expired) and was dropped to make room had its last status told.
+      for (const [proof, identity] of before ?? []) {
+        if (quiet || shown.has(proof) || identity.status === "withdrawn" || identity.status === "revoked" || identity.status === "expired") continue;
+        this.emit("identity.status", `identity.status:${link.id}:${proof}:withdrawn:${this.now()}:${this.seq + 1}`, { chat: link.id, identity: { ...identity, status: "withdrawn", error: null } });
       }
     }
     for (const [id, transfer] of Object.entries(state.transfers ?? {})) this.transferChanged(id, transfer, state, quiet);
