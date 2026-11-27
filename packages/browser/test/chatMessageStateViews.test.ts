@@ -9,12 +9,13 @@ import type { EngineState, GroupView, StoredLink, StoredMessage } from "../src/s
 
 /**
  * What changes in a 1:1 chat's messages (a delete here or the contact's for everyone, a pin or an unpin, a reaction,
- * either side's) and what its DHT delivery says builds again that chat's view alone, as its link's states do
- * (chatLinkStateViews.test.ts): every other chat's view and every group's stay the same objects. Each built every
- * chat's and group's view. GhostLink is replaced by a recorder.
+ * either side's, a pinned message's row coming after its pin) and what its DHT delivery says builds again that chat's
+ * view alone, as its link's states do (chatLinkStateViews.test.ts): every other chat's view and every group's stay the
+ * same objects. So does a compatibility chat's text that the data link delivered. Each built every chat's and group's
+ * view. GhostLink is replaced by a recorder.
  */
 
-type Recorded = { options: GhostLinkOptions & { params: StoredLink; events: Required<NonNullable<GhostLinkOptions["events"]>> } };
+type Recorded = { isDataLinkOpen: boolean; options: GhostLinkOptions & { params: StoredLink; events: Required<NonNullable<GhostLinkOptions["events"]>> } };
 const recorded = vi.hoisted(() => [] as Recorded[]);
 vi.mock("@ghostly/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@ghostly/core")>();
@@ -40,13 +41,16 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     supportsGroupVersion = vi.fn(() => false);
     paymentEnabled = vi.fn(() => false);
     dhtHolds = vi.fn(() => false);
+    // Longer than a state's wait: the text's own state goes before the send ends.
+    sendMessage = vi.fn(async () => { await new Promise(r => setTimeout(r, 200)); return null; });
     constructor(readonly options: GhostLinkOptions) { recorded.push(this as never); }
   }
   return { ...actual, GhostLink: RecordedLink };
 });
 
-function row(label: string): StoredLink {
-  return { id: `chat-${crypto.randomUUID().slice(0, 8)}`, profile: "paired-chat/1", createdAt: Date.now(), label, seedB64: createIdentity().seedB64,
+/** `compat`: no profile, a compatibility chat (WISP 402). */
+function row(label: string, compat = false): StoredLink {
+  return { id: `chat-${crypto.randomUUID().slice(0, 8)}`, ...(!compat && { profile: "paired-chat/1" as const }), createdAt: Date.now(), label, seedB64: createIdentity().seedB64,
     encKeyB64: createIdentity().seedB64, peerPubKeyZ32: createIdentity().pubKeyZ32, participationSeed: createIdentity().seedB64 };
 }
 async function add(node: GhostlyNode, stored: StoredLink) {
@@ -85,17 +89,21 @@ afterEach(async () => { for (const node of nodes.splice(0)) await node.shutdown(
 describe("the state a change of a 1:1 chat's messages pushes", () => {
   it("builds again only that chat's view, and keeps every other chat's and every group's", async () => {
     const { node, next } = engine();
-    const alice = await add(node, row("Alice")), bob = await add(node, row("Bob"));
-    for (let n = 0; n < 6; n++) await db.putMessage(text(bob.id, n));
+    const alice = await add(node, row("Alice")), bob = await add(node, row("Bob")), old = await add(node, row("Old", true));
+    for (let n = 0; n < 7; n++) await db.putMessage(text(bob.id, n));
     const group = { id: "g1", profile: "mesh", name: "g1", createdAt: 1, lastMessageAt: 0, isAdmin: true, canSend: true, invited: [], memberLinks: {},
       members: [{ key: "me", role: "admin", me: true }] } as unknown as GroupView;
     let all = 0;
     node["groups"].views = () => { all++; return [group]; };
     node["startLink"](bob.id);
+    node["startLink"](old.id);
     const events = recorded.find(link => link.options.params.id === bob.id)!.options.events;
+    recorded.find(link => link.options.params.id === old.id)!.isDataLinkOpen = true;
     node["emitState"]();
     let before = await next();
-    const changes: [string, () => unknown, (view: EngineState["links"][number]) => unknown][] = [
+    let sent = "";
+    // Each change's chat (Bob's unless named), and what its view then shows.
+    const changes: [string, () => unknown, (view: EngineState["links"][number]) => unknown, string?][] = [
       ["a delete here", () => node.deleteMessage({ linkId: bob.id, messageId: "peer_wire0000" }), () => undefined],
       ["the contact's delete for everyone", () => events.onMessageEdit({ id: "wire0001", e: 1, rm: true } as never), () => undefined],
       ["my pin", () => node.pinMessage({ linkId: bob.id, messageId: "peer_wire0002" }), view => expect(view.pin?.id).toBe("wire0002")],
@@ -105,16 +113,27 @@ describe("the state a change of a 1:1 chat's messages pushes", () => {
       // The chat list's reaction line quotes it: the line goes back to the reaction before.
       ["the reacted message deleted", () => node.deleteMessage({ linkId: bob.id, messageId: "peer_wire0005" }), view => expect(view.lastReaction?.message).toBe("peer_wire0004")],
       ["its DHT delivery", () => events.onDhtDelivery({ peerMode: "dht" } as never), () => undefined],
+      // Pinned, then deleted here: the contact's delete for everyone takes the pin (`receiveEdit`'s removed reference).
+      ["the contact's pin of a message", () => events.onPin({ id: "wire0006", n: Date.now() + 60_000 }), view => expect(view.pin?.id).toBe("wire0006")],
+      ["the pinned message deleted here", () => node.deleteMessage({ linkId: bob.id, messageId: "peer_wire0006" }), view => expect(view.pin?.id).toBe("wire0006")],
+      ["its delete for everyone", () => events.onMessageEdit({ id: "wire0006", e: 1, rm: true } as never), view => expect(view.pin?.id).toBe("")],
+      // A pin that came before its message names the message once its row is here.
+      ["the contact's pin of a message not here yet", () => events.onPin({ id: "wire0007", n: Date.now() + 60_000 }), view => { expect(view.pin?.id).toBe("wire0007"); expect(view.pin?.messageId).toBeUndefined(); }],
+      ["the pinned message's row", async () => { await db.putMessage(text(bob.id, 7)); await node["messagesChanged"](bob.id, ["peer_wire0007"]); },
+        view => expect(view.pin?.messageId).toBe("peer_wire0007")],
+      // A compatibility chat's text sent on the data link is delivered: its own state went while the send took its time.
+      ["a compatibility chat's text", async () => { sent = (await node.sendMessage({ linkId: old.id, text: "hello" })).messageId!; },
+        view => expect(view.peerAck).toBe(Number(sent.slice("me_".length))), old.id],
     ];
-    for (const [what, change, shows] of changes) {
+    for (const [what, change, shows, changed = bob.id] of changes) {
       all = 0;
       await change();
       const after = await next();
       expect({ what, all }).toEqual({ what, all: 0 });
-      expect(chatView(after, alice.id), what).toBe(chatView(before, alice.id));
+      for (const chat of [alice.id, bob.id, old.id].filter(id => id !== changed)) expect(chatView(after, chat), what).toBe(chatView(before, chat));
       expect(after.groups[0], what).toBe(before.groups[0]);
-      expect(chatView(after, bob.id), what).not.toBe(chatView(before, bob.id));
-      shows(chatView(after, bob.id));
+      expect(chatView(after, changed), what).not.toBe(chatView(before, changed));
+      shows(chatView(after, changed));
       before = after;
     }
   });
