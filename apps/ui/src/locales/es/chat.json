@@ -33,7 +33,9 @@
     "blocked": "Bloqueaste a este contacto",
     "body": "Ya no podrá llamarte ni enviarte nada, y nada se lo avisa. El chat se queda. Desbloquéalo desde este menú o en Ajustes → Privacidad y seguridad.",
     "confirm": "Bloquear",
-    "title": "¿Bloquear a {{name}}?"
+    "failed": "Contacto no bloqueado",
+    "title": "¿Bloquear a {{name}}?",
+    "unblockFailed": "Contacto no desbloqueado"
   },
   "compat": {
     "burned": "El chat se ha destruido",

@@ -865,6 +865,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const saveRow = useHandler((messageId: string) => {
     if (chatLink?.id) void setSaved(chatLink.id, messageId, savedHere.has(messageId)).catch(() => {});
   });
+  // Why a Block contact or an Unblock did not go through (`setBlocked` below).
+  const { toast: blockWhy, show: showBlockWhy, dismiss: dismissBlockWhy } = useToast();
 
   if (!params) {
     // A chat still on a call has nowhere better to be; only the one on screen leaves.
@@ -904,7 +906,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (blocked && webrtc.callState !== "idle") webrtc.hangUp(!ringsIn, !ringsIn);
     // Nor is a call that waits for the contact's app to wake placed once it does.
     if (blocked) wakeCall.cancel();
-    void engine.call("setContactBlocked", { peerPubKeyZ32: blockKey, blocked }).catch(() => {});
+    // One the device could not save (no room left) is not kept: the engine left it as it was, so the menu offers it again.
+    void engine.call("setContactBlocked", { peerPubKeyZ32: blockKey, blocked })
+      .catch((e: unknown) => showBlockWhy(problemLine(e, t), { title: t(blocked ? "chat.block.failed" : "chat.block.unblockFailed") }));
   };
 
   const statusLabel = contactStatus(deliveryPeer, paired, status);
@@ -1539,6 +1543,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     )}
     {/* Why an app did not open here, over the app that covers the chat: over the whole window, above its panel. */}
     <Toast toast={appWhy} onDismiss={dismissAppWhy} testId="chat-app-why" />
+    <Toast toast={blockWhy} onDismiss={dismissBlockWhy} testId="chat-block-why" />
     {showIdentities && params && (
       <ContactIdentitiesPanel key={identityCard ? `${identityCard.side}:${identityCard.id}` : "panel"} peerKey={params.peerPubKeyB64} name={shownName}
         card={identityCard} onClose={() => setShowIdentities(false)} />

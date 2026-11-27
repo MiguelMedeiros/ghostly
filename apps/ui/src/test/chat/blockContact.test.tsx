@@ -66,6 +66,24 @@ describe("⋮ → Block contact", () => {
     expect(engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: BOB, blocked: false }]);
   });
 
+  it("a block the device cannot save says so, with what to do, and the menu offers Block contact again", async () => {
+    const { user, menu, engine } = await openMenu();
+    engine.on("setContactBlocked", () => { throw new Error("Not enough space on this device (QuotaExceededError)"); });
+    await user.click(menu.getByTestId("chat-block"));
+    await user.click(within(asked()!).getByRole("button", { name: "Block" }));
+    expect(await screen.findByTestId("chat-block-why-title")).toHaveTextContent("Contact not blocked");
+    expect(screen.getByTestId("chat-block-why-text")).toHaveTextContent(/^Not enough space on this device\. Free /);
+    await user.click(screen.getByTestId("chat-options"));
+    expect(within(await screen.findByTestId("chat-options-menu")).getByTestId("chat-block")).toBeInTheDocument();
+  });
+
+  it("an unblock the device cannot save says so", async () => {
+    const { user, menu, engine } = await openMenu(true);
+    engine.on("setContactBlocked", () => { throw new Error("Not enough space on this device (QuotaExceededError)"); });
+    await user.click(menu.getByTestId("chat-unblock"));
+    expect(await screen.findByTestId("chat-block-why-title")).toHaveTextContent("Contact not unblocked");
+  });
+
   it("a contact not blocked shows no such line, and its call buttons are on", async () => {
     await openMenu();
     expect(screen.queryByTestId("chat-blocked")).toBeNull();
@@ -114,6 +132,20 @@ describe("Settings → Blocked contacts", () => {
     await utils.user.click(await screen.findByRole("button", { name: /^Unblock .*Ana/ }));
     await vi.waitFor(() => expect(screen.getAllByTestId("settings-blocked-contact")).toHaveLength(2));
     await vi.waitFor(() => expect(screen.getByRole("button", { name: /^Unblock .*Carl/ })).toHaveFocus());
+  });
+
+  it("an Unblock the device cannot save says so under its row, which stays for another try", async () => {
+    const utils = renderApp(<BlockedContacts />);
+    utils.engine.update({ links: [linkView({ id: "link-1", peerPubKeyZ32: BOB, label: "Bob" })], settings: { blockedContacts: [BOB] } as never });
+    utils.engine.on("setContactBlocked", () => { throw new Error("Not enough space on this device (QuotaExceededError)"); });
+    await utils.user.click(await screen.findByRole("button", { name: /^Unblock .*Bob/ }));
+    const said = await screen.findByTestId("settings-blocked-error");
+    expect(said).toHaveTextContent("Contact not unblocked");
+    expect(said).toHaveTextContent("Not enough space on this device");
+    expect(screen.getByRole("button", { name: /^Unblock .*Bob/ })).toBeEnabled();
+    utils.engine.on("setContactBlocked", () => undefined);
+    await utils.user.click(screen.getByRole("button", { name: /^Unblock .*Bob/ }));
+    await vi.waitFor(() => expect(screen.queryByTestId("settings-blocked-error")).toBeNull());
   });
 
   it("the last row's Unblock hands the focus to the line that says none is left", async () => {

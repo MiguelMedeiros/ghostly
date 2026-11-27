@@ -423,6 +423,64 @@ describe("setContactBlocked's input", () => {
     expect((await db.getSettings()).blockedContacts).toEqual([other.peerPubKeyZ32]);
   });
 
+  it("a block or unblock the device cannot save changes nothing here, and trying again saves it", async () => {
+    const chat = row();
+    const { node } = await watched(chat);
+    const full = () => vi.spyOn(db, "putSettings").mockRejectedValueOnce(new DOMException("full", "QuotaExceededError"));
+    full();
+    await expect(node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true })).rejects.toThrow("full");
+    expect(node.getSettings().blockedContacts).toBeUndefined();
+    expect(viewOf(node, chat.id).blocked).toBeUndefined();
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    expect((await db.getSettings()).blockedContacts).toEqual([chat.peerPubKeyZ32]);
+    expect(viewOf(node, chat.id).blocked).toBe(true);
+    full();
+    await expect(node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false })).rejects.toThrow("full");
+    expect(node.getSettings().blockedContacts).toEqual([chat.peerPubKeyZ32]);
+    expect(viewOf(node, chat.id).blocked).toBe(true);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    expect((await db.getSettings()).blockedContacts).toBeUndefined();
+  });
+
+  it("a settings write, a block or an unblock made while a block is saved keeps it, here and on the device", async () => {
+    const a = row(), b = row();
+    const { node } = await watched(a, b);
+    await Promise.all([node.setContactBlocked({ peerPubKeyZ32: a.peerPubKeyZ32, blocked: true }), node.setWakeOnline({ on: false })]);
+    expect(node.getSettings().blockedContacts).toEqual([a.peerPubKeyZ32]);
+    expect((await db.getSettings())).toMatchObject({ blockedContacts: [a.peerPubKeyZ32], wakeOnline: false });
+    await Promise.all([node.setContactBlocked({ peerPubKeyZ32: b.peerPubKeyZ32, blocked: true }), node.setContactBlocked({ peerPubKeyZ32: a.peerPubKeyZ32, blocked: false })]);
+    expect(node.getSettings().blockedContacts).toEqual([b.peerPubKeyZ32]);
+    expect((await db.getSettings()).blockedContacts).toEqual([b.peerPubKeyZ32]);
+    await Promise.all([node.setContactBlocked({ peerPubKeyZ32: a.peerPubKeyZ32, blocked: true }), node.setContactBlocked({ peerPubKeyZ32: a.peerPubKeyZ32, blocked: false })]);
+    expect(node.getSettings().blockedContacts).toEqual([b.peerPubKeyZ32]);
+    expect((await db.getSettings()).blockedContacts).toEqual([b.peerPubKeyZ32]);
+  });
+
+  it("a block that cannot be saved leaves one saved at the same time, and one made while the wake rotates is kept", async () => {
+    const a = row(), b = row(), c = row({ wakeToken: "t" }), d = row();
+    const { node, rotated } = await watched(a, b, c, d);
+    // A's write fails while B's goes through: B stays, and A is blocked here only if the device kept it (B's write saves
+    // A too when the two overlap; when they run one at a time, A is undone before B's runs).
+    vi.spyOn(db, "putSettings").mockRejectedValueOnce(new DOMException("full", "QuotaExceededError"));
+    const [failed, saved] = await Promise.allSettled([node.setContactBlocked({ peerPubKeyZ32: a.peerPubKeyZ32, blocked: true }), node.setContactBlocked({ peerPubKeyZ32: b.peerPubKeyZ32, blocked: true })]);
+    expect([failed.status, saved.status]).toEqual(["rejected", "fulfilled"]);
+    const kept = (await db.getSettings()).blockedContacts;
+    expect(kept).toContain(b.peerPubKeyZ32);
+    expect(node.getSettings().blockedContacts).toEqual(kept);
+    // C waits for the wake to rotate while D is asked: whether D lands during the wait (C reads the list again after it)
+    // or runs after C (one at a time), both stay.
+    let release: (() => void) | undefined;
+    rotated.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    const first = node.setContactBlocked({ peerPubKeyZ32: c.peerPubKeyZ32, blocked: true });
+    const second = node.setContactBlocked({ peerPubKeyZ32: d.peerPubKeyZ32, blocked: true });
+    await vi.waitFor(() => expect(release).toBeDefined());
+    release!();
+    await Promise.all([first, second]);
+    const all = [...(kept ?? []), c.peerPubKeyZ32, d.peerPubKeyZ32].sort();
+    expect([...(node.getSettings().blockedContacts ?? [])].sort()).toEqual(all);
+    expect([...((await db.getSettings()).blockedContacts ?? [])].sort()).toEqual(all);
+  });
+
   it("a stored list with no key left in it is no list", async () => {
     await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true, blockedContacts: ["zzz", "zzz"] });
     const { node } = await watched(row());

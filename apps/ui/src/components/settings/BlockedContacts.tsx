@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
 import { useEngineValue } from "../../lib/engineState";
 import { focusLost } from "../../lib/focus";
 import { contactName, usePeerChats } from "../../lib/identities";
 import { isolate } from "../../lib/ownStatus";
+import { problemLine, problemText } from "../../lib/problemText";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { Row, Section } from "../layout";
-import { Button } from "../wallet/ui";
+import { Button, Notice } from "../wallet/ui";
 
 /**
  * Settings → Privacy, **Blocked contacts**: each contact blocked here (a chat's ⋮ → Block contact), named as the chat
@@ -31,6 +32,7 @@ export function BlockedContacts() {
     return { ...line, name, shown: own ? <bdi>{own}</bdi> : name };
   });
   const [unblocking, setUnblocking] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ key: string; why: string; detail?: string } | null>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const none = useRef<HTMLDivElement>(null);
   const handOff = useRef<{ gone: string; next?: string } | null>(null);
@@ -46,10 +48,15 @@ export function BlockedContacts() {
 
   const unblock = async (key: string, i: number) => {
     setUnblocking(key);
+    setFailed(null);
     handOff.current = { gone: key, next: lines[i + 1]?.key ?? lines[i - 1]?.key };
     try {
       await engine.call("setContactBlocked", { peerPubKeyZ32: key, blocked: false });
-    } catch { handOff.current = null; /* still listed: the button stays for another try */ }
+    } catch (e) {
+      // Still listed: the button stays for another try, and the line under the row says why (a device with no room left).
+      handOff.current = null;
+      setFailed({ key, why: problemLine(e, t), detail: problemText(e, t).detail });
+    }
     setUnblocking(null);
   };
 
@@ -60,12 +67,17 @@ export function BlockedContacts() {
             <Row label={t("settings.blocked.none")} hint={t("settings.blocked.hint")} testId="settings-blocked-none" />
           </div>
         : lines.map((line, i) => (
-          <Row key={line.key} label={line.shown} testId="settings-blocked-contact">
-            <Button ref={(button) => { if (button) buttons.current.set(line.key, button); else buttons.current.delete(line.key); }} loading={unblocking === line.key} disabled={unblocking !== null}
-              aria-label={t("settings.blocked.unblockLabel", { name: isolate(line.name) })} onClick={() => void unblock(line.key, i)}>
-              {t("settings.blocked.unblock")}
-            </Button>
-          </Row>
+          <Fragment key={line.key}>
+            <Row label={line.shown} testId="settings-blocked-contact">
+              <Button ref={(button) => { if (button) buttons.current.set(line.key, button); else buttons.current.delete(line.key); }} loading={unblocking === line.key} disabled={unblocking !== null}
+                aria-label={t("settings.blocked.unblockLabel", { name: isolate(line.name) })} onClick={() => void unblock(line.key, i)}>
+                {t("settings.blocked.unblock")}
+              </Button>
+            </Row>
+            {failed?.key === line.key && <div className="px-4 py-3">
+              <Notice tone="error" title={t("chat.block.unblockFailed")} next={failed.why} details={failed.detail} testId="settings-blocked-error" />
+            </div>}
+          </Fragment>
         ))}
     </Section>
   );

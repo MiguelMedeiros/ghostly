@@ -33,7 +33,9 @@
     "blocked": "Você bloqueou este contato",
     "body": "Essa pessoa não poderá mais ligar nem enviar nada para você, e nada avisa a ela. A conversa fica. Desbloqueie por este menu ou em Ajustes → Privacidade e segurança.",
     "confirm": "Bloquear",
-    "title": "Bloquear {{name}}?"
+    "failed": "Contato não bloqueado",
+    "title": "Bloquear {{name}}?",
+    "unblockFailed": "Contato não desbloqueado"
   },
   "compat": {
     "burned": "A conversa foi apagada",
