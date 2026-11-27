@@ -22,7 +22,7 @@ import { InfoButton } from "./layout/Section";
 import { useCallModeration, type GroupCallModerator } from "../hooks/useCallModeration";
 import { ModerationProblem, RemovedFromCall, TileModerationMenu } from "./GroupCallModerationMenu";
 import { TileVolume } from "./GroupCallVolume";
-import { setVolumeOf, volumeOf } from "../lib/groupCallVolume";
+import { elementTakesVolume, gainPlays, setVolumeOf, volumeMaxOn, volumeOf } from "../lib/groupCallVolume";
 
 /** One person in a group call, as `useGroupCall` gives them: what they send, and the tracks to show and play. */
 export interface GroupCallParticipant {
@@ -156,20 +156,21 @@ function TrackVideo({ track, fit, mirror }: { track: MediaStreamTrack; fit: "cov
   return <video ref={ref} autoPlay playsInline muted className={`absolute inset-0 w-full h-full bg-black ${fit === "contain" ? "object-contain" : "object-cover"}`} style={mirror ? { transform: "scaleX(-1)" } : undefined} />;
 }
 
-/** Whether this engine's Web Audio can play on a chosen speaker (`AudioContext.setSinkId`). */
-const audioPicksSpeaker = () => typeof AudioContext === "function" && typeof (AudioContext.prototype as { setSinkId?: unknown }).setSinkId === "function";
-
 /**
  * Someone's sound (their voice, or their shared screen's), on the chosen speaker, as loud as you set them (`volume`,
- * 1 as sent). Up to 1 the element's own volume, and 0 mutes it. Past 1, which an element can't play, through a Web
- * Audio gain with the element muted: it keeps the stream, which Chrome plays to Web Audio only while an element holds
- * it. An engine whose Web Audio can't play on the speaker you chose stays at 1 there.
+ * 1 as sent). Up to 1 the element's own volume, and 0 mutes it. Past 1, which an element can't play, or any level on
+ * an engine that ignores the element's volume (iOS), through a Web Audio gain with the element muted while the gain
+ * plays: it keeps the stream, which Chrome plays to Web Audio only while an element holds it. A context that doesn't
+ * run (WebKit starts none outside a gesture, iOS interrupts one) leaves the element playing at 1. An engine whose Web
+ * Audio can't play on the speaker you chose stays at 1 there, and its slider stops there too (`volumeMaxOn`).
  */
 function TrackAudio({ track, speaker, volume = 1, testId = "group-call-audio" }: { track: MediaStreamTrack; speaker?: string; volume?: number; testId?: string }) {
   const ref = useRef<HTMLAudioElement>(null);
-  const boost = useRef<{ context: AudioContext; gain: GainNode } | null>(null);
-  const level = useRef(volume);
-  level.current = volume;
+  const boost = useRef<{ context: AudioContext; gain: GainNode; live: () => void } | null>(null);
+  const [takesVolume] = useState(elementTakesVolume);
+  const played = Math.min(volume, volumeMaxOn(speaker));
+  const level = useRef(played);
+  level.current = played;
   useEffect(() => {
     if (!ref.current || typeof MediaStream !== "function") return;
     try {
@@ -181,40 +182,48 @@ function TrackAudio({ track, speaker, volume = 1, testId = "group-call-audio" }:
   useEffect(() => {
     void applySpeaker(ref.current, speaker).catch(() => {});
   }, [speaker, track]);
-  const louder = volume > 1 && typeof AudioContext === "function" && typeof MediaStream === "function" && (!speaker || audioPicksSpeaker());
+  const throughGain = played !== 1 && (played > 1 || !takesVolume) && gainPlays(speaker);
   useEffect(() => {
     const element = ref.current;
-    if (!louder || !element) return;
+    if (!throughGain || !element) return;
     let context: AudioContext;
+    let gain: GainNode;
     try {
       context = new AudioContext();
-      const gain = context.createGain();
+      gain = context.createGain();
       gain.gain.value = level.current;
       context.createMediaStreamSource(new MediaStream([track])).connect(gain).connect(context.destination);
-      boost.current = { context, gain };
     } catch {
       // no Web Audio for this track: it plays at 1
       return;
     }
-    element.muted = true;
-    void context.resume().catch(() => {});
+    // The element is muted only while the gain plays, and only for this gain (a closed one's late resume says nothing).
+    const live = () => {
+      if (boost.current?.context === context) element.muted = context.state === "running" || level.current === 0;
+    };
+    boost.current = { context, gain, live };
+    context.onstatechange = live;
+    live();
+    void context.resume().catch(() => {}).then(live);
     void applySpeaker(context, speaker).catch(() => {});
     return () => {
       boost.current = null;
+      context.onstatechange = null;
       void context.close().catch(() => {});
       element.muted = level.current === 0;
     };
-  }, [louder, track, speaker]);
+  }, [throughGain, track, speaker]);
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
     if (boost.current) {
-      boost.current.gain.gain.value = volume;
+      boost.current.gain.gain.value = played;
+      boost.current.live();
       return;
     }
-    element.volume = Math.min(1, volume);
-    element.muted = volume === 0;
-  }, [volume, louder, track]);
+    element.volume = Math.min(1, played);
+    element.muted = played === 0;
+  }, [played, throughGain, track]);
   return <audio ref={ref} autoPlay className="hidden" data-testid={testId} />;
 }
 
@@ -369,10 +378,10 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
     swapped.current = large ?? null;
     setPicked(id);
   };
-  // Each other face's volume and the admin's menu, in the whole window: the small one has no room for them.
+  // Each other face's volume (one level for their voice and their screen's sound) and the admin's menu, in the whole window: the small one has no room for them.
   const menuOf = (p: GroupCallParticipant) => mini || p === local ? undefined : (
     <>
-      <TileVolume name={shown(p)} volume={volumeOf(p.identity)} onChange={(volume) => setVolume(p.identity, volume)} host={box} />
+      <TileVolume name={shown(p)} volume={volumeOf(p.identity)} max={volumeMaxOn(devices?.speaker)} onChange={(volume) => setVolume(p.identity, volume)} host={box} />
       {moderation && <TileModerationMenu identity={p.identity} name={shown(p)} moderation={moderation} host={box} />}
     </>
   );
@@ -427,7 +436,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       <div role="status" className="sr-only" data-testid="group-call-news">{news.map((line) => <p key={line}>{line}</p>)}</div>
 
       {participants.map((p) => p.tracks.audio && <TrackAudio key={p.identity} track={p.tracks.audio} speaker={devices?.speaker} volume={volumeOf(p.identity)} />)}
-      {participants.map((p) => p.tracks.screenAudio && <TrackAudio key={`${p.identity}-screen`} track={p.tracks.screenAudio} speaker={devices?.speaker} testId="group-call-screen-audio" />)}
+      {participants.map((p) => p.tracks.screenAudio && <TrackAudio key={`${p.identity}-screen`} track={p.tracks.screenAudio} speaker={devices?.speaker} volume={volumeOf(p.identity)} testId="group-call-screen-audio" />)}
 
       {mini ? (
         <div className="call-mini-tile absolute inset-0 grid">

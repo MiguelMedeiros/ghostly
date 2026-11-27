@@ -1,20 +1,22 @@
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { useI18n } from "../contexts/I18nContext";
-import { VOLUME_MAX } from "../lib/groupCallVolume";
 import { isolate } from "../lib/ownStatus";
 import { Menu } from "./Menu";
 
 /**
  * The speaker on another person's tile: a slider from 0 to 200% of how loud they play here, for you alone. At 0 they
- * are muted for you, and the tile's speaker says so. `host`: the call's window, which a screen reader reads alone.
+ * are muted for you, and the tile's speaker says so. `max`: the loudest they can play here (`volumeMaxOn`: 1 on a
+ * speaker Web Audio can't play on), which the slider and what it shows stop at. `host`: the call's window, which a
+ * screen reader reads alone.
  */
-export function TileVolume({ name, volume, onChange, host }: { name: string; volume: number; onChange: (volume: number) => void; host: RefObject<HTMLElement | null> }) {
+export function TileVolume({ name, volume: set, max, onChange, host }: { name: string; volume: number; max: number; onChange: (volume: number) => void; host: RefObject<HTMLElement | null> }) {
   const { t, language } = useI18n();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   const slider = useRef<HTMLInputElement>(null);
   const noteId = useId();
   const label = t("calls.group.volumeOf", { name: isolate(name) });
+  const volume = Math.min(set, max);
   const off = volume === 0;
   const percent = new Intl.NumberFormat(language, { style: "percent", maximumFractionDigits: 0 }).format(volume);
   useEffect(() => {
@@ -33,7 +35,7 @@ export function TileVolume({ name, volume, onChange, host }: { name: string; vol
       </button>
       <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="group-call-volume-menu" label={label} describedBy={noteId} portal align="start" host={host.current}>
         <div className="flex items-center gap-3 px-3 py-2">
-          <input ref={slider} type="range" min={0} max={VOLUME_MAX * 100} step={5} value={Math.round(volume * 100)} data-testid="group-call-volume-slider"
+          <input ref={slider} type="range" min={0} max={max * 100} step={5} value={Math.round(volume * 100)} data-testid="group-call-volume-slider"
             aria-label={label} aria-valuetext={percent} onChange={(e) => onChange(Number(e.currentTarget.value) / 100)}
             className="min-w-0 flex-1 min-h-8 max-md:min-h-11 accent-accent cursor-pointer" />
           <span data-testid="group-call-volume-value" className="w-12 shrink-0 text-end text-sm tabular-nums text-text-primary">{percent}</span>
