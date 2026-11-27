@@ -60,6 +60,17 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   const openRef = useCallback((button: HTMLButtonElement) => () => { openHadFocus.current = document.activeElement === button; }, []);
   const runAnywayRef = useRef<HTMLButtonElement>(null);
   const checkRef = useRef<HTMLSpanElement>(null);
+  // Uninstalled from the details screen its Run anyway opened: that button went with the app, and the screen gave the
+  // focus back to nothing. The card's Join (or its line saying to ask for a link) has it, not the page.
+  const uninstalled = useRef(false);
+  const joinRef = useRef<HTMLButtonElement>(null);
+  const askRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    if (!uninstalled.current || details || app) return;
+    uninstalled.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body) (joinRef.current ?? askRef.current)?.focus({ preventScroll: true });
+  });
   useLayoutEffect(() => {
     if (!openHadFocus.current) return;
     openHadFocus.current = false;
@@ -109,8 +120,8 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       {error && <p role="alert" dir={ownDirection(error)} className="chat-text-card-line text-danger-ink" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
         {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
-          : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
-            : <span className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : withName(t("apps.card.ask", { name: NAME }), contact)}</span>}
+          : card.url ? <Button ref={joinRef} variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
+            : <span ref={askRef} tabIndex={-1} className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : withName(t("apps.card.ask", { name: NAME }), contact)}</span>}
         {runAnyway && <Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => setDetails(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>
       </div>
@@ -118,7 +129,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
         <AppInstallDialog source={{ card: { ref: card.ref, url: card.url, sequence: card.sequence, digest: card.digest } }} title={card.title}
           sentBy={mine ? undefined : contact} openAfter onClose={() => setInstalling(false)} onInstalled={() => open()} />
       )}
-      {details && app && <InstalledAppDialog app={app} onClose={() => setDetails(false)} onOpen={(_app, options) => open(options?.runAnyway === true)} />}
+      {details && app && <InstalledAppDialog app={app} onClose={() => setDetails(false)} onOpen={(_app, options) => open(options?.runAnyway === true)} onUninstalled={() => { uninstalled.current = true; }} />}
     </div>
   );
 }

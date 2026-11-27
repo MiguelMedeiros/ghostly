@@ -102,6 +102,20 @@ describe("an app card for an installed app taken down", () => {
     expect(opened).not.toHaveBeenCalled();
   });
 
+  it.each([["Join", CARD, "app-card-install"], ["line saying to ask for a link", { ...CARD, url: undefined }, "app-card-ask"]] as const)("removed by a store: Uninstall on the card's details screen leaves the focus on the card's %s, not the page", async (_name, card, testId) => {
+    run = REMOVED;
+    let apps = [installed()];
+    fakeEngine.on("appList", () => apps).on("appUninstall", () => { apps = []; });
+    const { user } = renderApp(<AppCardView card={card} mine={false} contact="Ana" linkId="link-1" peerKey="peer" />);
+    const view = screen.getByTestId("app-card");
+    await user.click(await within(view).findByTestId("app-card-run-anyway"));
+    await user.click(within(await screen.findByTestId("app-details")).getByTestId("app-uninstall-open"));
+    await user.click(within(await screen.findByTestId("app-uninstall")).getByTestId("app-uninstall-confirm"));
+    await waitFor(() => expect(screen.queryByTestId("app-uninstall")).not.toBeInTheDocument());
+    // The card's Run anyway went with the app: what the card now offers has the focus.
+    expect(document.activeElement).toBe(within(view).getByTestId(testId));
+  });
+
   it("an app that may run still says Installed with Open", async () => {
     run = { status: "ok" };
     const { row, card, user } = await pageAndCard();
