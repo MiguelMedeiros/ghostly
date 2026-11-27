@@ -1228,8 +1228,9 @@ export function MessageInput({
             onMouseDown={(e) => e.preventDefault()} onClick={() => guardThen(() => drafting.start(text, picker.compose(text)))} disabled={disabled}
             className="composer-icon-button self-center shrink-0"><TranslateIcon /></button>
         )}
-        {/* Send button; the mic while there is nothing to send, as in WhatsApp */}
-        {onSendFile && canRecord && (recording || !text.trim()) ? (
+        {/* Send button; the mic while there is nothing to send, as in WhatsApp. Not while editing: an edit is text only, so an emptied
+            one keeps Send (disabled). Before, the mic took its place and sent a new voice message beside the edit. */}
+        {onSendFile && canRecord && (recording || (!text.trim() && !edit)) ? (
           <VoiceRecorderButton
             onSend={(file, voice) => onSendFile(file, voice)}
             unavailable={fileUnavailable}
