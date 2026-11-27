@@ -10060,8 +10060,10 @@ export class GhostlyNode implements EngineImplementation {
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: false }), undefined, linkId),
         // A deleted chat's link, still up while the ends of its files get out (`removeLink`), makes it no files again.
         // A blocked contact's files frames go unanswered, as if this app were closed: an offer is neither taken nor
-        // declined (a decline would tell the contact), and nothing of it is written.
-        onFilesFrame: (frame) => this.links.get(linkId) !== live || this.blockedChat(live.stored) ? Promise.resolve() : this.fileDesk.handle(linkId, frame),
+        // declined (a decline would tell the contact), and nothing of it is written. Its answers about a file I send there
+        // still come in: dropped, each file sent to it stayed "transferring" for good, the contact waiting for its bytes.
+        onFilesFrame: (frame) => this.links.get(linkId) !== live || (this.blockedChat(live.stored) && !this.fileDesk.answersMine(linkId, frame))
+          ? Promise.resolve() : this.fileDesk.handle(linkId, frame),
         onFilesSession: (open) => { if (this.links.get(linkId) !== live) return; this.fileDesk.session(linkId, open); if (open) this.sayWithdrawnFiles(linkId); },
         onFileAnnounced: stored.profile && !stored.group ? (file, packet) => this.fileAnnounced(linkId, file, packet) : undefined,
         onFileFailed: (id, reason, direction) =>

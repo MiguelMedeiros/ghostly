@@ -361,6 +361,21 @@ it("sends a file to a contact with files/3, and cancels one on both sides", asyn
   await vi.waitFor(() => expect(t.records.get("in:send-0002")).toMatchObject({ state: "cancelled", error: "Cancelled by the sender" }));
 }, 60_000);
 
+it("a file sent to a contact I blocked goes whole; the contact's own offer is still left unanswered", async () => {
+  const t = await setup();
+  await t.node().setContactBlocked({ peerPubKeyZ32: t.node().getState().links.find((l) => l.id === t.id)!.peerPubKeyZ32!, blocked: true });
+  // The contact's answers to it (taken, bytes confirmed, checked) reach this side: it stayed "transferring" for good.
+  const sent = await put(t, "send-0009", 2000);
+  await vi.waitFor(() => expect(t.node().getState().transfers[sent.id]).toMatchObject({ state: "done", direction: "out", transferred: 2000 }), { timeout: 20_000 });
+  await vi.waitFor(() => expect(t.records.get("in:send-0009")?.state).toBe("done"));
+  // The contact's file is neither taken nor declined, and nothing of it is written.
+  t.offer("theirs-001", 2000);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(t.records.get("out:theirs-001")?.state).toBe("offered");
+  expect(await t.incoming("theirs-001")).toBeNull();
+  expect((await fileStore.listForLink(t.id)).filter((f) => f.direction === "in")).toEqual([]);
+}, 60_000);
+
 it("deleting the chat while files move ends them on the contact's side too, before its session stops", async () => {
   const t = await setup();
   // Both transfers stop midway and stay under way: the contact's bytes and its acknowledgements go no further.

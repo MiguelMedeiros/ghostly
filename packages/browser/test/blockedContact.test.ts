@@ -161,6 +161,8 @@ describe("a blocked contact", () => {
     // files/3: the offer reaches no file desk, so it is neither taken nor declined (a decline would tell the contact).
     const desk = vi.spyOn(node["fileDesk"], "handle");
     await peer.onFilesFrame({ t: "pf-offer", id: "wBlockedFile1", name: "a.pdf", mime: "application/pdf", size: 2048, ts: Date.now() });
+    // An answer that names no file I send there is no answer to mine: unanswered too (it would hear a pf-abort).
+    for (const t of ["pf-accept", "pf-wait", "pf-got", "pf-done", "pf-refuse"]) await peer.onFilesFrame({ t, id: "wNotMine00001", offset: 0 });
     expect(desk).not.toHaveBeenCalled();
     // files/2: refused before anything is stored.
     expect(peer.onFileIncoming({ id: "f2", name: "b.txt", size: 4, mime: "text/plain", timestamp: Date.now() })).toBe("refused");
