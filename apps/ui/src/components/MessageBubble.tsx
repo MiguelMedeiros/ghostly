@@ -937,12 +937,26 @@ const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   );
 }, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, onDeleteForEveryone: deleteForEveryoneIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, onSave: saveIt, saved, selection, names, highlight, author, onOpenAuthor, payee, buttons, compactPress }: BubbleViewProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, onDeleteForEveryone: deleteForEveryoneIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, onSave: saveIt, saved, selection: choice, names, highlight, author, onOpenAuthor, payee, buttons, compactPress }: BubbleViewProps) {
+  // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
+  // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
+  // One whose copy into this device failed never left it: the red mark too, but nothing to send again.
+  // So only a transfer that failed is read here: read while it moved, each step of its progress drew the whole
+  // message again (its mark, reactions and menu), up to 20 a second.
+  const failedTransfer = useTransferValue(message.sender === "me" ? message.file?.id : undefined, (transfer) => (transfer?.state === "failed" ? transfer : null));
+  const fileRetry = !!message.file && canRetryFile(message.file, failedTransfer, servicesPlatform);
+  const fileUnsent = !!message.file && fileNeverSent(failedTransfer);
+  const fileFailed = fileRetry || fileUnsent;
+  // One that never left is a row the page made alone: the engine has none to reply to, react to, pin, forward or delete
+  // for everyone, save or choose for a forward, and would refuse each (React, Pin and Save with nothing said; a forward
+  // with it in fails whole). In a choice it is drawn as a row that cannot be chosen.
+  const selection = fileUnsent && choice ? { selected: choice.selected } : choice;
   // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
   const choosing = !!selection;
-  const onPin = choosing ? undefined : pinIt, onSave = choosing ? undefined : saveIt;
-  const onDelete = choosing ? undefined : deleteIt, onDeleteForEveryone = choosing ? undefined : deleteForEveryoneIt, onReply = choosing ? undefined : replyIt, onEdit = choosing ? undefined : editIt;
-  const onReact = choosing ? undefined : reactIt, onForward = choosing ? undefined : forwardIt, onSelect = choosing ? undefined : selectIt;
+  const kept = choosing || fileUnsent;
+  const onPin = kept ? undefined : pinIt, onSave = kept ? undefined : saveIt;
+  const onDelete = choosing ? undefined : deleteIt, onDeleteForEveryone = kept ? undefined : deleteForEveryoneIt, onReply = kept ? undefined : replyIt, onEdit = choosing ? undefined : editIt;
+  const onReact = kept ? undefined : reactIt, onForward = kept ? undefined : forwardIt, onSelect = kept ? undefined : selectIt;
   const { t, language, dir } = useI18n();
   const memberText = useMemberText();
   const chat = useCueChat();
@@ -1030,15 +1044,6 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // The original in place of the sent text, with its own mention places: the message's are the translation's.
   const original = sent && showingOriginal ? sent.original.trim() : undefined;
   const originalMarks = useMemo(() => original === undefined ? undefined : originalMentions(original, message.text, message.mentions), [original, message.text, message.mentions]);
-  // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
-  // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
-  // One whose copy into this device failed never left it: the red mark too, but nothing to send again.
-  // So only a transfer that failed is read here: read while it moved, each step of its progress drew the whole
-  // message again (its mark, reactions and menu), up to 20 a second.
-  const failedTransfer = useTransferValue(isMe ? message.file?.id : undefined, (transfer) => (transfer?.state === "failed" ? transfer : null));
-  const fileRetry = !!message.file && canRetryFile(message.file, failedTransfer, servicesPlatform);
-  const fileUnsent = !!message.file && fileNeverSent(failedTransfer);
-  const fileFailed = fileRetry || fileUnsent;
   const shown = fileFailed ? "failed" as const : message.delivery;
   // A file waiting in a DHT-only chat waits for a live connection, not for the contact to be online.
   const live = waitsForLive(isMe && !fileFailed ? message : undefined, useDhtOnly(peerPubKey));
@@ -1068,8 +1073,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(refuse(shown));
   };
   /** Delete for everyone, confirmed: a refused one stays, with why under it, as a refused Send again. */
-  // Not a file whose copy into this device failed: it never left, the engine has no row of it and would refuse.
-  const deleteForEveryone = fileUnsent ? undefined : onDeleteForEveryone && (() => {
+  const deleteForEveryone = onDeleteForEveryone && (() => {
     setRefused(null);
     void Promise.resolve(onDeleteForEveryone()).catch(refuse(shown));
   });
