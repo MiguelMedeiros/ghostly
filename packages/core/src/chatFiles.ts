@@ -1164,8 +1164,8 @@ export class ChatFiles {
     incoming.starting = true;
     void this.target(entry).then(() => {
       incoming.starting = false;
-      // Ended, paused or cut off while it opened: its turn goes to the next one.
-      if (transferEnded(entry.record) || !this.attached || (entry.record.state === "paused" && entry.record.pausedBy === "me")) { this.startNext(); return; }
+      // Ended, paused (here or by its sender) or cut off while it opened: its turn goes to the next one.
+      if (transferEnded(entry.record) || !this.attached || entry.record.state === "paused") { this.startNext(); return; }
       entry.record.state = "active";
       entry.record.pausedBy = undefined;
       entry.in!.gapAt = undefined;
