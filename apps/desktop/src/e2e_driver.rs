@@ -13,6 +13,9 @@
 //!
 //! `GET /window` answers with what the system shows of the Ghostly window: whether it is visible, its title bar's
 //! appearance, and the badge on the Dock icon.
+//!
+//! `GET /menu` answers with the menu bar's titles as they stand, each submenu's with its items'
+//! (`app_window::shown_titles`): a test sees the language the menu is in.
 
 #[cfg(all(feature = "e2e-driver", not(debug_assertions)))]
 compile_error!(

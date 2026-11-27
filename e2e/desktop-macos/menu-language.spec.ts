@@ -13,8 +13,8 @@ import { forgetSharedData, openMacDesktop, type MacDesktop } from "../support/de
  *   npm run test:e2e:desktop-macos -- menu-language
  */
 
-// 49760-49764: this test's ports.
-const PORTS = { app: 49760 };
+// 49785-49789: this test's ports.
+const PORTS = { app: 49785 };
 
 const ENGLISH: [string, string[]][] = [
   ["Ghostly", ["About Ghostly", "Settings…", "Services", "Hide Ghostly", "Hide Others", "Show All", "Quit Ghostly"]],

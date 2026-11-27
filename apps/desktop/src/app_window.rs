@@ -66,6 +66,7 @@ pub fn on_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) -> bool {
 /// A title the page gives a menu item, as the menu shows it: trimmed, at most `MAX_TITLE` characters, nothing a line
 /// cannot hold. An `&` is doubled, so the menu shows it instead of reading a mnemonic. None: not a title, the item
 /// keeps the one it has.
+#[cfg(any(target_os = "macos", test))]
 pub fn menu_title(value: &str) -> Option<String> {
     let title = value.trim();
     if title.is_empty() || title.chars().count() > MAX_TITLE || title.chars().any(char::is_control)
@@ -76,11 +77,13 @@ pub fn menu_title(value: &str) -> Option<String> {
 }
 
 /// The longest title a menu item takes from the page.
+#[cfg(any(target_os = "macos", test))]
 const MAX_TITLE: usize = 60;
 
 /// Where each title the page may give sits in `menu`: (the page's key, the submenu, the item in it; none for the
 /// submenu's own title). The app's own submenu keeps the app's name, which macOS shows there whatever it is called.
 /// Kept in step with `menu` by e2e/desktop-macos/menu-language.spec.ts, which reads every title back.
+#[cfg(any(target_os = "macos", test))]
 const TITLES: &[(&str, usize, Option<usize>)] = &[
     ("about", 0, Some(0)),
     ("settings", 0, Some(2)),
