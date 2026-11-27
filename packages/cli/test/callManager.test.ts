@@ -1418,6 +1418,21 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  // The engine drops a blocked contact's hang-up: the call went on here until its media went quiet.
+  it("a contact blocked during a call ends it as a hang-up, and the contact hears it", async () => {
+    const { a, b } = pairOfManagers();
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    await a.calls.start("chat-ab", {});
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected")))).catch(diagnose(a, b));
+    a.link.blocked = true;
+    await a.calls.endBlocked();
+    expect(a.calls.list()).toEqual([]);
+    expect(a.events.find((e) => e.type === "call.ended")).toMatchObject({ direction: "out", reason: "hangup" });
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   /** Both sides call each other at once; the side whose offer lost is the one that ends its call as `crossed`. */
   async function glare(a: Side, b: Side) {
     await Promise.allSettled([a.calls.start("chat-ab", {}), b.calls.start("chat-ba", {})]);
