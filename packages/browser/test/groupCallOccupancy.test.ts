@@ -17,12 +17,14 @@ import { STORES, transact } from "../src/shared/idb";
 Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: async () => ({ quota: 50 * 1024 ** 3, usage: 10 * 1024 ** 3 }) }, configurable: true });
 
 const SFU = "https://call.ghostly.test";
+const TURN = { urls: "turn:turn.ghostly.test:3478", username: "u", credential: "p" };
 const SPKI = Buffer.from("302a300506032b6570032100", "hex");
 const FIELDS = ["g", "k", "n", "room", "sig", "ts", "v"];
 
-/** A node with the route: it answers a request signed by `member()` with `reply`, and anyone else with the one 403. */
-function fakeSfu(g: string, member: () => string | undefined, reply: Record<string, unknown> = { count: 2, since: 1794700500 }) {
+/** A node with the route: it answers a request signed by `member()` with `reply`, and anyone else, or a nonce it saw, with the one 403. */
+function fakeSfu(g: string, member: () => string | undefined, reply: Record<string, unknown> = { count: 1, since: 1794700500 }) {
   const seen: { url: string; init?: RequestInit; body: Record<string, unknown> }[] = [];
+  const nonces = new Set<string>();
   const handler = vi.fn(async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     seen.push({ url: String(input), init, body });
@@ -32,7 +34,8 @@ function fakeSfu(g: string, member: () => string | undefined, reply: Record<stri
     if (Object.keys(body).sort().join() !== FIELDS.join() || body.v !== 1 || body.g !== g || room !== `g_${g}` || Math.abs(Date.now() / 1000 - ts) > 60) return forbidden();
     const signed = Buffer.from(JSON.stringify(["ghostly-sfu/1 occupancy", SFU, g, room, k, ts, n]));
     const key = createPublicKey({ key: Buffer.concat([SPKI, publicKeyFromZ32(k)]), format: "der", type: "spki" });
-    if (!nodeVerify(null, signed, key, fromBase64Url(sig)) || k !== member()) return forbidden();
+    if (!nodeVerify(null, signed, key, fromBase64Url(sig)) || k !== member() || nonces.has(n)) return forbidden();
+    nonces.add(n);
     return Response.json(reply);
   });
   return { seen, fetch: handler };
@@ -45,12 +48,45 @@ describe("asking the node", () => {
 
   it("sends the WISP's body, signed over the node's origin, and answers the count and since when", async () => {
     const sfu = fakeSfu(g, () => me.pubKeyZ32);
-    expect(await ask(sfu.fetch as typeof fetch)).toEqual({ ok: true, count: 2, since: 1794700500 });
+    expect(await ask(sfu.fetch as typeof fetch)).toEqual({ ok: true, count: 1, since: 1794700500 });
     expect(sfu.seen).toHaveLength(1);
     expect(sfu.seen[0].body).toMatchObject({ v: 1, g, k: me.pubKeyZ32, room: `g_${g}` });
     expect(sfu.seen[0].body).not.toHaveProperty("name");
     expect(sfu.seen[0].init).toMatchObject({ method: "POST", redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store" });
     expect(new Headers(sfu.seen[0].init?.headers).get("Content-Type")).toBe("application/json");
+    expect(sfu.seen[0].init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("gives up on a node that never answers after the 10 s a token request waits", async () => {
+    vi.useFakeTimers();
+    // Node's AbortSignal.timeout runs on its own timers, out of the fake clock's reach: the same signal on the faked setTimeout.
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), ms);
+      return controller.signal;
+    });
+    try {
+      const hangs = vi.fn((_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason))));
+      let result: unknown;
+      void ask(hangs as unknown as typeof fetch).then(r => { result = r; });
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(result).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(result).toEqual({ ok: false, code: "no_answer" });
+    } finally { vi.useRealTimers(); timeout.mockRestore(); }
+  });
+
+  it("a count above the group's roster is a bad reply, and a since past now is left out", async () => {
+    const at = Date.parse("2026-11-15T12:00:00Z"), nowS = at / 1000;
+    const reply = (body: Record<string, unknown>, members?: number) =>
+      fetchGroupCallOccupancy({ sfu: SFU, g, seed: me.seed, now: () => at, ...(members !== undefined && { members }), fetch: once(async () => Response.json(body)) });
+    expect(await reply({ count: 3 }, 3)).toEqual({ ok: true, count: 3 });
+    expect(await reply({ count: 4 }, 3)).toEqual({ ok: false, code: "bad_reply" });
+    expect(await reply({ count: Number.MAX_SAFE_INTEGER }, 3)).toEqual({ ok: false, code: "bad_reply" });
+    expect(await reply({ count: 2, since: nowS + 60 }, 3)).toEqual({ ok: true, count: 2, since: nowS + 60 });
+    expect(await reply({ count: 2, since: nowS + 61 }, 3)).toEqual({ ok: true, count: 2 });
+    expect(await reply({ count: 2, since: nowS + 3600 }, 3)).toEqual({ ok: true, count: 2 });
   });
 
   it("an empty room is a count of 0, with no since", async () => {
@@ -91,7 +127,7 @@ describe("asking the node", () => {
   });
 });
 
-interface Inner { groups: { communities: { session(id: string): { state: { meta?: GroupMeta }; myKey: string } | undefined } } }
+interface Inner { groups: { communities: { session(id: string): { state: { meta?: GroupMeta }; myKey: string; roster: unknown[] } | undefined } } }
 
 const nodes: GhostlyNode[] = [];
 beforeEach(async () => {
@@ -120,8 +156,26 @@ describe("the engine's groupCallOccupancy", () => {
     const { node, groupId, session } = await community();
     const sfu = fakeSfu(groupId, () => session.myKey);
     vi.stubGlobal("fetch", sfu.fetch);
-    expect(await node.groupCallOccupancy({ groupId })).toEqual({ ok: true, count: 2, since: 1794700500 });
+    expect(await node.groupCallOccupancy({ groupId })).toEqual({ ok: true, count: 1, since: 1794700500 });
     expect(sfu.seen.map(s => s.body.k)).toEqual([session.myKey]);
+  });
+
+  it("asks the group's node nothing while Hide my IP is on: it would learn this device's address", async () => {
+    const { node, groupId, session } = await community();
+    const sfu = fakeSfu(groupId, () => session.myKey);
+    vi.stubGlobal("fetch", sfu.fetch);
+    await node.updateSettings({ settings: { iceServers: [TURN], relayOnly: true } });
+    expect(await node.groupCallOccupancy({ groupId })).toEqual({ ok: false, code: "hidden" });
+    expect(sfu.fetch).not.toHaveBeenCalled();
+    await node.updateSettings({ settings: { relayOnly: false } });
+    expect(await node.groupCallOccupancy({ groupId })).toEqual({ ok: true, count: 1, since: 1794700500 });
+  });
+
+  it("a count above the group's roster is a bad reply (the node counts roster keys only)", async () => {
+    const { node, groupId, session } = await community();
+    const members = (node as unknown as Inner).groups.communities.session(groupId)!.roster.length;
+    vi.stubGlobal("fetch", fakeSfu(groupId, () => session.myKey, { count: members + 1, since: 1794700500 }).fetch);
+    expect(await node.groupCallOccupancy({ groupId })).toEqual({ ok: false, code: "bad_reply" });
   });
 
   it("a group I am not in, or whose call names no node that holds, sends nothing", async () => {
