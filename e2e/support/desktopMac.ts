@@ -139,6 +139,11 @@ export class MacDriver implements DesktopApp {
     return (await this.request("POST", "/menu", id)) as boolean;
   }
 
+  /** The menu bar's titles as they stand (`GET /menu`): each submenu's title with its items', separators left out. */
+  async menuTitles(): Promise<[string, string[]][]> {
+    return (await this.request("GET", "/menu")) as [string, string[]][];
+  }
+
   /**
    * Every link the app handed to the system so far, in order, exactly as `open` would have received it. The app under
    * the driver writes them down instead of opening them (`launch` in apps/desktop/src/commands.rs), so no browser starts.

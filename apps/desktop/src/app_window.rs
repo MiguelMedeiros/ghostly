@@ -63,6 +63,109 @@ pub fn on_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) -> bool {
     true
 }
 
+/// A title the page gives a menu item, as the menu shows it: trimmed, at most `MAX_TITLE` characters, nothing a line
+/// cannot hold. An `&` is doubled, so the menu shows it instead of reading a mnemonic. None: not a title, the item
+/// keeps the one it has.
+pub fn menu_title(value: &str) -> Option<String> {
+    let title = value.trim();
+    if title.is_empty() || title.chars().count() > MAX_TITLE || title.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(title.replace('&', "&&"))
+}
+
+/// The longest title a menu item takes from the page.
+const MAX_TITLE: usize = 60;
+
+/// Where each title the page may give sits in `menu`: (the page's key, the submenu, the item in it; none for the
+/// submenu's own title). The app's own submenu keeps the app's name, which macOS shows there whatever it is called.
+/// Kept in step with `menu` by e2e/desktop-macos/menu-language.spec.ts, which reads every title back.
+const TITLES: &[(&str, usize, Option<usize>)] = &[
+    ("about", 0, Some(0)),
+    ("settings", 0, Some(2)),
+    ("services", 0, Some(4)),
+    ("hide", 0, Some(6)),
+    ("hideOthers", 0, Some(7)),
+    ("showAll", 0, Some(8)),
+    ("quit", 0, Some(10)),
+    ("file", 1, None),
+    ("newChat", 1, Some(0)),
+    ("closeWindow", 1, Some(2)),
+    ("edit", 2, None),
+    ("undo", 2, Some(0)),
+    ("redo", 2, Some(1)),
+    ("cut", 2, Some(3)),
+    ("copy", 2, Some(4)),
+    ("paste", 2, Some(5)),
+    ("selectAll", 2, Some(6)),
+    ("view", 3, None),
+    ("fullScreen", 3, Some(0)),
+    ("window", 4, None),
+    ("minimize", 4, Some(0)),
+    ("zoom", 4, Some(1)),
+    ("closeWindow", 4, Some(3)),
+    ("help", 5, None),
+];
+
+/// Gives the menu the page's titles (`commands::set_menu_titles`): only the keys of `TITLES` with a title `menu_title`
+/// takes; anything else is left as it is.
+#[cfg(target_os = "macos")]
+pub fn retitle<R: Runtime>(
+    app: &AppHandle<R>,
+    titles: &std::collections::HashMap<String, String>,
+) -> tauri::Result<()> {
+    use tauri::menu::MenuItemKind;
+    let Some(menu) = app.menu() else {
+        return Ok(());
+    };
+    let submenus = menu.items()?;
+    for (key, at, item) in TITLES {
+        let Some(title) = titles.get(*key).and_then(|title| menu_title(title)) else {
+            continue;
+        };
+        let Some(MenuItemKind::Submenu(submenu)) = submenus.get(*at) else {
+            continue;
+        };
+        match item {
+            None => submenu.set_text(&title)?,
+            Some(index) => match submenu.items()?.get(*index) {
+                Some(MenuItemKind::MenuItem(item)) => item.set_text(&title)?,
+                Some(MenuItemKind::Predefined(item)) => item.set_text(&title)?,
+                _ => {}
+            },
+        }
+    }
+    Ok(())
+}
+
+/// The menu bar as it stands, for the e2e driver: each submenu's title with its items' titles, separators left out.
+#[cfg(any(test, feature = "e2e-driver"))]
+#[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
+pub fn shown_titles<R: Runtime>(app: &AppHandle<R>) -> Vec<(String, Vec<String>)> {
+    use tauri::menu::MenuItemKind;
+    let Some(menu) = app.menu() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for kind in menu.items().unwrap_or_default() {
+        let MenuItemKind::Submenu(submenu) = kind else {
+            continue;
+        };
+        let mut items = Vec::new();
+        for item in submenu.items().unwrap_or_default() {
+            let title = match item {
+                MenuItemKind::MenuItem(item) => item.text().ok(),
+                MenuItemKind::Predefined(item) => item.text().ok(),
+                _ => None,
+            };
+            items.extend(title.filter(|title| !title.is_empty()));
+        }
+        out.push((submenu.text().unwrap_or_default(), items));
+    }
+    out
+}
+
 /// The app's menu on a Mac: Tauri's default (the app menu, File, Edit, View, Window, Help) with Settings… (Cmd+,)
 /// in the app menu and New Chat (Cmd+N) in File.
 #[cfg(target_os = "macos")]
@@ -193,5 +296,44 @@ mod tests {
         // Not the page's: Tauri's own items (Quit, Copy...) do what they do, and the page hears nothing.
         assert!(!on_menu_event(app.handle(), "quit"));
         assert_eq!(*heard.lock().unwrap(), [r#""settings""#, r#""new""#]);
+    }
+
+    #[test]
+    fn a_menu_title_from_the_page_is_trimmed_bounded_and_one_line() {
+        assert_eq!(menu_title("  Arquivo "), Some("Arquivo".into()));
+        assert_eq!(menu_title("Ajustes…"), Some("Ajustes…".into()));
+        // Shown as it is, never read as a mnemonic.
+        assert_eq!(menu_title("Cut & Paste"), Some("Cut && Paste".into()));
+        assert_eq!(menu_title(""), None);
+        assert_eq!(menu_title("   "), None);
+        assert_eq!(menu_title("two\nlines"), None);
+        assert_eq!(
+            menu_title(&"a".repeat(MAX_TITLE)),
+            Some("a".repeat(MAX_TITLE))
+        );
+        assert_eq!(menu_title(&"a".repeat(MAX_TITLE + 1)), None);
+        // Counted in characters, not bytes.
+        assert_eq!(
+            menu_title(&"設".repeat(MAX_TITLE)),
+            Some("設".repeat(MAX_TITLE))
+        );
+    }
+
+    #[test]
+    fn every_title_has_a_place_of_its_own_in_the_menu() {
+        let mut places: Vec<(usize, Option<usize>)> =
+            TITLES.iter().map(|(_, at, item)| (*at, *item)).collect();
+        let count = places.len();
+        places.sort();
+        places.dedup();
+        assert_eq!(places.len(), count);
+        // Close Window is in File and in Window: one title for both.
+        assert_eq!(
+            TITLES
+                .iter()
+                .filter(|(key, _, _)| *key == "closeWindow")
+                .count(),
+            2
+        );
     }
 }

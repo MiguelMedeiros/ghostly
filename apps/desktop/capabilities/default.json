@@ -139,6 +139,7 @@
     "allow-resolve-messages",
     "allow-resolve-records",
     "allow-service-respond",
+    "allow-set-menu-titles",
     "allow-set-pkarr-relays",
     "allow-share-text",
     "allow-system-bars",

@@ -179,6 +179,7 @@ macro_rules! commands {
             commands::resolve_messages,
             commands::resolve_records,
             commands::service_respond,
+            commands::set_menu_titles,
             commands::set_pkarr_relays,
             commands::system_bars,
             commands::test_network,

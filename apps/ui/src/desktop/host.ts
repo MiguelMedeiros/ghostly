@@ -40,6 +40,7 @@ import { desktopGroupCallFetch } from "./groupCallFetch";
 import { desktopOidc } from "./oidc";
 import { desktopAtprotoHost } from "./atproto";
 import { appCommandForKey, isAppCommand, sendAppCommand } from "../lib/appCommands";
+import { setAppMenuSink } from "../lib/appMenu";
 import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nativeCalls";
 import { setDeviceSource } from "../lib/mediaDevices";
 import { setAppBadgeTarget } from "../lib/appBadge";
@@ -421,6 +422,9 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // The title bar follows the app's Light / Dark choice (null: the system's). On a Mac this is the app's appearance, so
   // the page's `prefers-color-scheme` follows it too, and comes back to the system's with System.
   setWindowThemeSink((value) => void invoke("plugin:window|set_theme", { label: "main", value }).catch(() => {}));
+  // The Mac menu bar's titles in the app's language (`set_menu_titles`; Linux and Windows have no menu bar, and the
+  // command does nothing there).
+  setAppMenuSink((titles) => void invoke("set_menu_titles", { titles }).catch(() => {}));
   // Every step of a link's way to a live connection goes to the app's log (see `diagnostic_log`), so a
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));

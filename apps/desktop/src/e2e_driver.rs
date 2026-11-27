@@ -177,6 +177,11 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
             crate::app_window::show_main(app);
             (200, "true".into())
         }
+        // The menu bar's titles as they stand: `[[submenu, [item, …]], …]`.
+        ("GET", "/menu") => (
+            200,
+            serde_json::to_string(&crate::app_window::shown_titles(app)).unwrap_or_default(),
+        ),
         ("POST", "/menu") => {
             let id: String = match serde_json::from_slice(&request.body) {
                 Ok(id) => id,
