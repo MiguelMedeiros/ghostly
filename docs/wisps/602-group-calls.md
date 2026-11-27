@@ -8,7 +8,7 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [600](600-media.md), [601](601-webrtc-media.md), [902](902-group-mesh.md), [903](903-group-community.md) |
 | Implementation | Since 1.12, in communities: the `call` field in core [`groupMeta.ts`](../../packages/core/src/groupMeta.ts); the engine's `setGroupCall` and `groupCallToken` in [`node.ts`](../../packages/browser/src/engine/node.ts); the app's [`GroupCallButton`](../../apps/ui/src/components/GroupCallButton.tsx) and [`groupCallPass.ts`](../../apps/ui/src/lib/groupCallPass.ts). The CLI names the node (`group call <group> --sfu`) but does not join. |
-| Summary | A community group names a node that forwards its calls, and a member asks that node for a call pass with a signed request. |
+| Summary | A community group names a node that forwards its calls, and a member asks that node for a call pass, or whether a call is on, with a signed request. |
 | Availability | Available |
 | Notes | Community groups only, joined from the web app, the extension, Android and the desktop app on macOS and Windows; not from the desktop app on Linux or the CLI yet. Media goes through the node's forwarding server (an SFU, LiveKit), not from each member to each other. End-to-end encryption of the media is optional in this revision. |
 
@@ -251,15 +251,90 @@ da979e3b50058293985b871cf5050e8ee98243b0d925ddb5ab81a5fbe8e84748f3045ee1aa68eb37
 
 `node:crypto` reproduces it as it does the token request's vector.
 
+## Occupancy
+
+A member's app can ask the node whether the group's call is on before joining it, so that it offers to join a call that is going on and to start one when none is. The node knows who is in its room; nothing in the group's frames says it.
+
+```
+POST <sfu>/sfu/group-occupancy
+Content-Type: application/json
+
+{ "v": 1, "g": "<group id>", "k": "<member key>", "room": "g_<group id>", "ts": 1794700800, "n": "<nonce>", "sig": "<signature>" }
+```
+
+The fields are the token request's (§ The token request), without `name`. Any other field is refused.
+
+**Signed bytes.** `sig` signs, exactly:
+
+```
+utf8(JSON.stringify(["ghostly-sfu/1 occupancy", sfuOrigin, g, room, k, ts, n]))
+```
+
+as the token request's bytes, under its own tag, so it cannot be taken for a token or a moderation request, nor either of them for it.
+
+**What the node checks.** Checks 1 to 5 of the token request (§ What the node checks), with this body's fields and its 4 KiB bound. A key banned from the call (§ Moderation) is still in the roster and is answered. Every refusal is the same `403` with the same body as the token route's. Past 30 requests in a minute from one address, or for one `k`, the node answers `429` with a `Retry-After` header; these requests are counted apart from the token route's, so asking never keeps a member from joining. The route answers CORS as the token route does (§ CORS). A node that does not have this route answers `404`.
+
+**The reply.**
+
+```
+200 OK
+{ "count": 3, "since": 1794700500 }
+```
+
+- `count`: how many members are in `"g_" + g` now, an integer, `0` when the room is empty or does not exist (with LiveKit, the participants `ListParticipants` gives for the room, `0` when it is absent from `ListRooms`). A participant the node itself runs in the room, one whose identity is not a key of the roster, is not counted.
+- `since`: present only when `count` is above `0`: the unix time in seconds the room was opened (with LiveKit, the room's `creation_time`), on the node's clock.
+
+The reply says how many and since when, not who: the app learns who is in the call by joining it. The node MAY answer from a look at the SFU up to 5 seconds old.
+
+**How the app asks.** It asks while the group is open and in sight (a hidden tab or a window in the background does not ask), at most once every 15 seconds, and once more when the user comes back to the group. A `count` above `0` is a call that is on: the app offers to join it. A `0` is no call: the app offers to start one, which is the same token request. A `404`, a `403`, a `429`, or no answer, tells the app nothing: it shows the group's call as it would without this route, and on a `404` does not ask that node again until the group's `call` changes or the app starts again. On a `429` it waits `Retry-After` before it asks again.
+
+### Occupancy test vector
+
+The member is the token request's test key, with the token request's inputs.
+
+| Input | Value |
+|---|---|
+| `k` | `yqooxx9u3aemh8mo5wcqq16yufu6jitouq1o4za751dger1igghy` |
+| `sfuOrigin` | `https://call.ghostly.tools` |
+| `g` | `oKGio6SlpqeoqaqrrK2urw` |
+| `room` | `g_oKGio6SlpqeoqaqrrK2urw` |
+| `ts` | `1794700800` |
+| `n` | `EBESExQVFhcYGRobHB0eHw` |
+
+The signed text (199 bytes):
+
+```
+["ghostly-sfu/1 occupancy","https://call.ghostly.tools","oKGio6SlpqeoqaqrrK2urw","g_oKGio6SlpqeoqaqrrK2urw","yqooxx9u3aemh8mo5wcqq16yufu6jitouq1o4za751dger1igghy",1794700800,"EBESExQVFhcYGRobHB0eHw"]
+```
+
+Its bytes in hex:
+
+```
+5b2267686f73746c792d7366752f31206f63637570616e6379222c2268747470733a2f2f63616c6c2e67686f73746c792e746f6f6c73222c226f4b47696f36536c7071656f71617172724b32757277222c22675f6f4b47696f36536c7071656f71617172724b32757277222c2279716f6f787839753361656d68386d6f3577637171313679756675366a69746f7571316f347a6137353164676572316967676879222c313739343730303830302c2245424553457851564668635947526f62484230654877225d
+```
+
+The signature, in hex and as `sig`:
+
+```
+865c98aa62acb31be53693044085147799366ab544c8854129bc182f72fb09f2e0bd9605959cb465fc00f0302e8e40beae19ac1b4a314d22500513447c997509
+hlyYqmKssxvlNpMEQIUUd5k2arVEyIVBKbwYL3L7CfLgvZYFlZy0ZfwA8DAujkC-rhmsG0oxTSJQBRNEfJl1CQ
+```
+
+`node:crypto` reproduces it as it does the token request's vector.
+
 ## Compatibility
 
 `parseGroupMetaBody` drops keys it does not know, so an app from before this WISP reads a body with `call` as before and shows no call. An admin on such an app who renames the group or changes its picture writes a body without `call`, which turns the group's calls off until the admin sets it again from an app that knows it. Nothing changes in the membership chain, in the frames between members, or in 1:1 calls.
+
+The occupancy route (§ Occupancy) is optional on both sides. A node from before it answers `404` and the app shows the group's call as before; an app from before it never asks, and joins as before.
 
 ## Security and privacy
 
 The node learns who joins the call, when, from which address, and the name it gives them; with end-to-end encryption off it can also see and hear the media. It learns nothing a member does not already know. The token request proves a key of the roster asked, for this node, within the last minute; a request seen by someone else cannot be used at another node or again later. `name` is not signed and is used only when the node has no name for `k`. A TURN server in `iceServers` sees the media as the node sends it: DTLS-SRTP, and sealed once more when end-to-end encryption is on.
 
 A moderation request proves the admin asked, for this node, within the last minute, and the node acts only for the admin its roster names. Taking someone out of the call (§ Moderation) does not change the call key: a member banned from the call but still in the group keeps the current epoch's secret, so it could open the call's sealed media if it got it some other way (from the node, or from a member), until the group moves to a new epoch. A group remove ([903](903-group-community.md#membership-chain)) moves it, and the call key with it. The node learns nothing new from a moderation request: the admin and the roster are already known to it.
+
+An occupancy request tells a member of the roster only what joining would show it, and less: whether a call is on, how many are in it and since when, not who. Someone outside the roster gets the one `403`. The node learns that a member has the group open, and from which address, about every 15 seconds while it does; an app that does not want the node to know that does not ask, and still joins as before.
 
 ## Open decisions
 
@@ -271,6 +346,8 @@ A moderation request proves the admin asked, for this node, within the last minu
 The test vector above. An implementation of the node refuses each of the five checks with the same `403`, answers the preflight, and never admits a request to a room that is not `"g_" + g`.
 
 The moderation test vector. A node that has the moderation route refuses each of its six checks with the same `403`, refuses a banned key's token request with it too, leaves a muted key's sources out of its next token, and drops a room's state once the call has ended.
+
+The occupancy test vector. A node that has the occupancy route refuses each of its five checks with the same `403`, counts only roster keys in `"g_" + g`, and answers `0` without `since` for a room that is empty or gone.
 
 ## Revision log
 
