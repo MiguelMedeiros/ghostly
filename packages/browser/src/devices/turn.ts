@@ -226,6 +226,8 @@ export function newestSlots(held: Pick<Held, "record" | "ownSlot" | "ownKey" | "
 
 interface Held {
   record: DeviceRecord; keys: TurnKeys; ownSlot: number; ownKey: Uint8Array; stored: Uint8Array | null; storedRecord: TurnRecord | null;
+  /** The device-set secret `keys` are of: `record` is replaced by every write, and may carry a newer one by then. */
+  d: string;
   /** This device wrote the packet it stored. */
   wrote: boolean;
   /** A record was written since this was read from the store (in this check). */
@@ -282,7 +284,7 @@ export class TurnKeeper {
     const storedRecord = read?.record ?? null;
     const author = storedRecord?.slots[storedRecord.author];
     const wrote = !!storedRecord && storedRecord.author === ownSlot && !!author && toBase64Url(author.key) === own.key;
-    return { record, keys, ownSlot, ownKey, stored, storedRecord, wrote };
+    return { record, keys, d: record.d, ownSlot, ownKey, stored, storedRecord, wrote };
   }
 
   /**
@@ -468,6 +470,11 @@ export class TurnKeeper {
       // settles can offer a new device secret against it by name.
       const stopping = held.record.activeSlot !== undefined && held.record.activeSlot !== held.ownSlot ? held.record.deviceSet[held.record.activeSlot]?.key : undefined;
       held.record = await this.store.move(this.options.profile, "taking", { handoff: { role: "taking", step: `${TAKEOVER}${prior}`, ...(stopping ? { peer: stopping } : {}) } });
+      // A new secret taken since the check above: the last window, as a `taking` device refuses every set-update.
+      if (held.record.d !== held.d) {
+        held.record = await this.store.move(this.options.profile, prior, { handoff: undefined, settle: undefined });
+        return { kind: "wait", read };
+      }
       // The set of the newest record it knows, not only the one it stored: a device added since its last read stays listed.
       const slots = options.slots ?? newestSlots(held, read);
       try { await this.writeWith(held, read.conditions, { turn, ...(slots ? { slots } : {}) }, true); } catch (error) {
@@ -497,6 +504,7 @@ export class TurnKeeper {
       if (!held) return null;
       if (held.record.state !== "taking") throw new Error("Only a device that holds a release takes the turn");
       const read = await this.readWith(held, true);
+      // A belt: `checkSetUpdate` refuses a `taking` device, so no new secret reaches a take today.
       if (!read.good || await this.secretMoved(held)) return { kind: "wait", read };
       // A record below the turn the release names is the releaser's (its last, or a later `rev` of it this device never
       // stored): a release is for the turn above it by construction. One at or above that turn is a rival.
@@ -606,11 +614,12 @@ export class TurnKeeper {
 
   /**
    * A new device secret taken while this read was out (a `set-update`, `links.ts`): the read was of the old address,
-   * and a record written on it would be signed under a secret the device no longer holds. Nothing is written.
+   * and a record written on it would be signed under a secret the device no longer holds. Nothing is written. Against
+   * the secret the keys are of: `readWith`'s amend of the mark may have handed back the new record already.
    */
   private async secretMoved(held: Held): Promise<boolean> {
     const fresh = await this.store.read(this.options.profile);
-    return !!fresh && fresh.d !== held.record.d;
+    return !!fresh && fresh.d !== held.d;
   }
 
   /** One action. Null: read again. */

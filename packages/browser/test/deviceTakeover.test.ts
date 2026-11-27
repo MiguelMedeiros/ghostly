@@ -400,6 +400,30 @@ describe("what keeps a forced takeover from locking the owner out", () => {
     await expect(phone.keeper.check(true)).resolves.toBeTruthy();
   });
 
+  // The two later windows: between the read's check of the secret and its amend of the mark (which hands back the
+  // new record), and between the takeover's check of the secret and its move to `taking`.
+  for (const window of ["mark", "move"] as const) {
+    it(`a set-update accepted just before the takeover's ${window === "mark" ? "amend of the mark" : "move to taking"}: nothing is written under the old secret`, async () => {
+      const NEW_D = new Uint8Array(32).fill(0xe8);
+      const phone = await device(network, 1, "standby");
+      network.seed(phone.stored);
+      const newSet = { d: toBase64Url(NEW_D), deviceSet: [...deviceSet().slice(0, 2), null], turn: N, rev: 0, activeSlot: 0, turnPacket: undefined, seenSequence: 0, tombstone: undefined, settle: undefined };
+      const { amend: amendStore, move } = phone.store;
+      let landed = false;
+      const land = async () => { if (!landed) { landed = true; await amendStore("ghostly", newSet); } };
+      if (window === "mark") phone.store.amend = async (profile, patch) => { if (patch.seenSequence) await land(); return amendStore(profile, patch); };
+      else phone.store.move = async (profile, to, patch) => { if (to === "taking") await land(); return move(profile, to, patch); };
+      clock.onSleep = async () => {};
+      const outcome = await forceTakeover(ports(phone.store, phone.keeper), { password: PASSWORD, name: "Desktop" });
+      expect(landed).toBe(true);
+      expect(outcome.kind).not.toBe("start");
+      expect(phone.store.record).toMatchObject({ state: "standby", d: toBase64Url(NEW_D), takeovers: 0 });
+      expect(phone.store.record.raise).toBeUndefined();
+      expect(phone.store.record.turnPacket).toBeUndefined();
+      await expect(phone.keeper.check(true)).resolves.toBeTruthy();
+    });
+  }
+
   it("a superseded device takes the turn back (It wasn't me) above the turn that replaced it", async () => {
     const desktop = await device(network, 0, "superseded", { activeSlot: 1 });
     const intruder = await packet(N + 7, 0, 1);
