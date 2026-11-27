@@ -3797,7 +3797,17 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
-  async setContactBlocked({ peerPubKeyZ32, blocked }: { peerPubKeyZ32: string; blocked: boolean }): Promise<void> {
+  setContactBlocked(params: { peerPubKeyZ32: string; blocked: boolean }): Promise<void> {
+    // One at a time: each reads the list the one before kept. Two at once (a script, the CLI) both read it before the
+    // subscription was replaced, and the later one saved over the other's key.
+    const run = this.blocking.then(() => this.applyContactBlocked(params));
+    this.blocking = run.catch(() => {});
+    return run;
+  }
+
+  private blocking: Promise<void> = Promise.resolve();
+
+  private async applyContactBlocked({ peerPubKeyZ32, blocked }: { peerPubKeyZ32: string; blocked: boolean }): Promise<void> {
     // Only a key in its one spelling, and only true or false: before, the word "false" blocked, and a word or a key named
     // again went in the list once more each time (which moves to the person's other devices), telling the contact again.
     if (!isZ32Key(peerPubKeyZ32)) throw new Error("Name the contact's key");
