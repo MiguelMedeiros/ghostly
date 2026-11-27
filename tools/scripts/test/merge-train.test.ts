@@ -33,6 +33,8 @@ function fakeRepo() {
   const events = new Map<number, { event: string; label?: { name: string }; created_at: string }[]>();
   /** `editor`: who last wrote the comment, when not its author (an edit by another login). */
   const comments = new Map<number | string, { id: number; node_id?: string; body: string; user?: { login: string }; editor?: string; created_at?: string; author_association?: string }[]>();
+  /** The GitHub reviews of each pull request (`gh pr review`): a body, a state, the commit it was given on. */
+  const reviews = new Map<number, { id: number; body: string; state: string; commit_id: string; submitted_at?: string; author_association?: string }[]>();
   const runs = new Map<string, object[]>();
   /** CI's runs on a commit before the newest one (newest first), and the files each pull request changes (unset: one source file). */
   const earlier = new Map<string, object[][]>();
@@ -119,6 +121,7 @@ function fakeRepo() {
       return first && moved && moved > first ? moved : first;
     },
     comments: async (n: number) => read(comments.get(n) ?? []),
+    reviews: async (n: number) => read(reviews.get(n) ?? []),
     /** Who last wrote each comment, or each pull request's body (`editor`, when not its author). */
     lastEditors: async (ids: string[]) => {
       const all = [...[...comments.values()].flat().map((c) => ({ id: c.node_id, who: c.editor ?? c.user?.login })), ...[...pulls.values()].map((p) => ({ id: p.nodeId, who: p.editor ?? p.author }))];
@@ -281,7 +284,7 @@ function fakeRepo() {
   const flight = () => (batch() ? members() : [...pulls.values()].filter((p) => p.open && alone(p.number)?.sha === p.sha).map((p) => p.number));
   let stamp = 0;
   const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), pause: async () => {}, ...opts });
-  return { gh, git, pulls, events, comments, runs, earlier, kinds, meta, files, drafts, going, cancelled, cancelAccess, pushed, moves, tips, landed, conflicts, clashes, unrebasable, missing, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, mergeStates, pullReads, add, settle, batch, members, alone, flight, run };
+  return { gh, git, pulls, events, comments, reviews, runs, earlier, kinds, meta, files, drafts, going, cancelled, cancelAccess, pushed, moves, tips, landed, conflicts, clashes, unrebasable, missing, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, mergeStates, pullReads, add, settle, batch, members, alone, flight, run };
 }
 
 describe("the line", () => {
@@ -3700,6 +3703,47 @@ describe("a pull request with a review running (Review: in progress)", () => {
     expect(reviewHold([...asked, note("Review: approved (head d06086e)", start + 5 * 60_000), note("Review: changes needed (head d06086e)", start + 9 * 60_000)], sha, start + 10 * 60_000)).toEqual({ since: start + 9 * 60_000, until: null });
     // Only a reviewer's verdict holds it.
     expect(reviewHold([note("Review: changes needed (head d06086e)", start, "NONE")], sha, start + 60_000)).toBeNull();
+  });
+
+  it("reads the head a verdict names as review-verdict does: any `head <sha>` on its first line", () => {
+    const sha = "d06086e5a1b2c3d4e5f60718293a4b5c6d7e8f90";
+    const held = { since: start, until: null };
+    for (const line of ["Review: changes needed (head `d06086e`)", "Review: changes needed (head: d06086e)", "Review: changes needed, head d06086e", "Review: changes needed (head d06086e, after the rebase)", "Review: changes needed: the test is red (head D06086E)"])
+      expect(reviewHold([note(line)], sha, start + 60_000), line).toEqual(held);
+    expect(reviewHold([note("Review: in progress, head `d06086e`")], sha, start + 60_000)).toEqual({ since: start, until: start + REVIEW_HOLD });
+    expect(reviewHold([note("Review: changes needed (head: d06086e)"), note("Review: approved, head `d06086e`", start + 60_000)], sha, start + 2 * 60_000)).toBeNull();
+    // Still only a head it names: another one, one too short to tell, or a word that only looks like one.
+    for (const line of ["Review: changes needed (head: bc29edd)", "Review: changes needed (head: d06)", "Review: changes needed (ahead d06086e)", "Review: changes needed (head d06086e5a1b2c3d4e5f60718293a4b5c6d7e8f90ff)"])
+      expect(reviewHold([note(line)], sha, start + 60_000), line).toBeNull();
+  });
+
+  it("reads a reviewer's GitHub review too: its body, else its state, on the commit it was given on", () => {
+    const sha = "d06086e5a1b2c3d4e5f60718293a4b5c6d7e8f90";
+    const given = (body: string, state: string, at = start, commit_id = sha, author_association = "OWNER") => ({ id: id++, body, state, commit_id, submitted_at: new Date(at).toISOString(), author_association });
+    const held = { since: start, until: null };
+    expect(reviewHold([given("Review: changes needed\n\nThe test is red.", "COMMENTED")], sha, start + 60_000)).toEqual(held);
+    expect(reviewHold([given("", "CHANGES_REQUESTED")], sha, start + 60_000)).toEqual(held);
+    expect(reviewHold([given("Review: in progress", "COMMENTED")], sha, start + 60_000)).toEqual({ since: start, until: start + REVIEW_HOLD });
+    // A later approval ends it, as a review or as a comment; a review given on another commit says nothing of this head.
+    expect(reviewHold([given("", "CHANGES_REQUESTED"), given("", "APPROVED", start + 60_000)], sha, start + 2 * 60_000)).toBeNull();
+    expect(reviewHold([given("", "CHANGES_REQUESTED"), note("Review: approved (head d06086e)", start + 60_000)], sha, start + 2 * 60_000)).toBeNull();
+    expect(reviewHold([given("", "CHANGES_REQUESTED", start, "bc29edd5a1b2c3d4e5f60718293a4b5c6d7e8f90")], sha, start + 60_000)).toBeNull();
+    // A plain comment review, one by an account that may not hold it, or one not submitted yet: nothing.
+    expect(reviewHold([given("Looks fine so far", "COMMENTED")], sha, start + 60_000)).toBeNull();
+    expect(reviewHold([given("", "CHANGES_REQUESTED", start, sha, "NONE")], sha, start + 60_000)).toBeNull();
+    expect(reviewHold([{ ...given("Review: changes needed", "PENDING"), submitted_at: undefined }], sha, start + 60_000)).toBeNull();
+  });
+
+  it("never lands one with changes needed in a GitHub review on its head; it lands after a later approved", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.reviews.set(11, [{ id: 1, body: "Review: changes needed", state: "COMMENTED", commit_id: "h11", submitted_at: new Date(start).toISOString(), author_association: "OWNER" }]);
+    await repo.run({ now: start + REVIEW_HOLD + 60_000 });
+    expect(repo.merges).toEqual([]);
+    expect(said(repo, 11)).toMatch(/Waiting: a reviewer asked for changes on its head at 19:45 UTC/);
+    review(repo, 11, "Review: approved (head `h11`)", start + 2 * REVIEW_HOLD);
+    await repo.run({ now: start + 2 * REVIEW_HOLD + 60_000 });
+    expect(repo.landed).toEqual(["#11"]);
   });
 
   it("says a held one boards on the train's next pass after the verdict, not once it is posted", () => {
