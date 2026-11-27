@@ -1,8 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import {
-  deleteSession, isSessionPinned, listSessions, moveInOrder, movePinned, movePinnedTo, orderPinned, pinnedOrder, pinnedPlace,
-  saveSession, setSessionPinned, setStorageProfile,
+  deleteSession, isSessionPinned, listSessions, moveInOrder, movePinnedTo, orderPinned, pinnedOrder, saveSession, setSessionPinned, setStorageProfile,
 } from "../../../apps/ui/src/lib/storage";
 import { createProfile, namespaceOf } from "../../../apps/ui/src/lib/profiles";
 import { createProfileBackup, restoreProfileBackup } from "../../../apps/ui/src/lib/profileBackup";
@@ -63,22 +62,20 @@ describe("pinned chats in the order chosen", () => {
     expect(pinnedOrder()).toEqual(["b", "a", "d"]);
   });
 
-  it("moves up and down one place, stops at the ends, and tells the list each time", () => {
+  it("moves one place at a time, stops at the ends, and tells the list each time it moved", () => {
     chats();
     pin("a", "b", "c");
     expect(pinnedOrder()).toEqual(["c", "b", "a"]);
     updates.mockClear();
-    expect(movePinned("a", "up")).toEqual({ index: 1, count: 3 });
+    expect(movePinnedTo("a", 1)).toEqual({ index: 1, count: 3 });
     expect(shown()).toEqual(["c", "a", "b", "e", "d"]);
-    expect(movePinned("a", "up")).toEqual({ index: 0, count: 3 });
+    expect(movePinnedTo("a", 0)).toEqual({ index: 0, count: 3 });
     expect(updates).toHaveBeenCalledTimes(2);
-    expect(movePinned("a", "up"), "already first").toBeUndefined();
-    expect(movePinned("b", "down"), "already last").toBeUndefined();
-    expect(movePinned("e", "up"), "not pinned").toBeUndefined();
+    expect(movePinnedTo("a", -1), "already first").toBeUndefined();
+    expect(movePinnedTo("b", 3), "already last").toBeUndefined();
+    expect(movePinnedTo("e", 0), "not pinned").toBeUndefined();
     expect(updates).toHaveBeenCalledTimes(2);
     expect(pinnedOrder()).toEqual(["a", "c", "b"]);
-    expect(pinnedPlace("c")).toEqual({ index: 1, count: 3 });
-    expect(pinnedPlace("e")).toBeUndefined();
   });
 
   it("drops a chat at any place among the pinned ones, never outside them", () => {
@@ -112,7 +109,7 @@ describe("pinned chats in the order chosen", () => {
     chats(["x", "y"]);
     expect(pinnedOrder()).toEqual([]);
     pin("x", "y");
-    movePinned("x", "up");
+    movePinnedTo("x", 0);
     expect(pinnedOrder()).toEqual(["x", "y"]);
     setStorageProfile("");
     expect(pinnedOrder()).toEqual(["b", "a"]);
@@ -127,7 +124,7 @@ describe("pins made before the order was kept", () => {
     expect(storage.getItem("ghostly_pin_order")).toBeNull();
     expect(pinnedOrder()).toEqual(["d", "c", "a"]);
     expect(shown()).toEqual(["d", "c", "a", "e", "b"]);
-    expect(movePinned("a", "up")).toEqual({ index: 1, count: 3 });
+    expect(movePinnedTo("a", 1)).toEqual({ index: 1, count: 3 });
     expect(JSON.parse(storage.getItem("ghostly_pin_order")!)).toEqual(["d", "a", "c"]);
     // One the order does not name (a pin from an older version of the app, synced in) comes after those it names.
     storage.setItem("ghostly_pin_e", "1");
@@ -161,7 +158,7 @@ describe("a profile's backup", () => {
     const back = await restoreProfileBackup(await createProfileBackup(PASSPHRASE, work.id), PASSPHRASE);
     setStorageProfile(namespaceOf(back.id));
     expect(shown()).toEqual(["a", "c", "b", "e", "d"]);
-    expect(movePinned("b", "up")).toEqual({ index: 1, count: 3 });
+    expect(movePinnedTo("b", 1)).toEqual({ index: 1, count: 3 });
   });
 
   it("made before the order was kept restores with its pins, the latest first", async () => {

@@ -25,9 +25,6 @@ export const parseCardId=(id:string):{rail:WalletRail;network:WalletNetwork;card
 /** A wallet card's deck id: a network's only Lightning card is its Lightning (`lightning:testnet`), one of several its own. */
 export const deckId=(w:Pick<WalletInstanceView,'type'|'network'|'card'>,state:WalletState)=>cardId(w.type,w.network,w.type==='lightning'&&lightningCount(state,w.network)>1?w.card:undefined);
 const lightningCount=(state:WalletState,network:WalletNetwork)=>(state.wallets??[]).filter(w=>w.type==='lightning'&&w.network===network).length;
-/** A test wallet's sats are test sats wherever they show: its card says Testnet, and its amounts say so too. */
-export const satsUnit=(network:WalletNetwork)=>network==='testnet'?'test sats':'sats';
-
 /**
  * Which network's Lightning pays an invoice or an address found in a chat: a test chain's is Testnet's; an invoice
  * on Bitcoin (a test mint's look the same) goes to the Mainnet Lightning wallet when there is one, else the Testnet one.
