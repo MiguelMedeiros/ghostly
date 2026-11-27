@@ -99,6 +99,17 @@ describe("changelog fragments", () => {
     expect(fragment("Fixed", "- First, with #1 and <!-- inline -->.\n  - A sub-item.").problems).toEqual([]);
   });
 
+  it("refuses a line of the text that is not in a list item: a bold group, a heading's underline", () => {
+    const x = "docs/changelog/unreleased/x.md";
+    const item = (text: string) => `${x}: the line "${text}" is not in a list item: start it with "- ", or indent it under its item`;
+    const rule = (text: string) => `${x}: the line "${text}" would be a heading or a rule in the changelog: write it as a list item ("- ...")`;
+    expect(fragment("For users / Chat", "- Chat part.\n\n**Calls**\n\n- Calls part.").problems).toEqual([item("**Calls**")]);
+    expect(fragment("Fixed", "- A fix.\n\nMore\n---").problems).toEqual([item("More"), rule("---")]);
+    expect(fragment("Fixed", "- A fix.\n  More\n  ===").problems).toEqual([rule("  ===")]);
+    expect(fragment("Fixed", "- A fix.\n\n- - -").problems).toEqual([rule("- - -")]);
+    expect(fragment("Fixed", "- A fix,\n  over two lines.\n\n  A second paragraph.\n- Another, with **bold** -- and = in it.").problems).toEqual([]);
+  });
+
   it("passes every entry waiting in docs/changelog/unreleased/", () => {
     expect(readFragments(root).flatMap((f: { problems: string[] }) => f.problems)).toEqual([]);
   });
