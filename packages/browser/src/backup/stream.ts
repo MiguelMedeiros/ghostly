@@ -112,6 +112,8 @@ export interface FrameCrypto {
   sha256(...parts: Uint8Array[]): Uint8Array;
   /** Opens a frame sealed with AES-256-GCM (its 16 byte tag at the end) under `key`, 32 bytes; throws if it fails. */
   open(key: Uint8Array, iv: Uint8Array, additionalData: Uint8Array, sealed: Uint8Array): Uint8Array;
+  /** Seals a frame with AES-256-GCM under `key`, 32 bytes: the ciphertext, then its 16 byte tag, as `open` reads it. */
+  seal(key: Uint8Array, iv: Uint8Array, additionalData: Uint8Array, plain: Uint8Array): Uint8Array;
   /**
    * Inflates a gzip frame of at most `limit` bytes out (a `DecompressionStream` costs ~100 µs per frame, however small).
    * Throws "This backup is too large to restore" past `limit`, and any other error for a frame that does not inflate.
@@ -126,10 +128,15 @@ async function openerFrom(passphrase: string, salt: Uint8Array, iterations: numb
     const key = await keyFrom(passphrase, salt, iterations);
     return async (iv, additionalData, sealed) => new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv as BufferSource, additionalData: additionalData as BufferSource }, key, sealed as BufferSource));
   }
-  const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveBits"]);
-  const key = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: salt as BufferSource, iterations }, material, 256));
+  const key = await keyBits(passphrase, salt, iterations);
   return (iv, additionalData, sealed) => frames.open(key, iv, additionalData, sealed);
 }
+/** The same PBKDF2 key as `keyFrom`, as raw bits for a `FrameCrypto`. */
+async function keyBits(passphrase: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
+  const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveBits"]);
+  return new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: salt as BufferSource, iterations }, material, 256));
+}
+type Sealer = (iv: Uint8Array, additionalData: Uint8Array, plain: Uint8Array) => Promise<Uint8Array> | Uint8Array;
 const sha256 = async (...parts: Uint8Array[]) => new Uint8Array(await crypto.subtle.digest("SHA-256", join(parts) as BufferSource));
 function join(parts: Uint8Array[]): Uint8Array {
   if (parts.length === 1) return parts[0];
@@ -161,10 +168,14 @@ export class BackupWriter {
   /** Set once the sink refused a frame: the error it gave, thrown again at every later write. */
   private failed: { error: unknown } | null = null;
 
-  private constructor(private readonly sink: BackupSink, private readonly key: CryptoKey | null, private readonly base: Uint8Array, private chain: Uint8Array, private readonly signal?: AbortSignal) {}
+  private constructor(private readonly sink: BackupSink, private readonly seal: Sealer | null, private readonly base: Uint8Array, private chain: Uint8Array, private readonly frames?: FrameCrypto, private readonly signal?: AbortSignal) {}
 
-  /** `passphrase` null: a backup anyone can read (the caller has made sure that is what the person chose). */
-  static async start(sink: BackupSink, passphrase: string | null, signal?: AbortSignal, version: 2 | 3 = 2): Promise<BackupWriter> {
+  /**
+   * `passphrase` null: a backup anyone can read (the caller has made sure that is what the person chose). `frames`: each
+   * frame sealed or chained at once rather than through an async call (`FrameCrypto`): a profile of 50,000 small files
+   * is 100,000 frames, and the CLI's backup of one took 16 s, most of it in a WebCrypto call per frame.
+   */
+  static async start(sink: BackupSink, passphrase: string | null, signal?: AbortSignal, version: 2 | 3 = 2, frames?: FrameCrypto): Promise<BackupWriter> {
     if (passphrase !== null && passphrase.length < 12) throw new Error("Use at least 12 characters for the backup passphrase");
     check(signal);
     const salt = crypto.getRandomValues(new Uint8Array(16)), base = crypto.getRandomValues(new Uint8Array(7));
@@ -172,8 +183,15 @@ export class BackupWriter {
       ? { format: "ghostly-backup", version, protection: "none", check: { name: "SHA-256-chain" } }
       : { format: "ghostly-backup", version, protection: "passphrase", kdf: { name: "PBKDF2-SHA256", iterations: ITERATIONS, salt: toBase64Url(salt) }, cipher: { name: "AES-256-GCM", nonce: toBase64Url(base) } };
     const line = new TextEncoder().encode(`${JSON.stringify(header)}\n`);
-    const key = passphrase === null ? null : await keyFrom(passphrase, salt, ITERATIONS);
-    const writer = new BackupWriter(sink, key, base, await sha256(line), signal);
+    let seal: Sealer | null = null;
+    if (passphrase !== null && frames) {
+      const key = await keyBits(passphrase, salt, ITERATIONS);
+      seal = (iv, additionalData, plain) => frames.seal(key, iv, additionalData, plain);
+    } else if (passphrase !== null) {
+      const key = await keyFrom(passphrase, salt, ITERATIONS);
+      seal = async (iv, additionalData, plain) => new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource, additionalData: additionalData as BufferSource }, key, plain as BufferSource));
+    }
+    const writer = new BackupWriter(sink, seal, base, frames ? frames.sha256(line) : await sha256(line), frames, signal);
     await sink.write(line);
     writer.written = line.length;
     return writer;
@@ -187,14 +205,14 @@ export class BackupWriter {
     // What a reader refuses is not written: found out now, not when the backup is needed.
     if (plain.length > MAX_FRAME_BYTES) throw new Error("A record of this profile is too large for a backup");
     let out: Uint8Array;
-    if (this.key) {
+    if (this.seal) {
       // The header's digest is every frame's associated data: a frame of another backup, or under a changed header, fails.
-      const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce(this.base, this.frame, kind) as BufferSource, additionalData: this.chain as BufferSource }, this.key, plain as BufferSource));
+      const sealed = await this.seal(nonce(this.base, this.frame, kind), this.chain, plain);
       out = join([prefix(kind, sealed.length), sealed]);
     } else {
       const head = prefix(kind, kind === KIND.final ? 32 : plain.length);
       if (kind === KIND.final) out = join([head, this.chain]);
-      else { out = join([head, plain]); this.chain = await sha256(this.chain, out); }
+      else { out = join([head, plain]); this.chain = this.frames ? this.frames.sha256(this.chain, out) : await sha256(this.chain, out); }
     }
     this.frame += 1;
     // A frame the sink did not take (no room left, say) is the end of this backup: every frame after it would be
