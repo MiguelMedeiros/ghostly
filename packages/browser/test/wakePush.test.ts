@@ -755,6 +755,46 @@ describe("private groups: a mention wakes a member whose app is closed", () => {
     expect((await db.getSettings()).wakeMutedGroups).toEqual(["other", "third"]);
   });
 
+  it("a muted group that ends while another's mute replaces the subscription stays unmuted, joined again", async () => {
+    const node = engine();
+    const [b, c] = [edgeLink(), edgeLink()];
+    await addEdge(node, "g", memberKey(), b);
+    await addEdge(node, "other", memberKey(), c);
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect([b, c].map((link) => framesOf(link).length)).toEqual([1, 1]));
+    await node.setWakeMuted({ linkId: "group:other", muted: true });
+    vi.spyOn(node as never as { rotateWake(): Promise<void> }, "rotateWake").mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    const muting = node.setWakeMuted({ linkId: "group:g", muted: true });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    // Removed from "other" while the subscription is replaced: its mute goes with it.
+    node["groupHistoryGone"]("other");
+    await muting;
+    expect((await db.getSettings()).wakeMutedGroups).toEqual(["g"]);
+    expect(node["groupWakeView"]({ id: "other", profile: "mesh" } as never).wakeMuted).toBeUndefined();
+  });
+
+  it("the group being muted ends during its own wait, or before its turn: it stays unmuted", async () => {
+    const node = engine();
+    const [b, c] = [edgeLink(), edgeLink()];
+    await addEdge(node, "g", memberKey(), b);
+    await addEdge(node, "other", memberKey(), c);
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect([b, c].map((link) => framesOf(link).length)).toEqual([1, 1]));
+    vi.spyOn(node as never as { rotateWake(): Promise<void> }, "rotateWake").mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    const muting = node.setWakeMuted({ linkId: "group:g", muted: true });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    node["groupHistoryGone"]("g");
+    await muting;
+    expect((await db.getSettings()).wakeMutedGroups).toBeUndefined();
+    // Queued behind another group's mute, and gone before its turn.
+    const first = node.setWakeMuted({ linkId: "group:other", muted: true });
+    const queued = node.setWakeMuted({ linkId: "group:g", muted: true });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    node["groupHistoryGone"]("g");
+    await Promise.all([first, queued]);
+    expect((await db.getSettings()).wakeMutedGroups).toEqual(["other"]);
+  });
+
   it("a group mute that fails does not hold up the next one", async () => {
     const node = engine();
     const [b, c] = [edgeLink(), edgeLink()];
