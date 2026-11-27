@@ -1554,6 +1554,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // on hold since: the same, until the label comes off. Before the push below too: a review's hold ends on a new
     // head, so the train's own push would end it.
     if (p.draft || isHeld(p)) return null;
+    // Flying again, it is no longer parked: a mark left so would let another parked one take its place next run.
+    delete mark.parked;
     // The push failed: the rebase it promised is pushed again, a second run too (its head's red is the first run's).
     if (p.sha !== mark.sha) return goAlone(p, { retried: mark.retried, rerun: mark.retried, past });
     const tip = await gh.branchSha(base);
