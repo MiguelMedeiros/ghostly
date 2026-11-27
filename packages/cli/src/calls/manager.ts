@@ -610,6 +610,16 @@ export class CallManager {
     this.saveAuto();
   }
 
+  /**
+   * A contact blocked here (`setContactBlocked`): nothing of theirs is heard any more, their hang-up included, so a call
+   * with them ends now, as the apps' Block contact ends it. One that only rings here stops with nothing sent, as if this
+   * side were closed; one that is on, or rings on their side, ends as a hang-up does.
+   */
+  async endBlocked(): Promise<void> {
+    await Promise.all([...this.calls.values()].filter((call) => this.link(call.chat)?.blocked).map((call) =>
+      this.end(call, "hangup", !(call.direction === "in" && call.state === "ringing"))));
+  }
+
   private saveAuto(): void {
     const tmp = `${this.configPath}.tmp`;
     writeFileSync(tmp, JSON.stringify({ autoAnswer: this.auto }, null, 2) + "\n", { mode: 0o600 });
