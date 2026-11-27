@@ -38,7 +38,8 @@ export class SetMoveRefusal extends Error {
 
 export interface SetMovePorts {
   read(): Promise<DeviceRecord | null>;
-  amend(patch: DevicePatch): Promise<DeviceRecord>;
+  /** A function makes the patch from the record read inside the write (`amendDevice`): what landed since is kept. */
+  amend: (patch: DevicePatch | ((current: DeviceRecord) => DevicePatch | null)) => Promise<DeviceRecord>;
   /** This device's signing key. */
   signer: Signer;
   /** The turn record's sources: the new record and the tombstones are put there. Null: offline, the steps wait for the next start. */
@@ -143,7 +144,10 @@ export async function moveSet(ports: SetMovePorts, options: { remove?: string } 
   const before = await ports.read();
   const plan = await planSetMove(before, ports.signer, { remove: options.remove, random: ports.random });
   ports.crash?.("planned");
-  const record = await ports.amend(plan.patch);
+  // The plan was made from a read before its signing: what was stored for its earlier sets since (an ack, a delivery,
+  // a foreign tombstone) is kept. A set moved or handed over meanwhile is not written over.
+  const record = await ports.amend((current) => (current.state === "active" && current.d === before?.d ? { ...plan.patch, earlierSets: since(plan.patch.earlierSets ?? [], current) } : null));
+  if (record.d !== plan.patch.d) throw new SetMoveRefusal("state", "The device set changed meanwhile. Try again.");
   ports.crash?.("stored");
   const report = await resumeSetMove(ports, record);
   return { ...report, ...(plan.removed ? { removed: plan.removed } : {}) };
@@ -165,7 +169,8 @@ export async function resumeSetMove(ports: SetMovePorts, given?: DeviceRecord): 
     tombstones = await putTombstones(ports.network, record, ports.signer.publicKey);
     // Another tombstone in place of one of ours: not put again, and the person is told.
     const foreign = new Set(tombstones.filter((put) => put.foreign).map((put) => put.d));
-    if (foreign.size) record = await ports.amend({ earlierSets: record.earlierSets.map((set) => (foreign.has(set.d) ? { ...set, foreign: true as const } : set)) });
+    // Marked on the record as it stands at the write: a move stored during the puts keeps its set.
+    if (foreign.size) record = await ports.amend((current) => ({ earlierSets: current.earlierSets.map((set) => (foreign.has(set.d) ? { ...set, foreign: true as const } : set)) }));
   }
   ports.crash?.("tombstone-put");
   await ports.refresh?.();
@@ -248,6 +253,16 @@ export function delivered(record: DeviceRecord | null, key: string, d: string): 
   if (!record || !set || named === undefined || set.delivered?.some((e) => e.key === key && e.d === named)) return null;
   const kept = new Set([record.d, ...record.earlierSets.map((s) => s.d)]);
   return { earlierSets: record.earlierSets.map((s) => (s === set ? withDelivered(s, [{ key, d: named }], kept) : s)) };
+}
+
+/** The planned earlier sets with what the record stored for each since the plan's read: acks, deliveries, a foreign mark. */
+function since(planned: EarlierDeviceSet[], current: DeviceRecord): EarlierDeviceSet[] {
+  return planned.map((set) => {
+    const now = current.earlierSets.find((s) => s.d === set.d);
+    if (!now) return set;
+    const more = (now.delivered ?? []).filter((e) => !set.delivered?.some((w) => w.key === e.key && w.d === e.d));
+    return withDelivered({ ...set, pending: set.pending.filter((key) => now.pending.includes(key)), ...(now.foreign ? { foreign: true as const } : {}) }, more);
+  });
 }
 
 /** `set` with `more` delivered, and only entries of devices still pending under a secret the record keeps (`kept`). */
