@@ -3799,6 +3799,45 @@ describe("a pull request with a review running (Review: in progress)", () => {
     expect(said(repo, 11)).toMatch(/1st\*\*\. Waiting: a review is running on its head/);
   });
 
+  describe("a lone one the train rebased: a verdict on the queued (reviewed) head counts on the train's rebase", () => {
+    const lone = async (body: string, priority = false) => {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true, priority });
+      expect((await repo.run({ now: start - 60 * 60_000 })).inFlight).toBe(11);
+      expect(repo.pulls.get(11)!.sha).not.toBe("h11"); // its head is the train's rebase; its mark keeps h11
+      review(repo, 11, body);
+      repo.settle(); // green on the train's rebase: without the review it would land now
+      await repo.run({ now: start + 5 * 60_000 });
+      return repo;
+    };
+
+    it("holds it with changes needed on the queued head, queue:priority too", async () => {
+      for (const priority of [false, true]) {
+        const repo = await lone("Review: changes needed (head h11)", priority);
+        expect(repo.landed).toEqual([]);
+        expect(said(repo, 11)).toMatch(/Waiting: a reviewer asked for changes on its head at 19:45 UTC/);
+      }
+    });
+
+    it("holds it with a review running on the queued head, but not one with queue:priority", async () => {
+      expect((await lone("Review: in progress (head h11)")).landed).toEqual([]);
+      expect((await lone("Review: in progress (head h11)", true)).landed).toEqual(["#11"]);
+    });
+
+    it("holds it with changes needed on the train's rebase, and lets it land on an approval of the queued head", async () => {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      await repo.run({ now: start - 60 * 60_000 });
+      review(repo, 11, `Review: changes needed (head ${repo.pulls.get(11)!.sha})`);
+      repo.settle();
+      await repo.run({ now: start + 5 * 60_000 });
+      expect(repo.landed).toEqual([]);
+      review(repo, 11, "Review: approved (head h11)", start + 10 * 60_000);
+      await repo.run({ now: start + 11 * 60_000 });
+      expect(repo.landed).toEqual(["#11"]);
+    });
+  });
+
   it("stops a green batch's landing on dev at one whose review started since it boarded", async () => {
     const repo = fakeRepo();
     for (const n of [11, 12, 13]) repo.add(n, { behind: true });

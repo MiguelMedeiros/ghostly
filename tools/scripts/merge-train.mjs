@@ -12,7 +12,8 @@
 //   it with no time limit, whatever "in progress" comes after it; a later approved or a new head ends it (for every
 //   pull request, `queue:priority` too). So does one with a review running: a reviewer's newest `Review:` comment is
 //   "Review: in progress (head <sha>)" on its head, posted less than 90 minutes ago (REVIEW_HOLD, `reviewHold`); a
-//   verdict, a new head or the bound ends it (not for `queue:priority`).
+//   verdict, a new head or the bound ends it (not for `queue:priority`). The train's own rebase of a lone one is not a
+//   new head: a verdict on the queued head counts on it, and one on the rebase counts too (`reviewedHeads`).
 //   A green run of CI that skipped
 //   jobs the pull request's own files turn on (ci.yml planned it from other files: a run for another base) does not
 //   count; the run before it does. Nor does a
@@ -149,10 +150,12 @@ const REVIEWERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
  * head, holds it until REVIEW_HOLD after it was posted; a later verdict or the bound passing ends that. A new head ends
  * both, with nothing to lift. `priority` (`queue:priority`: a flake, a blocker) skips only the "in progress" hold.
  * While it holds, the pull request is held like one with `queue:hold`: it waits in line, keeps its place, and a batch
- * it is aboard stops before landing it.
+ * it is aboard stops before landing it. `sha` may list several heads that are one patch (`reviewedHeads`): a comment on
+ * any of them counts as on this head.
  */
 export function reviewHold(comments, sha, now, priority = false) {
-  const onHead = (head) => !!head && !!sha && (head === sha.toLowerCase() || (head.length >= 7 && sha.toLowerCase().startsWith(head)));
+  const heads = [sha].flat().filter(Boolean).map((s) => s.toLowerCase());
+  const onHead = (head) => !!head && heads.some((s) => head === s || (head.length >= 7 && s.startsWith(head)));
   let newest = null;
   let asked = NaN;
   let approved = NaN;
@@ -645,6 +648,14 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
 const isPosition = (c, login) => c.user?.login === login && (c.body ?? "").startsWith(POSITION);
 
 export const queuedHead = (sticky) => sticky?.body?.match(HEAD)?.[1] ?? null;
+/**
+ * The heads a `Review:` comment may name for pull request `p`: its head, and while that head is the train's own rebase
+ * of the queued one (its lone mark), the queued (reviewed) head and the train's earlier rebase too: one patch.
+ */
+export const reviewedHeads = (p) => {
+  const ours = !!p.alone && (p.alone.sha === p.sha || p.alone.from === p.sha);
+  return [p.sha, ...(ours ? [queuedHead(p.sticky), p.alone.from] : [])].filter(Boolean);
+};
 
 const newCommitsText = (what) =>
   `Merge train: this pull request got new commits after it was queued (${what}), so it left the line. Add \`queue\` again once this head is reviewed and green.`;
@@ -846,6 +857,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const open = await gh.pulls(base);
   const batches = open.filter((p) => isBatch(p, base, login)).sort((a, b) => a.number - b.number);
   const queued = open.filter((p) => !isBatch(p, base, login) && (inLine(p.labels) || also.includes(p.number)));
+  const comments = new Map();
   await inTurns(queued, READS_AT_ONCE, async (p) => {
     const events = (p.events = await gh.events(p.number));
     p.queuedAt = queuedAt(events, p.createdAt, p.labels);
@@ -863,9 +875,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.redAt = p.ci === "failure" ? gateDoneAt(jobs, "CI Success") : null;
     p.failed = p.ci === "failure" ? failedJobs(jobs) : [];
     const said = await gh.comments(p.number);
+    comments.set(p.number, said);
     p.sticky = said.find((c) => isPosition(c, login));
-    // A fix with `queue:priority` (a flake, a blocker) does not wait for a review to end, but changes needed holds it too.
-    p.review = reviewHold(said, p.sha, now, p.priority);
     // GitHub lists both oldest first, and anyone may comment: past what the train reads, its own position comment (the
     // reviewed head) or the latest `queue` may be missing. That is a doubt, not "none yet": it waits, and gets no new comment.
     if (events.truncated) p.unread = "events";
@@ -886,6 +897,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const relabeled = vouchedAt(events, p.labels, null);
     if (p.sticky && relabeled && Date.parse(p.sticky.updated_at ?? p.sticky.created_at) < Date.parse(relabeled)) [p.stale, p.sticky] = [p.sticky, undefined];
     p.alone = aloneMark(p.sticky);
+    // A fix with `queue:priority` (a flake, a blocker) does not wait for a review to end, but changes needed holds it too.
+    // On the train's own rebase, a verdict on the head the reviewer read (the queued one) counts as well.
+    p.review = reviewHold(comments.get(p.number), reviewedHeads(p), now, p.priority);
     // No position comment records the queued head yet: tell it by time, when the branch became this head against the
     // label. A force push the pull request logged counts too, whatever head it left (one put back reads as old).
     if (!p.sticky && inLine(p.labels)) {
