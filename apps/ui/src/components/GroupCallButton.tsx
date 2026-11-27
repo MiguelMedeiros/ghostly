@@ -11,6 +11,7 @@ import { useGroupCallSupport } from "../hooks/useGroupCallSupport";
 import { useGroupCallDevices } from "../hooks/useCallDevices";
 import { useHandler } from "../hooks/useHandler";
 import { useCallService } from "../lib/callService";
+import { useCallOnLockScreen } from "../lib/callUnderLock";
 import { askGroupCallPass, groupCallOf, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, passRefused, type GroupCallPass } from "../lib/groupCallPass";
 import { focus } from "../lib/connection";
 import { askGroupCallKey, canSealCallMedia, groupCallSealed, groupCallSealProblem } from "../lib/groupCallPass";
@@ -212,6 +213,19 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   useEffect(() => { if (!on) setHeard(false); else if (call.local.mic) setHeard(true); }, [on, call.local.mic]);
   useCallService(on && heard ? { name: group.name || t("group.chat.unnamed"), video: call.local.camera } : null, leave,
     settings.lockScreen.enabled && !!settings.lockScreen.passwordHash);
+
+  // While locked, the lock screen shows this call as the group's header names it, its time, and Mute and Leave call
+  // through this call's own controls, with no password (WISP 601 § Locked). Its time counts from when it connected.
+  const [connectedAt, setConnectedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (!on) setConnectedAt(null);
+    else if (call.status === "connected") setConnectedAt((at) => at ?? Date.now());
+  }, [on, call.status]);
+  useCallOnLockScreen(on ? {
+    id: groupId, name: group.name || t("group.chat.unnamed"), named: true, photo: group.picture, group: true,
+    state: call.status === "connected" ? "connected" : "connecting", startedAt: connectedAt, muted: !call.local.mic,
+    toggleMute: () => void call.toggleMic(), end: leave,
+  } : null);
 
   // The room closed (the node dropped you) or would not take you: the window goes, and a failed join says why. Taken
   // out by the admin, the pass held is dropped (the node bans the key) and Join call says why.

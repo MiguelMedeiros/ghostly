@@ -71,6 +71,7 @@ import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { useIsLocked, useRingOnLockScreen, useSayOnLockScreen } from "../contexts/LockScreenContext";
+import { useCallOnLockScreen } from "../lib/callUnderLock";
 import { handOverCall, ringingCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
 import { othersName } from "../lib/groups";
@@ -826,6 +827,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     ringOn: holdForUnlock
       ? () => { if (chatLink?.id && ringing.signal) engine.keepCallOffer(chatLink.id, ringing.signal); nav.conversation(chatPath(sessionId)); }
       : undefined,
+  } : null);
+  // On a call while locked, the lock screen shows whom with (as this chat's header names them), its time, and Mute and
+  // End call through this call's own controls, with no password (WISP 601 § Locked).
+  const callOnState = callState === "offering" ? "calling" as const
+    : callState === "answering" || callState === "connecting" ? "connecting" as const
+    : callState === "connected" ? (webrtc.reconnecting ? "reconnecting" as const : "connected" as const)
+    : null;
+  useCallOnLockScreen(params && !holdForUnlock && callOnState ? {
+    id: sessionId, name: shownName, named: !isAnonymous, peerPubKey: params.peerPubKeyB64, photo: face?.photo,
+    state: callOnState, startedAt: webrtc.callStartedAt, muted: webrtc.isMuted,
+    toggleMute: webrtc.toggleMute, end: () => webrtc.hangUp(),
   } : null);
   // A call answered from the lock screen before the first unlock, handed over to this chat: answered as it came.
   useEffect(() => {

@@ -3,6 +3,7 @@
   "answerPassword": "Enter your password to answer",
   "enterPassword": "Enter your password to unlock",
   "incorrectPassword": "Incorrect password, try again",
+  "onCallWith": "On a call with {{name}}",
   "title": "Ghostly is locked",
   "tooManyAttempts": "Too many attempts. Try again in {{seconds}} s",
   "unlock": "Unlock"

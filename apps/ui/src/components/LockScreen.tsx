@@ -6,7 +6,10 @@ import { ProfileBadge } from "./ProfileBadge";
 import { useViewportHeight } from "../hooks/useViewportHeight";
 import { useBackCloses } from "../hooks/useDismiss";
 import { PeerAvatar } from "./Avatar";
+import { GroupAvatar } from "./GroupAvatar";
 import { ACCEPT, DECLINE, DeclineIcon, PhoneIcon, VideoIcon } from "./IncomingCallNotification";
+import { callTime, useCallsUnderLock, type CallUnderLock } from "../lib/callUnderLock";
+import { isolate } from "../lib/ownStatus";
 
 const LockIcon = ({ className }: { className: string }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
@@ -34,6 +37,11 @@ export function LockScreen() {
   const errorId = useId();
   // A call ringing while locked (WISP 601 § Locked): who calls, Decline, and Answer, which asks for the password first.
   const call = isLocked ? ringing?.[0] ?? null : null;
+  // A call on while locked (WISP 601 § Locked): whom it is with, its time, and Mute and End call, which need no
+  // password. A call ringing meanwhile shows instead, as it would with none on.
+  const onCalls = useCallsUnderLock();
+  const onCall = isLocked && !call ? onCalls[0] ?? null : null;
+  const onCallLabel = useId();
   // The kind each call last rang as. A chat that rang before the first unlock goes with the lock, its call off the list,
   // maybe before the password check ends (an older hash replaced): what it last rang as still counts.
   const rangAs = useRef(new Map<string, boolean>());
@@ -151,6 +159,21 @@ export function LockScreen() {
     }
   }, [callId, callVideo]);
 
+  // A call on that ends (End call pressed here, or hung up) takes its buttons with it: the focus they had goes back to
+  // the password field. The lock stays.
+  const onCallId = onCall?.id;
+  const hadOnCall = useRef(false);
+  useEffect(() => {
+    if (onCallId) {
+      hadOnCall.current = true;
+      return;
+    }
+    if (!hadOnCall.current) return;
+    hadOnCall.current = false;
+    const focused = document.activeElement;
+    if (!focused || focused === document.body || !focused.isConnected) inputRef.current?.focus();
+  }, [onCallId]);
+
   // Answer asks for the password right there, in the same field.
   useEffect(() => {
     if (answering) inputRef.current?.focus();
@@ -194,6 +217,8 @@ export function LockScreen() {
       // Over everything the lock hides, the call window included: the whole window, not the card a dialog draws.
       className="fixed inset-0 z-[60] m-0 h-full w-full max-h-none max-w-none border-0 p-0 bg-app-bg text-text-primary backdrop:bg-app-bg"
       aria-label={t("lockScreen.title")}
+      // On a call, the screen says so as it opens: "On a call with …".
+      aria-describedby={onCall ? onCallLabel : undefined}
     >
       <LockViewport />
       {/* How a call that rang here ended ("Missed audio call"): its card goes, the focus back on the password, and the
@@ -205,6 +230,8 @@ export function LockScreen() {
       <div className="w-full max-w-sm mx-4 py-4">
         {call ? (
           <RingingCard call={call} cardRef={cardRef} profile={profile} />
+        ) : onCall ? (
+          <OnCallCard call={onCall} labelId={onCallLabel} profile={profile} />
         ) : (
         <div className="text-center mb-8">
           <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-surface flex items-center justify-center">
@@ -222,6 +249,8 @@ export function LockScreen() {
           {(!call || answering) && (
           <div>
             {call && <label htmlFor={`${errorId}-field`} className="block mb-2 text-center text-sm text-text-secondary">{t("lockScreen.answerPassword")}</label>}
+            {/* The call's card took the place of the words over the field: they go with the field. */}
+            {onCall && <label htmlFor={`${errorId}-field`} className="block mb-2 text-center text-sm text-text-secondary">{t("lockScreen.enterPassword")}</label>}
             <input
               ref={inputRef}
               id={`${errorId}-field`}
@@ -417,6 +446,102 @@ function CallChoices({ call, answering, busy, canAnswer, onAnswer }: {
         </button>
         <span aria-hidden="true" className="text-text-secondary text-xs">{answerLabel}</span>
       </div>
+    </div>
+  );
+}
+
+const MicIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+    <line x1="12" y1="19" x2="12" y2="23" />
+    <line x1="8" y1="23" x2="16" y2="23" />
+  </svg>
+);
+
+const MicOffIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <line x1="1" y1="1" x2="23" y2="23" />
+    <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+    <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17" />
+    <line x1="12" y1="19" x2="12" y2="23" />
+    <line x1="8" y1="23" x2="16" y2="23" />
+  </svg>
+);
+
+/** The round Mute button, beside End call (the ringing card's Decline): red while muted, as in the call's window. */
+const MUTE = "w-14 h-14 max-md:w-[72px] max-md:h-[72px] shrink-0 rounded-full flex items-center justify-center transition-colors cursor-pointer forced-colors:border forced-colors:border-[color:ButtonText]";
+
+/**
+ * How long the call has lasted, from when it connected (`startedAt`, the device's clock), counted on the monotonic
+ * clock as the call's window counts it: the clock put forward or back mid-call does not change it.
+ */
+function useCallSeconds(startedAt: number | null): number {
+  const [seconds, setSeconds] = useState(() => (startedAt === null ? 0 : Math.max(0, Math.floor((Date.now() - startedAt) / 1000))));
+  useEffect(() => {
+    if (startedAt === null) {
+      setSeconds(0);
+      return;
+    }
+    const from = performance.now() - Math.max(0, Date.now() - startedAt);
+    const tick = () => setSeconds(Math.floor((performance.now() - from) / 1000));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [startedAt]);
+  return seconds;
+}
+
+/**
+ * The call on while locked (WISP 601 § Locked): whom it is with, by the name and picture its chat's header shows, how
+ * long it has lasted, and Mute and End call, which need no password. Nothing else of the chat; the app stays locked
+ * above it, and nothing here leads into it.
+ */
+function OnCallCard({ call, labelId, profile }: { call: CallUnderLock; labelId: string; profile: ProfileEntry | null }) {
+  const { t } = useI18n();
+  const seconds = useCallSeconds(call.state === "connected" ? call.startedAt : null);
+  const time = call.state === "calling" ? t("calls.outgoing")
+    : call.state === "connecting" ? t("calls.connecting")
+    : call.state === "reconnecting" ? t("calls.reconnecting")
+    : callTime(seconds);
+  const muteLabel = call.muted ? t("calls.unmute") : t("calls.mute");
+  const endLabel = call.group ? t("calls.group.leave") : t("calls.end");
+  return (
+    <div className="text-center mb-6">
+      <p className="mb-6 inline-flex items-center gap-1.5 text-sm text-text-secondary">
+        <LockIcon className="w-4 h-4" />
+        {t("lockScreen.title")}
+      </p>
+      {profile && <div className="-mt-2 mb-6"><LockProfile profile={profile} /></div>}
+      <section role="group" aria-labelledby={labelId} data-testid="lock-on-call" data-group={call.group || undefined}
+        className="flex flex-col items-center gap-3">
+        <p id={labelId} className="sr-only">{t("lockScreen.onCallWith", { name: isolate(call.name) })}</p>
+        <div aria-hidden="true" className="relative w-20 h-20 rounded-full bg-surface-hover flex items-center justify-center text-2xl overflow-hidden">
+          {call.group
+            ? <GroupAvatar picture={call.photo} size={80} testId="lock-on-call-avatar" className="bg-accent/15" />
+            : <PeerAvatar peerPubKey={call.peerPubKey} label={call.name} named={call.named} photo={call.photo} testId="lock-on-call-avatar" />}
+        </div>
+        <div className="min-w-0 max-w-full">
+          <p data-testid="lock-on-call-name" className="text-text-primary text-lg font-medium truncate"><bdi>{call.name}</bdi></p>
+          <p data-testid="lock-on-call-time" data-state={call.state} className="text-text-muted text-sm tabular-nums">{time}</p>
+        </div>
+        <div className="flex items-start justify-center gap-10 max-md:gap-6 pt-2">
+          <div className="flex w-24 flex-col items-center gap-2">
+            <button type="button" onClick={call.toggleMute} data-testid="lock-on-call-mute" data-muted={call.muted || undefined}
+              title={muteLabel} aria-label={muteLabel}
+              className={`${MUTE} ${call.muted ? "bg-danger/15 text-danger hover:bg-danger/25" : "bg-surface-hover text-text-primary hover:bg-surface"}`}>
+              {call.muted ? <MicOffIcon /> : <MicIcon />}
+            </button>
+            <span aria-hidden="true" className="text-text-secondary text-xs">{muteLabel}</span>
+          </div>
+          <div className="flex w-24 flex-col items-center gap-2">
+            <button type="button" onClick={call.end} className={DECLINE} data-testid="lock-on-call-end" title={endLabel} aria-label={endLabel}>
+              <DeclineIcon />
+            </button>
+            <span aria-hidden="true" className="text-text-secondary text-xs">{endLabel}</span>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
