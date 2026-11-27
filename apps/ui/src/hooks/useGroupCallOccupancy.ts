@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupCallOccupancyResult } from "@ghostly/browser/engine/groupCall";
+import { useEngineValue } from "../lib/engineState";
 import { useWindowAway } from "../lib/windowAway";
 
 /*
@@ -12,13 +13,20 @@ import { useWindowAway } from "../lib/windowAway";
  * Anything but a 200 says nothing about the call: the button shows as it would without the route. What comes next
  * depends on what came back, kept per call node (its origin) for as long as the app runs, so coming back to the group
  * never cuts a wait short:
- * - `refused` (a 403, a key banned from the call too): asked again at the floor, as after a 200.
- * - `unsupported` (a 404 or a 405: a node without the route, or no node named): that node is not asked again until the
- *   group's call names another node or the app starts again.
- * - `rate_limited` (a 429): its Retry-After is waited out, `OCCUPANCY_RETRY_AFTER_MS` when it could not be read.
- * - `unreachable` (no answer at all: an old node refusing the preflight, a node away; or an engine error): each one
- *   in a row waits twice as long, from the floor up to `OCCUPANCY_BACKOFF_MAX_MS`; a 200 brings it back to the floor.
+ * - `refused` (a 403, a key banned from the call too) and `bad_reply` (any other status, or a 200 that is not an
+ *   occupancy: the node answered, only not usefully): asked again at the floor, as after a 200. Only a 200 ends a
+ *   backoff, as the WISP says.
+ * - `unsupported` (a 404 or a 405: a node without the route, or no node named; the engine remembers it too, per
+ *   group, until the group's `call` changes): that node is not asked again until the group's `call` changes in any
+ *   way (the engine forgets it then, so this does too) or the app starts again.
+ * - `rate_limited` (a 429): its `retryAfter` is waited out, `OCCUPANCY_RETRY_AFTER_MS` when it is null (none the
+ *   page could read).
+ * - `no_answer` (no status at all: an old node refusing the preflight, a node away, the timeout; an engine error, and
+ *   the older `unreachable`, the same): each one in a row waits twice as long, from the floor up to
+ *   `OCCUPANCY_BACKOFF_MAX_MS`; a 200 brings it back to the floor.
  * - `not_member` (told by the engine itself, nothing sent): not asked again while the group stays open.
+ * - `hidden` (told by the engine itself, nothing sent: "Hide my IP" is on, and asking would show the node my address
+ *   without my say): no group is asked again while that setting stays as it was; once it changes, asked as before.
  */
 
 /** The shortest time between two asks about one group's call. */
@@ -38,8 +46,13 @@ export interface GroupCallOccupancyNow {
 const askedAt = new Map<string, number>();
 /** Each group's last answer and when it came: opened again within the floor, the header shows it at once. */
 const answers = new Map<string, { occupancy: GroupCallOccupancyNow; at: number }>();
-/** The call node each group was last seen naming, so a change of node is told. */
-const groupNodes = new Map<string, string>();
+/** The `call` each group was last seen with, so a change of it is told. */
+const groupCalls = new Map<string, string>();
+/**
+ * The "Hide my IP" setting (`relayOnly`) as it was when the engine said `hidden`; null while it has not. While the
+ * setting stays so, nothing is asked: the engine would send nothing anyway.
+ */
+let hiddenUnder: boolean | null = null;
 
 /**
  * Per call node (its origin): asks in a row with no answer, the time before which it is not asked again (a backoff
@@ -65,8 +78,8 @@ export function occupancyBackoffMs(failures: number): number {
   return Math.min(OCCUPANCY_FLOOR_MS * 2 ** Math.max(0, Math.min(failures - 1, 16)), OCCUPANCY_BACKOFF_MAX_MS);
 }
 
-/** The wait a 429 asks for: its Retry-After in seconds, or `OCCUPANCY_RETRY_AFTER_MS` when it has none readable. */
-function retryAfterMs(seconds: number | undefined): number {
+/** The wait a 429 asks for: its `retryAfter` in seconds, or `OCCUPANCY_RETRY_AFTER_MS` when it is null (none readable). */
+function retryAfterMs(seconds: number | null | undefined): number {
   return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : OCCUPANCY_RETRY_AFTER_MS;
 }
 
@@ -77,33 +90,41 @@ function freshAnswer(groupId: string): GroupCallOccupancyNow | null {
 
 /**
  * The group's call as its node last told it: null while not known (not asked yet, anything but a 200, or not
- * `enabled`). `sfu`: the node the group's `call` names. `enabled`: false while I'm in the call, where the button shows
- * the call itself, or where this app can't join one.
+ * `enabled`). `call`: the group's `call` (the node it names, and whether it is sealed). `enabled`: false while I'm in
+ * the call, where the button shows the call itself, or where this app can't join one.
  */
-export function useGroupCallOccupancy(groupId: string, sfu: string | undefined, enabled: boolean): GroupCallOccupancyNow | null {
+export function useGroupCallOccupancy(groupId: string, call: { sfu: string; e2ee?: 1 } | undefined, enabled: boolean): GroupCallOccupancyNow | null {
   const away = useWindowAway();
-  const node = nodeOf(sfu);
+  const relayOnly = useEngineValue((state) => state?.settings.relayOnly === true);
+  const node = nodeOf(call?.sfu);
+  const stamp = JSON.stringify(call ?? null);
   const key = `${groupId} ${node}`;
   const [known, setKnown] = useState<{ key: string; occupancy: GroupCallOccupancyNow | null }>(() => ({ key, occupancy: freshAnswer(groupId) }));
   /** The group and node the engine said I'm not a member of, while open: asked again only once opened again. */
   const outside = useRef<string | null>(null);
+  /** "Hide my IP" as it is now, for an answer that comes after it changed. */
+  const relayOnlyNow = useRef(relayOnly);
+  relayOnlyNow.current = relayOnly;
 
   useEffect(() => {
-    // The group's call names another node: that one is asked at once, even one that once had no route.
-    const before = groupNodes.get(groupId);
-    groupNodes.set(groupId, node);
-    if (before !== undefined && before !== node) {
+    // The group's call changed (another node, or the same one sealed or not): asked at once, even a node that once
+    // had no route, as the engine forgets that too.
+    const before = groupCalls.get(groupId);
+    groupCalls.set(groupId, stamp);
+    if (before !== undefined && before !== stamp) {
       nodeAsks(node).unsupported = false;
       askedAt.delete(groupId);
       answers.delete(groupId);
     }
+    // "Hide my IP" changed since the engine said `hidden`: asked as before.
+    if (hiddenUnder !== null && hiddenUnder !== relayOnly) hiddenUnder = null;
     if (!enabled || away) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Read again at each turn: another group on the same node may have learnt a wait, or that it has no route.
     const plan = () => {
       const asks = nodeAsks(node);
-      if (asks.unsupported || outside.current === key) return;
+      if (asks.unsupported || outside.current === key || hiddenUnder !== null) return;
       const wait = Math.max((askedAt.get(groupId) ?? -Infinity) + OCCUPANCY_FLOOR_MS, asks.until) - Date.now();
       if (wait <= 0) void ask();
       else timer = setTimeout(plan, wait);
@@ -126,14 +147,17 @@ export function useGroupCallOccupancy(groupId: string, sfu: string | undefined, 
         asks.until = 0;
       } else {
         answers.delete(groupId);
-        const code = result?.code ?? "unreachable";
+        // Read as a string: `hidden` and the older `unreachable` too, whichever engine answers.
+        const code: string = result?.code ?? "no_answer";
         if (code === "unsupported") asks.unsupported = true;
-        else if (code === "rate_limited") asks.until = Date.now() + retryAfterMs(result?.retryAfter);
+        else if (code === "rate_limited") asks.until = Date.now() + retryAfterMs(result && "retryAfter" in result ? result.retryAfter : null);
         else if (code === "not_member") outside.current = key;
-        else if (code !== "refused") {
+        else if (code === "hidden") hiddenUnder = relayOnlyNow.current;
+        else if (code === "no_answer" || code === "unreachable") {
           asks.failures += 1;
           asks.until = Date.now() + occupancyBackoffMs(asks.failures);
         }
+        // `refused`, `bad_reply` and a code this page does not know: the floor, as after a 200.
       }
       if (!live) return;
       setKnown({ key, occupancy });
@@ -144,7 +168,7 @@ export function useGroupCallOccupancy(groupId: string, sfu: string | undefined, 
       live = false;
       clearTimeout(timer);
     };
-  }, [groupId, node, key, enabled, away]);
+  }, [groupId, node, stamp, key, enabled, away, relayOnly]);
 
   return enabled && known.key === key ? known.occupancy : null;
 }

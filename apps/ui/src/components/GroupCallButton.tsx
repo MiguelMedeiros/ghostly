@@ -229,7 +229,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   // Whether the group's call is on, asked of its node while I'm not in it (WISP 602 § Occupancy). Nobody in it: Start
   // call, a plain phone. Someone in it: Join call, saying how many to a hover and a screen reader (never who: the node
   // doesn't say). Not known: Join call, as before the route.
-  const occupancy = useGroupCallOccupancy(groupId, group.call?.sfu, !joined && support.supported);
+  const occupancy = useGroupCallOccupancy(groupId, group.call, !joined && support.supported);
   const look = joined ? "joined" : !occupancy ? "unknown" : occupancy.count > 0 ? "on" : "off";
   const inCall = look === "on" ? t("calls.group.inCall", { count: occupancy!.count }) : null;
   const label = look === "off" ? t("calls.group.start") : t("calls.group.join");

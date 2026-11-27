@@ -18,8 +18,10 @@ import { renderApp } from "../render";
  * Whether a group's call is on, before joining it (WISP 602 § Occupancy): the header asks the engine
  * (`groupCallOccupancy`) when the group opens and every 15 s while it is in sight, never while the page is hidden or
  * its window in the background, nor more often than that. What else comes back sets the next ask, per call node: a
- * 403 the same 15 s; a 404 or 405 none until the group's call names another node; a 429 its Retry-After (60 s
- * without one); no answer less and less often (up to 10 min); and coming back to the group cuts none of these short.
+ * 403, or a reply that is no occupancy, the same 15 s; a 404 or 405 none until the group's call changes; a 429 its
+ * Retry-After (60 s without one it can read); no answer less and less often (up to 10 min); and coming back to the
+ * group cuts none of these short. With "Hide my IP" on the engine sends nothing (`hidden`): nothing is asked again
+ * until that setting changes.
  * Join call, labelled in the call's colour, only while someone is in the call; Start call, a plain phone, while nobody
  * is; Join call as before while that is not known; and in the call, the call's own button, with nothing asked.
  */
@@ -148,7 +150,7 @@ describe("asking whether a group's call is on", () => {
     expect([1, 2, 3, 4, 5, 6, 7, 8, 40].map(occupancyBackoffMs)).toEqual([15_000, 30_000, 60_000, 120_000, 240_000, 480_000, 600_000, 600_000, 600_000]);
     expect(OCCUPANCY_BACKOFF_MAX_MS).toBe(600_000);
     // The node never answers (a node older than the route: its refused preflight reads as no answer at all).
-    answer(() => ({ ok: false, code: "unreachable" }));
+    answer(() => ({ ok: false, code: "no_answer" }));
     open();
     await elapse(0);
     expect(asks()).toBe(1);
@@ -166,6 +168,18 @@ describe("asking whether a group's call is on", () => {
     expect(asks()).toBe(11);
     await elapse(OCCUPANCY_FLOOR_MS);
     expect(asks()).toBe(12);
+  });
+
+  it("an older engine's `unreachable` is no answer too", async () => {
+    answer(() => ({ ok: false, code: "unreachable" }) as unknown as GroupCallOccupancyResult);
+    open();
+    await elapse(0);
+    await elapse(15_000);
+    expect(asks()).toBe(2);
+    await elapse(30_000 - 1);
+    expect(asks()).toBe(2);
+    await elapse(1);
+    expect(asks()).toBe(3);
   });
 
   it("counts an engine that can't ask (an error) as no answer too", async () => {
@@ -211,6 +225,36 @@ describe("what the node's answer says of the next ask", () => {
     expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
   });
 
+  it("a reply that is no occupancy (a 500, a 200 of something else): the node answered, so every 15 s, never slower", async () => {
+    answer(() => ({ ok: false, code: "bad_reply" }));
+    open();
+    await elapse(0);
+    expect(asks()).toBe(1);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+    for (const n of [2, 3, 4, 5, 6]) {
+      await elapse(OCCUPANCY_FLOOR_MS - 1);
+      expect(asks(), `ask ${n} not before 15 s`).toBe(n - 1);
+      await elapse(1);
+      expect(asks(), `ask ${n} after 15 s`).toBe(n);
+    }
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+  });
+
+  it("a 404 or 405: the group's call changing on the same node (sealed now) asks again, as the engine forgets it too", async () => {
+    answer(() => ({ ok: false, code: "unsupported" }));
+    const group = community();
+    const view = open(group);
+    await elapse(0);
+    await elapse(5 * 60_000);
+    expect(asks()).toBe(1);
+    answer(() => ({ ok: true, count: 0 }));
+    const sealed = { ...group, call: { sfu: group.call!.sfu, e2ee: 1 } } as GroupView;
+    view.rerender(<GroupCallButton group={sealed} loadLivekit={loadLivekit} />);
+    await elapse(0);
+    expect(asks()).toBe(2);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "off");
+  });
+
   it("a 404 or 405: that node is not asked again, by any group, opened again or not, until the group's call names another node", async () => {
     answer(() => ({ ok: false, code: "unsupported" }));
     const group = community();
@@ -244,8 +288,8 @@ describe("what the node's answer says of the next ask", () => {
     expect(asks()).toBe(3);
   });
 
-  it("a 429: waits 60 s when it says no Retry-After, and its Retry-After when it does (15 s at least), however many came before", async () => {
-    answer(() => ({ ok: false, code: "rate_limited" }));
+  it("a 429: waits 60 s when it says no Retry-After it can read (null), and its Retry-After when it does (15 s at least), however many came before", async () => {
+    answer(() => ({ ok: false, code: "rate_limited", retryAfter: null }));
     open();
     await elapse(0);
     expect(asks()).toBe(1);
@@ -272,7 +316,7 @@ describe("what the node's answer says of the next ask", () => {
   });
 
   it("no answer: coming back to the group does not cut the wait short", async () => {
-    answer(() => ({ ok: false, code: "unreachable" }));
+    answer(() => ({ ok: false, code: "no_answer" }));
     const group = community();
     const first = open(group);
     await elapse(0);
@@ -323,6 +367,36 @@ describe("what the node's answer says of the next ask", () => {
     setShown(true);
     await elapse(OCCUPANCY_FLOOR_MS);
     expect(asks()).toBe(1);
+  });
+
+  it("\"Hide my IP\" on (the engine says hidden and sends nothing): not known, and no group asked again until it is turned off", async () => {
+    fakeEngine.update({ settings: { relayOnly: true } });
+    answer(() => ({ ok: false, code: "hidden" }) as unknown as GroupCallOccupancyResult);
+    const group = community();
+    const first = open(group);
+    await elapse(0);
+    expect(asks()).toBe(1);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+    await elapse(10 * 60_000);
+    expect(asks()).toBe(1);
+    // Hidden and shown, closed and opened again, another group: still nothing asked.
+    setShown(false);
+    setShown(true);
+    first.unmount();
+    const again = open(group);
+    const other = open(community());
+    await elapse(5 * 60_000);
+    expect(asks()).toBe(1);
+    other.unmount();
+    // Turned off: asked at once, and every 15 s again.
+    answer(() => ({ ok: true, count: 2, since: 1_794_700_800 }));
+    act(() => fakeEngine.update({ settings: { relayOnly: false } }));
+    await elapse(0);
+    expect(asks()).toBe(2);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "on");
+    await elapse(OCCUPANCY_FLOOR_MS);
+    expect(asks()).toBe(3);
+    again.unmount();
   });
 });
 
