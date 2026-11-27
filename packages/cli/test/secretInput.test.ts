@@ -264,6 +264,15 @@ describe("secrets from stdin, out of ps", () => {
     await expect(settingValue("iceServers", undefined, never, true)).rejects.toMatchObject({ code: "usage", message: expect.stringMatching(/^Missing <json-value>/) });
   });
 
+  // `settings set iceServers -` on a terminal sat on the keyboard without a word, and what was typed there showed on the
+  // screen, while every other value taken on stdin refuses a terminal.
+  it("settings set <key> - on a terminal is a usage error at once, and stdin is not read", async () => {
+    await expect(settingValue("iceServers", "-", never, true)).rejects.toMatchObject({ code: "usage", message: "Missing <json-value> on stdin: … | ghostly settings set iceServers -" });
+    await expect(settingValue("nick", "-", never, true)).rejects.toMatchObject({ code: "usage", message: "Missing <json-value> on stdin: … | ghostly settings set nick -" });
+    // A value on the command line is no read: a terminal changes nothing.
+    expect(await settingValue("nick", "Ana", never, true)).toEqual({ value: "Ana" });
+  });
+
   it("other commands are left alone", async () => {
     const params = { chat: "x" };
     expect(await secretsFromStdin("chat.get", params, never)).toBeUndefined();

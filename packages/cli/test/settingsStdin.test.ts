@@ -1,5 +1,7 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ghostly, home, localRelay, ok } from "./support/cli";
+import { error, ghostly, home, localRelay, ok } from "./support/cli";
 // covers: headless.cli
 
 /**
@@ -35,5 +37,20 @@ describe("settings set from stdin", { timeout: 120_000 }, () => {
   it("a setting with no value reads it from a pipe", async () => {
     ok(await ghostly(["--home", dir, "settings", "set", "sendTyping"], { env, input: "false\n" }));
     expect(ok(await ghostly(["--home", dir, "settings", "get"], { env }))).toMatchObject({ sendTyping: false });
+  });
+
+  it("iceServers - on a terminal is refused at once with the usage error, and nothing is set", async () => {
+    // Stdin taken for a terminal's: the CLI reads `process.stdin.isTTY` (and `isatty(0)`), which a test's pipe never is.
+    const tty = join(dir, "tty.cjs");
+    writeFileSync(tty, "Object.defineProperty(process.stdin, \"isTTY\", { value: true }); const tty = require(\"node:tty\"); const isatty = tty.isatty; tty.isatty = (fd) => fd === 0 || isatty(fd); require(\"node:module\").syncBuiltinESMExports();\n");
+    // What comes on that stdin is never read: the refusal is not about it.
+    const run = await ghostly(["--home", dir, "settings", "set", "iceServers", "-"], { env: { ...env, NODE_OPTIONS: `--require "${tty}"` }, input: `${turn("typed")}\n` });
+    expect(error(run, "usage", 2).message).toBe("Missing <json-value> on stdin: … | ghostly settings set iceServers -");
+    expect(run.stderr).not.toMatch(/Ctrl-D/);
+    const shown = ok(await ghostly(["--home", dir, "settings", "get", "--show-secret"], { env }));
+    expect(JSON.stringify(shown)).not.toContain("typed");
+    // The same through a pipe: read and set.
+    ok(await ghostly(["--home", dir, "settings", "set", "iceServers", "-"], { env, input: `${turn("piped")}\n` }));
+    expect(JSON.stringify(ok(await ghostly(["--home", dir, "settings", "get", "--show-secret"], { env })))).toContain("piped");
   });
 });
