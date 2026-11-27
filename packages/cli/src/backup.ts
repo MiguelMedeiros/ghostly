@@ -147,7 +147,8 @@ async function place(partial: string, path: string): Promise<void> {
   try {
     const source = await open(partial, "r"), buffer = new Uint8Array(FRAME_BYTES);
     try {
-      for (let read; (read = (await source.read(buffer, 0, buffer.length)).bytesRead);) await target.write(buffer.subarray(0, read));
+      // Each read written whole (`writeAll`): one write taking part of it (the stick filling) left a backup cut short.
+      for (let read; (read = (await source.read(buffer, 0, buffer.length)).bytesRead);) await writeAll(target, buffer.subarray(0, read), undefined, path);
     } finally { await source.close(); }
     await target.sync();
     await target.close();
@@ -480,12 +481,13 @@ export function passphraseForms(given: string): string[] {
 /**
  * Writes all of `chunk` to `handle` (at `position` when given, else where the file is). One `FileHandle.write` may
  * take only part of it, a disk filling as it writes, and says so only in `bytesWritten`: the rest is written by the
- * next call, where the disk's ENOSPC comes. A write that takes nothing is the same full disk, as ENOSPC says it.
+ * next call, where the disk's ENOSPC comes. A write that takes nothing is the same full disk, as ENOSPC says it,
+ * naming `file` when given.
  */
-async function writeAll(handle: FileHandle, chunk: Uint8Array, position?: number): Promise<void> {
+async function writeAll(handle: FileHandle, chunk: Uint8Array, position?: number, file?: string): Promise<void> {
   for (let at = 0; at < chunk.length;) {
     const { bytesWritten } = await handle.write(chunk, at, chunk.length - at, position === undefined ? null : position + at);
-    if (!bytesWritten) throw localFileError(Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC", syscall: "write" }))!;
+    if (!bytesWritten) throw localFileError(Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC", syscall: "write" }), file)!;
     at += bytesWritten;
   }
 }
