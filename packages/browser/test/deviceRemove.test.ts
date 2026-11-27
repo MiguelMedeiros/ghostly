@@ -597,6 +597,24 @@ describe("New device secret", () => {
     expect(pendingFrames(desktop.record).filter((p) => p.key === slot(1).key).map((p) => p.d)).not.toContain(first);
   });
 
+  it("a move whose plan was signed while another move was stored, or the turn was taken, writes nothing and is refused", async () => {
+    const { record } = await setOf(network);
+    const desktop = memory(record(0, "active"));
+    const base = ports(desktop, network);
+    // Another move lands between this move's read and its write: it stays, with its own earlier set.
+    let raced = false;
+    const stale = moveSet({ ...base, amend: async (patch) => { if (!raced) { raced = true; await moveSet(base); } return base.amend(patch); } }, { remove: slot(2).key });
+    await expect(stale).rejects.toThrow(/remove-state/);
+    const newer = desktop.record.d;
+    expect(newer).not.toBe(record(0, "active").d);
+    expect(desktop.record.deviceSet.some((s) => s?.key === slot(2).key)).toBe(true);
+    expect(desktop.record.earlierSets.map((set) => set.d)).toEqual([record(0, "active").d]);
+    // The turn is taken elsewhere (superseded) between the read and the write: the secret does not move.
+    let taken = false;
+    await expect(moveSet({ ...base, amend: async (patch) => { if (!taken) { taken = true; await desktop.move("ghostly", "superseded", {}); } return base.amend(patch); } })).rejects.toThrow(/remove-state/);
+    expect(desktop.record).toMatchObject({ state: "superseded", d: newer });
+  });
+
   it("a device off across two moves by two devices, the profile handed over between them, takes the first and is added again", async () => {
     const { record } = await setOf(network, 4);
     const desktop = memory(record(0, "active")), phone = memory(record(1, "standby")), laptop = memory(record(3, "standby"));
@@ -687,8 +705,21 @@ describe("the tombstones' hourly put", () => {
     await hourly;
     expect(desktop.record.earlierSets).toHaveLength(2);
     expect(desktop.record.earlierSets[0].foreign).toBe(true);
+    expect(newer.foreign).toBeUndefined();
     expect(desktop.record.earlierSets[1]).toEqual(newer);
     expect(pendingFrames(desktop.record).map((p) => p.key)).toContain(slot(1).key);
+  });
+
+  it("a foreign tombstone at one old address marks only that set, through the moves after it", async () => {
+    const { record } = await setOf(network);
+    const desktop = memory(record(0, "active"));
+    await moveSet(ports(desktop, network), { remove: slot(2).key });
+    network.of(oldKeys.identity.pubKeyZ32).seed(await signTombstone(oldKeys, 1, [null, { key: signers[1].publicKey, name: "Phone" }, null, null], sign(1)));
+    await moveSet(ports(desktop, network));
+    await moveSet(ports(desktop, network));
+    await resumeSetMove(ports(desktop, network));
+    expect(desktop.record.earlierSets.map((set) => !!set.foreign)).toEqual([true, false, false]);
+    for (const set of desktop.record.earlierSets.slice(1)) expect(toBase64Url(network.held(turnKeys(fromBase64Url(set.d)))!)).toBe(set.tombstone);
   });
 
   it("puts nothing when no source answers, and the move stays stored for the next start", async () => {
