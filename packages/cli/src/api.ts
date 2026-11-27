@@ -1355,6 +1355,8 @@ const METHODS: Record<string, Method> = {
         await forgetHold(ctx, str(args ?? {}, "linkId", true));
         if (removedPeer) await closeServicesOf(ctx, removedPeer);
       }
+      // A contact blocked mid-call: its hang-up is not heard any more, so the call ends here (`endBlocked`).
+      if (method === "setContactBlocked" && args?.blocked === true) await ctx.calls.endBlocked();
       // A transport chosen during a hold ends it, as `chat transport` does: its time running out takes nothing back.
       if ((method === "setChatTransport" || method === "setDeliveryMode") && typeof args?.linkId === "string") await releaseHold(ctx, args.linkId, "lifted", true);
       return result;
