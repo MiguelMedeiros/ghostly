@@ -1022,6 +1022,23 @@ const METHODS: Record<string, Method> = {
     await node(ctx).renameLink({ linkId: link.id, label: chatName(params, "name") ?? "" });
     return chatJson(findChat(state(ctx).links, link.id));
   },
+  async "contact.block"(ctx, params) {
+    const link = chatOf(ctx, params);
+    if (!link.peerPubKeyZ32) throw new CliError("refused", "Nobody joined this chat yet: there is no contact to block");
+    await node(ctx).setContactBlocked({ peerPubKeyZ32: link.peerPubKeyZ32, blocked: true });
+    return blockedJson(ctx, link.peerPubKeyZ32);
+  },
+  async "contact.blocked"(ctx) {
+    return { contacts: (settingsOf(ctx).blockedContacts ?? []).map((key) => blockedJson(ctx, key)) };
+  },
+  async "contact.unblock"(ctx, params) {
+    // By its key too: a contact whose chats were all deleted here stays blocked, and has no chat left to name it by.
+    const ref = str(params, "chat", true);
+    const key = settingsOf(ctx).blockedContacts?.includes(ref) ? ref : chatOf(ctx, params).peerPubKeyZ32;
+    if (!key) throw new CliError("refused", "Nobody joined this chat yet: there is no contact to unblock");
+    await node(ctx).setContactBlocked({ peerPubKeyZ32: key, blocked: false });
+    return blockedJson(ctx, key);
+  },
   async "chat.remove"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group forget", "--yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass --yes (yes: true over the socket) to go on");
@@ -1617,6 +1634,13 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (sho
 const byItsId = (id: string | undefined) => (id === undefined ? ", with the id of the group meant (ghostly group list)" : "");
 
 /** The chat a chat command with a group twin names: a group's name says so, with `command`, the twin (see `notAGroup`). */
+/** A contact's block, as `contact block`, `contact unblock` and `contact blocked` say it: its key and its 1:1 chats here. */
+function blockedJson(ctx: ApiContext, peer: string) {
+  const blocked = !!settingsOf(ctx).blockedContacts?.includes(peer);
+  const chats = state(ctx).links.filter((l) => l.peerPubKeyZ32 === peer).map((l) => ({ id: l.id, name: l.label?.trim() || l.peerNick?.trim() || null }));
+  return { peer, blocked, chats };
+}
+
 function chatNotGroup(ctx: ApiContext, params: Params, command: string, rest = "") {
   return notAGroup(ctx, params, () => chatOf(ctx, params), (shown, id) => `ghostly ${command} ${shown}${rest ? ` ${rest}` : ""}${byItsId(id)}`);
 }

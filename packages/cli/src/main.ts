@@ -297,6 +297,7 @@ const READS: ReadonlySet<string> = new Set([
   "status", "profile.get", "settings.get", "events.replay", "chat.list", "chat.get", "chat.history", "chat.details",
   "group.list", "group.get", "group.history", "file.list", "wallet.list", "wallet.history", "payment.list", "identity.list", "identity.providers",
   "identity.contact", "service.list", "service.peer", "call.list", "app.served", "x401.credential.list", "saved.list", "status.get",
+  "contact.blocked",
 ]);
 
 /** Whether a one-shot for this call opens the profile offline; test/readOnlyCommands.test.ts names every table command. */
@@ -327,6 +328,8 @@ const LOCAL_WRITES: ReadonlySet<string> = new Set([
   // relay. A one-shot waits for no session, so online it would only show this device to the contacts for a moment; the
   // daemon says it at once, and any process that runs the profile online says it on each chat's next session.
   "status.set", "status.clear",
+  // A block is this profile's settings: each blocked contact is told not to wake the app on its next session.
+  "contact.block", "contact.unblock",
 ]);
 
 /**
