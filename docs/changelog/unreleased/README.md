@@ -21,8 +21,8 @@ section: For users / Chat
   Fixed, For developers, whatever the files' names. The check refuses any other heading, or one in another case.
 - The text is one or more list items, written for the people who read release notes. Plain English, no em dashes, and
   no line that starts with `#` or `<!--`, or is only `-` or `=`: the release would copy it as a heading, a note or a
-  rule. A line that does not start with `- ` is indented under its item: one outside every item (such as `**Calls**`)
-  would be a group of its own.
+  rule. A line that does not start with `- ` is indented two spaces (or a tab) under its item: one outside every item
+  (such as `**Calls**`) would be a group of its own.
 - Entries of one section go in the files' name order.
 - Only a `<slug>.md` file right in this folder is an entry (a lowercase `.md`, not `.MD` or `.markdown`, and not in
   a subfolder): the bump would leave any other out of the release, so the check refuses it.

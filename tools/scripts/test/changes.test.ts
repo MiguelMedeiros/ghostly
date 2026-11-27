@@ -107,7 +107,20 @@ describe("changelog fragments", () => {
     expect(fragment("Fixed", "- A fix.\n\nMore\n---").problems).toEqual([item("More"), rule("---")]);
     expect(fragment("Fixed", "- A fix.\n  More\n  ===").problems).toEqual([rule("  ===")]);
     expect(fragment("Fixed", "- A fix.\n\n- - -").problems).toEqual([rule("- - -")]);
-    expect(fragment("Fixed", "- A fix,\n  over two lines.\n\n  A second paragraph.\n- Another, with **bold** -- and = in it.").problems).toEqual([]);
+    // One space (or a no-break space) is not enough: after a blank line the item's text needs two columns.
+    expect(fragment("For users / Chat", "- Chat part.\n\n **Calls**\n\n- Calls part.").problems).toEqual([item(" **Calls**")]);
+    expect(fragment("For users / Chat", "- Chat part.\n\n **Calls**").problems).toEqual([item(" **Calls**")]);
+    expect(fragment("Fixed", "- A fix,\n  over two lines.\n\n  A second paragraph.\n\t**Bold** in it.\n- Another, with **bold** -- and = in it.").problems).toEqual([]);
+  });
+
+  it("reads a lone carriage return as the end of a line, as Markdown does", () => {
+    const saved = "---\rsection: For users / Chat\r---\r- Chat part.\r\r## 9.9.8\r\r- Fake release.\r";
+    expect(parseFragment("docs/changelog/unreleased/x.md", saved).problems).toEqual([
+      `docs/changelog/unreleased/x.md: the line "## 9.9.8" would be a heading or a note in the changelog: write it as a list item ("- ...")`,
+    ]);
+    expect(fragment("For users / Chat", "- Chat part.\r\r**Calls**\r\r- Calls part.").problems).toEqual([
+      `docs/changelog/unreleased/x.md: the line "**Calls**" is not in a list item: start it with "- ", or indent it under its item`,
+    ]);
   });
 
   it("passes every entry waiting in docs/changelog/unreleased/", () => {

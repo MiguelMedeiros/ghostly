@@ -103,8 +103,9 @@ function groupSpelling(group) {
 export function parseFragment(name, saved, version) {
   const problems = [];
   // Read as written whatever the editor saved: Git for Windows checks files out with CRLF, and some editors start a
-  // file with a byte order mark. Either one made every fragment "start with" the front matter it starts with.
-  const text = saved.replace(/^\uFEFF/, "").replaceAll("\r\n", "\n");
+  // file with a byte order mark. Either one made every fragment "start with" the front matter it starts with. A lone
+  // CR ends a line for Markdown too: kept, "\r\r## 9.9.8" was one line here and a release heading in the notes.
+  const text = saved.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return { problems: [`${name}: starts with a front matter block (---, section: ..., ---)`] };
   const fields = {};
@@ -137,7 +138,8 @@ export function parseFragment(name, saved, version) {
   for (const line of body.split("\n").slice(1)) {
     if (/^\s*(#|<!--)/.test(line)) problems.push(`${name}: the line "${line}" would be a heading or a note in the changelog: write it as a list item ("- ...")`);
     else if (/^\s*[-=][-=\s]*$/.test(line)) problems.push(`${name}: the line "${line}" would be a heading or a rule in the changelog: write it as a list item ("- ...")`);
-    else if (/^\S/.test(line) && !line.startsWith("- ")) problems.push(`${name}: the line "${line}" is not in a list item: start it with "- ", or indent it under its item`);
+    // In an item is "- ", two spaces or a tab: one space (or a no-break space) ends the item after a blank line.
+    else if (line.trim() && !/^(- | {2}|\t)/.test(line)) problems.push(`${name}: the line "${line}" is not in a list item: start it with "- ", or indent it under its item`);
   }
   if (/[–—]/.test(text)) problems.push(`${name}: no em or en dashes`);
   const release = fields.release === undefined ? undefined : fields.release.trim();
