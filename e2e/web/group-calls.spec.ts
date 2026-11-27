@@ -522,7 +522,7 @@ test.describe("a group's call button before joining", () => {
       const { id, members } = await shown();
       const roster = await fetch(`${endpoints.sfu.token}/test/roster/${id}`, { method: "PUT", body: JSON.stringify(Object.fromEntries(members.filter((m) => !m.me).map((m) => [m.key, "Member"]))) });
       expect(roster.status).toBe(204);
-      // Asked before the node knew them, each got its one 403 and waits longer and longer: opened again, each asks now.
+      // Asked before the node knew them, each got a 403 and asks again in 15 s: opened again, each asks now.
       for (const p of [ana, bia]) {
         await p.page.reload();
         await expect(p.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 120_000 });

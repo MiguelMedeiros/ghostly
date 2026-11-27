@@ -8,6 +8,7 @@ import { GroupCallButton } from "../../components/GroupCallButton";
 import type { LivekitModule } from "../../hooks/useGroupCall";
 import { OCCUPANCY_BACKOFF_MAX_MS, OCCUPANCY_FLOOR_MS, occupancyBackoffMs } from "../../hooks/useGroupCallOccupancy";
 import type { GroupCallPass } from "../../lib/groupCallPass";
+import { refreshWindowAway } from "../../lib/windowAway";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -15,19 +16,26 @@ import { renderApp } from "../render";
 
 /**
  * Whether a group's call is on, before joining it (WISP 602 § Occupancy): the header asks the engine
- * (`groupCallOccupancy`) when the group opens and every 15 s while the page is shown, never while it is hidden or
- * more often than that, and less and less often while no answer comes (up to 10 min). Join call, labelled in the
- * call's colour, only while someone is in the call; Start call, a plain phone, while nobody is; Join call as before
- * while that is not known; and in the call, the call's own button, with nothing asked.
+ * (`groupCallOccupancy`) when the group opens and every 15 s while it is in sight, never while the page is hidden or
+ * its window in the background, nor more often than that. What else comes back sets the next ask, per call node: a
+ * 403 the same 15 s; a 404 or 405 none until the group's call names another node; a 429 its Retry-After (60 s
+ * without one); no answer less and less often (up to 10 min); and coming back to the group cuts none of these short.
+ * Join call, labelled in the call's colour, only while someone is in the call; Start call, a plain phone, while nobody
+ * is; Join call as before while that is not known; and in the call, the call's own button, with nothing asked.
  */
 
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const ME = "me".padEnd(52, "y");
 let groups = 0;
-/** A community with a call node, under an id of its own: each test's group was never asked about on this page. */
-const community = () =>
-  ({ ...groupView({ id: `occupancy-${++groups}`, profile: "community", status: "active", epoch: 1, name: "Club", members: [{ key: ME, role: "member", me: true, online: true, missing: 0 }] }), call: { sfu: "https://sfu.ghostly.test" } }) as GroupView;
+/**
+ * A community under an id of its own, with a call node of its own unless `sfu` is given: neither the group nor its
+ * node was asked about on this page before.
+ */
+const community = (sfu?: string) => {
+  const n = ++groups;
+  return { ...groupView({ id: `occupancy-${n}`, profile: "community", status: "active", epoch: 1, name: "Club", members: [{ key: ME, role: "member", me: true, online: true, missing: 0 }] }), call: { sfu: sfu ?? `https://sfu-${n}.ghostly.test` } } as GroupView;
+};
 
 class FakeRoom {
   readonly remoteParticipants = new Map();
@@ -54,6 +62,12 @@ const setShown = (shown: boolean) => act(() => {
   visibility = shown ? "visible" : "hidden";
   document.dispatchEvent(new Event("visibilitychange"));
 });
+let focused = true;
+/** The window comes to the front, or goes behind another app's. */
+const setFocused = (front: boolean) => act(() => {
+  focused = front;
+  window.dispatchEvent(new Event(front ? "focus" : "blur"));
+});
 /** Time goes on by `ms`, with every answer that comes meanwhile taken in. */
 const elapse = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
@@ -66,6 +80,9 @@ beforeEach(() => {
   vi.useFakeTimers();
   visibility = "visible";
   vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+  focused = true;
+  vi.spyOn(document, "hasFocus").mockImplementation(() => focused);
+  refreshWindowAway();
 });
 
 afterEach(() => {
@@ -164,14 +181,148 @@ describe("asking whether a group's call is on", () => {
     expect(asks()).toBe(3);
   });
 
-  it("waits out a 429's Retry-After when it is longer than the wait it would take", async () => {
-    answer(() => ({ ok: false, code: "rate_limited", retryAfter: 90 }));
+  it("asks nothing while its window is in the background, and asks at once when it comes to the front", async () => {
+    answer(() => ({ ok: true, count: 0 }));
     open();
     await elapse(0);
+    expect(asks()).toBe(1);
+    setFocused(false);
+    await elapse(60_000);
+    expect(asks()).toBe(1);
+    setFocused(true);
+    await elapse(0);
+    expect(asks()).toBe(2);
+  });
+});
+
+describe("what the node's answer says of the next ask", () => {
+  it("a 403 (a key banned from the call too): not known, and asked again every 15 s, never slower", async () => {
+    answer(() => ({ ok: false, code: "refused" }));
+    open();
+    await elapse(0);
+    expect(asks()).toBe(1);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+    for (const n of [2, 3, 4, 5, 6]) {
+      await elapse(OCCUPANCY_FLOOR_MS - 1);
+      expect(asks(), `ask ${n} not before 15 s`).toBe(n - 1);
+      await elapse(1);
+      expect(asks(), `ask ${n} after 15 s`).toBe(n);
+    }
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+  });
+
+  it("a 404 or 405: that node is not asked again, by any group, opened again or not, until the group's call names another node", async () => {
+    answer(() => ({ ok: false, code: "unsupported" }));
+    const group = community();
+    const first = open(group);
+    await elapse(0);
+    expect(asks()).toBe(1);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+    await elapse(30 * 60_000);
+    expect(asks()).toBe(1);
+    // Hidden and shown, closed and opened again: still nothing asked.
+    setShown(false);
+    setShown(true);
+    first.unmount();
+    await elapse(60_000);
+    const again = open(group);
+    await elapse(5 * 60_000);
+    expect(asks()).toBe(1);
+    // Another group on the same node: that node is not asked either.
+    const other = open(community(group.call!.sfu));
+    await elapse(60_000);
+    expect(asks()).toBe(1);
+    other.unmount();
+    // The group's call names another node: asked at once, and every 15 s again.
+    answer(() => ({ ok: true, count: 2, since: 1_794_700_800 }));
+    const moved = { ...group, call: { sfu: "https://moved.ghostly.test" } } as GroupView;
+    again.rerender(<GroupCallButton group={moved} loadLivekit={loadLivekit} />);
+    await elapse(0);
+    expect(fakeEngine.callsTo("groupCallOccupancy")).toEqual([{ groupId: group.id }, { groupId: group.id }]);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "on");
+    await elapse(OCCUPANCY_FLOOR_MS);
+    expect(asks()).toBe(3);
+  });
+
+  it("a 429: waits 60 s when it says no Retry-After, and its Retry-After when it does (15 s at least), however many came before", async () => {
+    answer(() => ({ ok: false, code: "rate_limited" }));
+    open();
+    await elapse(0);
+    expect(asks()).toBe(1);
+    await elapse(60_000 - 1);
+    expect(asks()).toBe(1);
+    await elapse(1);
+    expect(asks()).toBe(2);
+    answer(() => ({ ok: false, code: "rate_limited", retryAfter: 20 }));
+    await elapse(60_000);
+    expect(asks()).toBe(3);
+    // Each one waits its own 20 s, not longer and longer.
+    await elapse(20_000 - 1);
+    expect(asks()).toBe(3);
+    await elapse(1);
+    expect(asks()).toBe(4);
+    answer(() => ({ ok: false, code: "rate_limited", retryAfter: 5 }));
+    await elapse(20_000);
+    expect(asks()).toBe(5);
+    await elapse(OCCUPANCY_FLOOR_MS - 1);
+    expect(asks()).toBe(5);
+    await elapse(1);
+    expect(asks()).toBe(6);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+  });
+
+  it("no answer: coming back to the group does not cut the wait short", async () => {
+    answer(() => ({ ok: false, code: "unreachable" }));
+    const group = community();
+    const first = open(group);
+    await elapse(0);
+    await elapse(15_000);
+    await elapse(30_000);
+    expect(asks()).toBe(3);
+    // The next is due 60 s after the third, at 105 s. Closed at 50 s, opened again at 70 s: it still waits.
+    await elapse(5_000);
+    first.unmount();
+    await elapse(20_000);
+    open(group);
+    await elapse(0);
+    expect(asks()).toBe(3);
+    await elapse(35_000 - 1);
+    expect(asks()).toBe(3);
+    await elapse(1);
+    expect(asks()).toBe(4);
+  });
+
+  it("a 429: coming back to the group, or the page shown again, does not cut its Retry-After short", async () => {
+    answer(() => ({ ok: false, code: "rate_limited", retryAfter: 120 }));
+    const group = community();
+    const first = open(group);
+    await elapse(10_000);
+    first.unmount();
+    await elapse(20_000);
+    open(group);
+    await elapse(0);
+    expect(asks()).toBe(1);
+    setShown(false);
+    setShown(true);
+    await elapse(0);
+    expect(asks()).toBe(1);
     await elapse(90_000 - 1);
     expect(asks()).toBe(1);
     await elapse(1);
     expect(asks()).toBe(2);
+  });
+
+  it("not a member (the engine says so and sends nothing): not known, and not asked again while the group is open", async () => {
+    answer(() => ({ ok: false, code: "not_member" }));
+    open();
+    await elapse(0);
+    expect(asks()).toBe(1);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+    await elapse(10 * 60_000);
+    setShown(false);
+    setShown(true);
+    await elapse(OCCUPANCY_FLOOR_MS);
+    expect(asks()).toBe(1);
   });
 });
 
