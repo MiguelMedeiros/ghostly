@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import { appFingerprint, appRefPublisher, type AppCard } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { usePlatformValue } from "../../hooks/useServicesPlatform";
@@ -48,6 +48,9 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   // makes long. The pressed button turns busy so the press shows, and a second press opens nothing more.
   const [opening, setOpening] = useState<"open" | "anyway" | null>(null);
   const app = useInstalledApp(card.ref);
+  // The details screen goes with the app, uninstalled on it or elsewhere (the Apps page, another card of it): it is no
+  // longer chosen, or it would open again by itself once the app is installed again.
+  if (details && !app) setDetails(false);
   // A refused Open's line is of the app as it was: once the installed app reads otherwise (a store allows it again,
   // its publisher revokes it), the card says what the Apps page says, not the old refusal.
   const [errorOf, setErrorOf] = useState(app);
@@ -60,14 +63,19 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   const openRef = useCallback((button: HTMLButtonElement) => () => { openHadFocus.current = document.activeElement === button; }, []);
   const runAnywayRef = useRef<HTMLButtonElement>(null);
   const checkRef = useRef<HTMLSpanElement>(null);
-  // Uninstalled from the details screen its Run anyway opened: that button went with the app, and the screen gave the
-  // focus back to nothing. The card's Join (or its line saying to ask for a link) has it, not the page.
-  const uninstalled = useRef(false);
+  // The app went while the focus was on the details screen its Run anyway opened (or on that screen's Uninstall
+  // question): uninstalled there, or elsewhere meanwhile. That button went with the app, and the screen gave the focus
+  // back to nothing. The card's Join (or its line saying to ask for a link) has it, not the page; never taken from where
+  // the person went meanwhile (the Apps page's own screen, where its Uninstall gives the focus to its Add). The screen
+  // is drawn over the window, outside the card's element, but its focus events reach the card through React.
+  const detailsHadFocus = useRef(false);
+  const focusIn = (e: FocusEvent<HTMLDivElement>) => { detailsHadFocus.current = details && !e.currentTarget.contains(e.target); };
+  const focusOut = (e: FocusEvent<HTMLDivElement>) => { if (e.relatedTarget) detailsHadFocus.current = false; };
   const joinRef = useRef<HTMLButtonElement>(null);
   const askRef = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
-    if (!uninstalled.current || details || app) return;
-    uninstalled.current = false;
+    if (!detailsHadFocus.current || details || app) return;
+    detailsHadFocus.current = false;
     const active = document.activeElement;
     if (!active || active === document.body) (joinRef.current ?? askRef.current)?.focus({ preventScroll: true });
   });
@@ -98,7 +106,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       .finally(() => setOpening(null));
   };
   return (
-    <div className="px-3 py-2.5 space-y-2" data-testid="app-card" data-ref={card.ref}>
+    <div className="px-3 py-2.5 space-y-2" data-testid="app-card" data-ref={card.ref} onFocus={focusIn} onBlur={focusOut}>
       <div className="flex items-start gap-3">
         <AppIcon size={40} installed={app} />
         <div className="min-w-0 flex-1">
@@ -129,7 +137,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
         <AppInstallDialog source={{ card: { ref: card.ref, url: card.url, sequence: card.sequence, digest: card.digest } }} title={card.title}
           sentBy={mine ? undefined : contact} openAfter onClose={() => setInstalling(false)} onInstalled={() => open()} />
       )}
-      {details && app && <InstalledAppDialog app={app} onClose={() => setDetails(false)} onOpen={(_app, options) => open(options?.runAnyway === true)} onUninstalled={() => { uninstalled.current = true; }} />}
+      {details && app && <InstalledAppDialog app={app} onClose={() => setDetails(false)} onOpen={(_app, options) => open(options?.runAnyway === true)} />}
     </div>
   );
 }
