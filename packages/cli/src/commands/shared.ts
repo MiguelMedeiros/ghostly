@@ -1,5 +1,6 @@
 import { closeSync, openSync, readSync, type Stats, statSync } from "node:fs";
 import { sep } from "node:path";
+import { isatty } from "node:tty";
 import { reactionEmoji } from "@ghostly/core";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
@@ -103,6 +104,7 @@ export const STDIN_TOO_BIG = "More than 16 MiB came on stdin, more than any comm
  * create a string longer than 0x1fffffe8 characters", and past 16 MiB a daemon cut the line ("The daemon went away").
  */
 export function readInput(file: string | 0): string {
+  if (file === 0) noteTerminalRead();
   const fd = file === 0 ? 0 : openSync(file, "r");
   try {
     const chunks: Buffer[] = [];
@@ -116,6 +118,20 @@ export function readInput(file: string | 0): string {
       chunks.push(chunk.subarray(0, read));
     }
   } finally { if (file !== 0) closeSync(fd); }
+}
+
+/** What a read of stdin says first on a terminal: how to end what is typed there. */
+export const TERMINAL_READ = `Reading from the terminal: end with ${process.platform === "win32" ? "Ctrl-Z, then Enter" : "Ctrl-D"}`;
+
+/**
+ * Before every read of stdin (`readInput(0)`, main.ts's `readStdin`): on a terminal, one line on stderr saying how the
+ * input ends. `engine <method> -`, `send --stdin`, `app send … -` and a card's `--json -` sat there with no word until
+ * Ctrl-D, while the commands that refuse a terminal say so before they read. Never on stdout, nor on a pipe or a file.
+ * `isatty(0)`, not `process.stdin.isTTY`: making `process.stdin` turns a pipe non-blocking, and `readSync(0)` then
+ * fails with EAGAIN while the writer is slow.
+ */
+export function noteTerminalRead(tty = isatty(0), write: (text: string) => void = (text) => { process.stderr.write(text); }): void {
+  if (tty) write(`ghostly: ${TERMINAL_READ}\n`);
 }
 
 /**

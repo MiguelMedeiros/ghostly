@@ -61,7 +61,9 @@ the profile.
 To join someone else's invite: `printf '%s' "$INVITE" | ghostly invite join --label bob` (stdin keeps it out of `ps`
 and the shell's history; `ghostly invite join <ghostly1… or link>` works too, with a warning). With no invite given,
 a join whose stdin stays empty says so on stderr after 2 s and gives up with a usage error after 60 s; `invite join -`
-waits for stdin as long as it takes. Any command that reads stdin takes at most 16 MiB there, the most a daemon's
+waits for stdin as long as it takes. A command that reads what you type at a terminal (`send --stdin`,
+`engine <method> -`, `app send … -`, a card's `--json -`) first says on stderr how to end it (Ctrl-D). Any command
+that reads stdin takes at most 16 MiB there, the most a daemon's
 request line holds: more is refused as it comes (`bad_request`), and so is a file a request carries (a card's `--json`,
 `identity complete --evidence-file`, `x401 credential add`). A request whose JSON passes 16 MiB all the same (a text's
 escapes) is refused before it goes to the daemon. The invite is the app's own, so
