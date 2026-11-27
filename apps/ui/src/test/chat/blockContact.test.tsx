@@ -91,6 +91,16 @@ describe("Settings → Blocked contacts", () => {
     expect(utils.engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: BOB, blocked: false }, { peerPubKeyZ32: gone, blocked: false }]);
   });
 
+  it("names a contact by the name its chat was given on this device, as the chat list does, not as \"Contact · <tag>\"", async () => {
+    // The chat header's rename keeps the name in the page's stored chat; the engine's link has none.
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: BOB, encKeyB64: "a2V5", participationSeedB64: "cGFydA", messages: [], createdAt: Date.now(), label: "Bea" });
+    const utils = renderApp(<BlockedContacts />);
+    utils.engine.update({ links: [linkView({ id: "link-1", peerPubKeyZ32: BOB })], settings: { blockedContacts: [BOB] } as never });
+    const [row] = await screen.findAllByTestId("settings-blocked-contact");
+    expect(row).toHaveTextContent("Bea");
+    expect(within(row!).getByRole("button")).toHaveAccessibleName("Unblock ⁨Bea⁩");
+  });
+
   it("Unblock hands the focus to the next row's Unblock once its own row is gone, not to the page", async () => {
     const utils = renderApp(<BlockedContacts />);
     const keys = ["a", "c", "d"].map((k) => k.repeat(52));
