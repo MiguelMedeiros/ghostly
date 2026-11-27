@@ -341,7 +341,8 @@ class EngineClient {
     const connection = this.connection;
     if (!connection) throw new Error("Ghostly is starting…");
     const id = this.nextId++;
-    const text = method === "sendMessage" ? sentText(params[0] as Parameters<EngineApi["sendMessage"]>[0]) : undefined;
+    const text = method === "sendMessage" ? sentText(params[0] as Parameters<EngineApi["sendMessage"]>[0])
+      : method === "sendGroupMessage" ? sentGroupText(params[0] as Parameters<EngineApi["sendGroupMessage"]>[0]) : undefined;
     return new Promise<Result<M>>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, ...(text && { text }) });
       connection.send({ kind: "request", id, method, params: params[0] } as Parameters<EngineConnection["send"]>[0]);
@@ -368,7 +369,7 @@ class EngineClient {
             if (!text) { reject(lost); continue; }
             // The peer stores a text before its send answers, and the next peer sends what it stored: one kept is sent,
             // not handed back to be sent twice. Only a text not in the chat failed.
-            void this.keptRow(text).then((messageId) => messageId ? resolve({ error: null, messageId }) : reject(lost), () => reject(lost));
+            void this.keptRow(text, Date.now()).then((messageId) => messageId ? resolve({ error: null, messageId }) : reject(lost), () => reject(lost));
           }
           this.pending.clear();
           this.reconnect(500);
@@ -398,10 +399,14 @@ class EngineClient {
     });
   }
 
-  /** The id of the row a text cut off by the peer going away was kept under, read from the next peer; none when not kept. */
-  private async keptRow({ linkId, text, timestamp }: SentText): Promise<string | undefined> {
-    const { messages } = await this.call("messagePage", { linkId, after: timestamp - 1, before: timestamp + 1 });
-    return messages.find((m) => m.sender === "me" && m.timestamp === timestamp && m.text === text)?.id;
+  /**
+   * The id of the row a text cut off by the peer going away was kept under, read from the next peer; none when not kept.
+   * `lostAt`: when the peer went, the latest a group text's row can be dated.
+   */
+  private async keptRow({ linkId, text, from, until }: SentText, lostAt: number): Promise<string | undefined> {
+    const last = until ?? lostAt;
+    const { messages } = await this.call("messagePage", { linkId, after: from - 1, before: last + 1, limit: 100 });
+    return messages.find((m) => m.sender === "me" && m.timestamp >= from && m.timestamp <= last && m.text === text)?.id;
   }
 
   /**
@@ -581,17 +586,27 @@ function sessionWord(method: string, params: unknown): { key: string; kept: bool
   }
 }
 
-/** A text sent at the page's own time (`sendMessage`'s `timestamp`): what finds its row in the chat. */
+/**
+ * A text sent, and the times its row can carry: what finds that row in the chat. A chat's is dated at the page's own time
+ * (`sendMessage`'s `timestamp`); a group's at the peer's, after the page asked and before the peer went (no `until`).
+ */
 interface SentText {
   linkId: string;
   text: string;
-  timestamp: number;
+  from: number;
+  until?: number;
 }
 
 function sentText(params: Parameters<EngineApi["sendMessage"]>[0]): SentText | undefined {
   const { linkId, text, timestamp } = params ?? {};
   return typeof linkId === "string" && typeof text === "string" && text.trim() && Number.isSafeInteger(timestamp)
-    ? { linkId, text: text.trim(), timestamp: timestamp! } : undefined;
+    ? { linkId, text: text.trim(), from: timestamp!, until: timestamp! } : undefined;
+}
+
+/** A group text is saved before its send answers too (`GroupSession.sendText`), and the next peer says it (`resume`). */
+function sentGroupText(params: Parameters<EngineApi["sendGroupMessage"]>[0]): SentText | undefined {
+  const { groupId, text } = params ?? {};
+  return typeof groupId === "string" && typeof text === "string" && text.trim() ? { linkId: `group:${groupId}`, text: text.trim(), from: Date.now() } : undefined;
 }
 
 /** A state the peer sent, whole: what it left out (`PostedState`) is what this page has from the state before. */
