@@ -48,6 +48,7 @@ function fake(missing = false, there?: { id: string }) {
     replyRefusal: vi.fn(async () => (missing ? NOT_THERE : null)),
     sendFile: vi.fn(async (_: { file: MessageFile; replyTo?: string }) => { if (missing) throw new Error(NOT_THERE); }),
     groupFileCheck: vi.fn(() => ({ error: null })),
+    groupTaken: vi.fn(() => 1),
     sendGroupFile: vi.fn(async (_: { file: MessageFile; replyTo?: string }) => (missing ? { error: NOT_THERE } : { error: null, messageId: "mine:0:1" })),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;

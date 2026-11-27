@@ -44,6 +44,7 @@ function contextFor() {
     getMessage: vi.fn(async () => undefined),
     sendFile: vi.fn(async () => {}),
     groupFileCheck: vi.fn(async () => ({ error: null })),
+    groupTaken: vi.fn(() => 1),
     sendGroupFile: vi.fn(async () => ({ error: null, messageId: "m1" })),
     setTyping: vi.fn(async () => {}),
     setGroupTyping: vi.fn(async () => {}),

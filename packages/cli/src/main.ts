@@ -198,8 +198,9 @@ function chatOrGroup(method: string, params: Record<string, unknown>): boolean {
   // it comes over the group's edges only, and with the groups unstarted the wait ran out with no byte here.
   if (method.startsWith("file.") && typeof params.file === "string" && params.file.startsWith("group-")) return true;
   // And `pin`'s and `forward --to`'s: a group's pin or forwarded copy goes over the same edges (the pin never went,
-  // and a forward's wait could only time out).
-  return method === "chat.pin" || method === "chat.forward";
+  // and a forward's wait could only time out). So does `file send`'s: a group's file is announced over them (its
+  // message never left the device, and the answer, exit 0, said nothing of it).
+  return method === "chat.pin" || method === "chat.forward" || method === "file.send";
 }
 
 /**
