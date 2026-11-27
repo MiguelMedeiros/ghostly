@@ -1853,8 +1853,8 @@ export class GhostlyNode implements EngineImplementation {
         else this.reactionNotes.delete(chat);
       }
       await this.messagesChanged(chat, [id]);
-      // A group's reaction line is that group's view.
-      if (chat.startsWith("group:")) this.groupChanged(chat.slice("group:".length)); else this.emitState();
+      // A group's reaction line is that group's view, a chat's its chat's: a 1:1 reaction built every chat's and group's.
+      this.historyChanged(chat);
     },
     // Someone reacted to a message of mine: a quiet notice, never a message's sound or an unread count.
     notify: (chat, key) => this.feedback("reaction", `${chat}:${key}`, chat),
@@ -4372,7 +4372,7 @@ export class GhostlyNode implements EngineImplementation {
     // The data link is reliable and ordered: sent means delivered.
     if (!live.stored.profile && !error && via === "datalink" && timestamp > live.peerAck) {
       live.peerAck = timestamp;
-      this.emitState();
+      this.chatChanged(linkId);
     }
     return { error, messageId: `me_${timestamp}` };
   }
@@ -4682,7 +4682,7 @@ export class GhostlyNode implements EngineImplementation {
           live.stored = { ...live.stored, removedRefs: withRemovedRef(live.stored.removedRefs, edit.id) };
           this.pinRemoved(linkId, edit.id);
           await this.writeDeletions(linkId, { removedRefs: live.stored.removedRefs });
-          this.emitState();
+          this.chatChanged(linkId);
         }
       }
       return true;
@@ -5291,7 +5291,8 @@ export class GhostlyNode implements EngineImplementation {
     // Its quotes cost no read of the chat each (`QuoteSweeps`): a contact can send and remove, or name ids that never were.
     if (removed) this.quoteSweeps.add(linkId, messageId, replyRef(message ?? { id: messageId, linkId }));
     await this.messagesChanged(linkId, [messageId]);
-    this.emitState();
+    // Its chat's view alone is built again (its last message, its pin): a delete built every chat's and group's view.
+    this.chatChanged(linkId);
     await withdrawn;
   }
 
@@ -6720,7 +6721,7 @@ export class GhostlyNode implements EngineImplementation {
     const patch = { pin, ...(out && { pinOut: out }) };
     live.stored = { ...live.stored, ...patch };
     await db.patchLink(linkId, patch);
-    this.emitState();
+    this.chatChanged(linkId);
   }
 
   /** Says my pin the contact has not confirmed, once both sides offer `pin/1`; again after a while with no receipt. */
@@ -6767,7 +6768,7 @@ export class GhostlyNode implements EngineImplementation {
       if (live.stored.pin !== pin) return;
       live.stored = { ...live.stored, pin: { ...pin, messageId: row.id } };
       await db.patchLink(linkId, { pin: live.stored.pin });
-      this.emitState();
+      this.chatChanged(linkId);
       return;
     }
   }
@@ -9638,7 +9639,7 @@ export class GhostlyNode implements EngineImplementation {
           }
           // Every read of the mailbox says so: the pages hear only of one that changed what the chat shows.
           const shown = JSON.stringify(view);
-          if (shown !== dhtShown) { dhtShown = shown; this.emitState(); }
+          if (shown !== dhtShown) { dhtShown = shown; this.chatChanged(linkId); }
         },
         onHold: (state) => this.hold.peerSaid(linkId, state),
         onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { await (await this.proofsFor(linkId)).receive(frame); } : undefined,
@@ -10800,11 +10801,11 @@ export class GhostlyNode implements EngineImplementation {
         if (this.reactionNotes.get(linkId) === reacted) {
           if (before) this.reactionNotes.set(linkId, before);
           else this.reactionNotes.delete(linkId);
-          this.emitState();
+          this.historyChanged(linkId);
         }
       } else {
         const fresh = noteAfterChange(reacted, row);
-        if (fresh) { this.reactionNotes.set(linkId, fresh); this.emitState(); }
+        if (fresh) { this.reactionNotes.set(linkId, fresh); this.historyChanged(linkId); }
       }
     }
     const onChanges = this.events.onMessageChanges;
