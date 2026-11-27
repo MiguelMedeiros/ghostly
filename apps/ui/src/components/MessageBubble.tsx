@@ -937,9 +937,7 @@ const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   );
 }, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, onDeleteForEveryone: deleteForEveryoneIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, onSave: saveIt, saved, selection, names, highlight, author, onOpenAuthor, payee, buttons, compactPress }: BubbleViewProps) {
-  // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
-  const choosing = !!selection;
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, onDeleteForEveryone: deleteForEveryoneIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, onSave: saveIt, saved, selection: choice, names, highlight, author, onOpenAuthor, payee, buttons, compactPress }: BubbleViewProps) {
   // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
   // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
   // One whose copy into this device failed never left it: the red mark too, but nothing to send again.
@@ -950,11 +948,15 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const fileUnsent = !!message.file && fileNeverSent(failedTransfer);
   const fileFailed = fileRetry || fileUnsent;
   // One that never left is a row the page made alone: the engine has none to reply to, react to, pin, forward or delete
-  // for everyone, and would refuse each (React and Pin with nothing said).
+  // for everyone, save or choose for a forward, and would refuse each (React, Pin and Save with nothing said; a forward
+  // with it in fails whole). In a choice it is drawn as a row that cannot be chosen.
+  const selection = fileUnsent && choice ? { selected: choice.selected } : choice;
+  // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
+  const choosing = !!selection;
   const kept = choosing || fileUnsent;
-  const onPin = kept ? undefined : pinIt, onSave = choosing ? undefined : saveIt;
+  const onPin = kept ? undefined : pinIt, onSave = kept ? undefined : saveIt;
   const onDelete = choosing ? undefined : deleteIt, onDeleteForEveryone = kept ? undefined : deleteForEveryoneIt, onReply = kept ? undefined : replyIt, onEdit = choosing ? undefined : editIt;
-  const onReact = kept ? undefined : reactIt, onForward = kept ? undefined : forwardIt, onSelect = choosing ? undefined : selectIt;
+  const onReact = kept ? undefined : reactIt, onForward = kept ? undefined : forwardIt, onSelect = kept ? undefined : selectIt;
   const { t, language, dir } = useI18n();
   const memberText = useMemberText();
   const chat = useCueChat();
