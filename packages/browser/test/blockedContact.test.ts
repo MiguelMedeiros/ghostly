@@ -403,6 +403,20 @@ describe("setContactBlocked's input", () => {
     expect((await db.getSettings()).blockedContacts).toBeUndefined();
   });
 
+  it("a settings write, a block or an unblock made while a block is saved keeps it, here and on the device", async () => {
+    const a = row(), b = row();
+    const { node } = await watched(a, b);
+    await Promise.all([node.setContactBlocked({ peerPubKeyZ32: a.peerPubKeyZ32, blocked: true }), node.setWakeOnline({ on: false })]);
+    expect(node.getSettings().blockedContacts).toEqual([a.peerPubKeyZ32]);
+    expect((await db.getSettings())).toMatchObject({ blockedContacts: [a.peerPubKeyZ32], wakeOnline: false });
+    await Promise.all([node.setContactBlocked({ peerPubKeyZ32: b.peerPubKeyZ32, blocked: true }), node.setContactBlocked({ peerPubKeyZ32: a.peerPubKeyZ32, blocked: false })]);
+    expect(node.getSettings().blockedContacts).toEqual([b.peerPubKeyZ32]);
+    expect((await db.getSettings()).blockedContacts).toEqual([b.peerPubKeyZ32]);
+    await Promise.all([node.setContactBlocked({ peerPubKeyZ32: a.peerPubKeyZ32, blocked: true }), node.setContactBlocked({ peerPubKeyZ32: a.peerPubKeyZ32, blocked: false })]);
+    expect(node.getSettings().blockedContacts).toEqual([b.peerPubKeyZ32]);
+    expect((await db.getSettings()).blockedContacts).toEqual([b.peerPubKeyZ32]);
+  });
+
   it("a stored list with no key left in it is no list", async () => {
     await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true, blockedContacts: ["zzz", "zzz"] });
     const { node } = await watched(row());

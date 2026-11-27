@@ -3807,14 +3807,25 @@ export class GhostlyNode implements EngineImplementation {
     const chats = [...this.links.values()].filter(({ stored }) => stored.profile && !stored.group && stored.peerPubKeyZ32 === peerPubKeyZ32);
     // A contact told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
     if (blocked && chats.some(({ stored }) => stored.wakeToken)) await this.rotateWake();
-    const next = blocked ? [...list, peerPubKeyZ32] : list.filter(key => key !== peerPubKeyZ32);
-    // Kept here only once it is saved: a block the device could not write held for this session alone, and a second
-    // try found it already there and saved nothing.
-    const settings: Settings = { ...this.settings, blockedContacts: next };
-    if (!next.length) delete settings.blockedContacts;
-    await db.putSettings(settings);
-    this.settings = { ...this.settings, blockedContacts: settings.blockedContacts };
+    // Read again: another call may have changed the list while the wake rotated.
+    const now = blockedKeys(this.settings.blockedContacts);
+    const next = blocked ? (now.includes(peerPubKeyZ32) ? now : [...now, peerPubKeyZ32]) : now.filter(key => key !== peerPubKeyZ32);
+    // Here before the write, as every other settings write saves the whole of `this.settings` and would leave it out.
+    const before = this.settings.blockedContacts;
+    this.settings = { ...this.settings, blockedContacts: next };
     if (!next.length) delete this.settings.blockedContacts;
+    const mine = this.settings.blockedContacts;
+    try {
+      await db.putSettings(this.settings);
+    } catch (error) {
+      // Not saved, so not kept here either: a block held for this session alone, and a second try found it already there
+      // and saved nothing. Unless another call changed the list since: that one's list stays.
+      if (this.settings.blockedContacts === mine) {
+        this.settings = { ...this.settings, blockedContacts: before };
+        if (!before) delete this.settings.blockedContacts;
+      }
+      throw error;
+    }
     for (const live of chats) {
       // An offer heard before the block rings no more, and holds no handoff back.
       if (blocked) this.offersWaiting.delete(live.stored.id);
