@@ -97,7 +97,7 @@ describe("a file in a chat on the DHT only", () => {
     const notice = waitNotice("file.send", params, "daemon")!;
     expect(dhtOnlyNotice(notice, "file.send", params, { deliveryMode: "dht", peerDeliveryMode: null }, "daemon")).toEqual({
       waiting: `copying notes.txt into the profile, then waiting for it to go out to Bob (up to 20 s; Ctrl-C stops the send while it is copied in, then only the waiting). ${mine}`,
-      stopped: `notes.txt was not sent to Bob if it was still being copied in; if it was in the chat, it is kept here (ghostly file list Bob says which). ${mine}`,
+      stopped: `notes.txt was not sent to Bob if it was still being copied in; if it was in the chat or group, it is kept here (ghostly file list Bob says which). ${mine}`,
     });
     expect(dhtOnlyNotice(notice, "file.send", params, { deliveryMode: "auto", peerDeliveryMode: null }, "daemon")).toBe(notice);
     // A chat that holds it for the contact: it goes without a live session, as the notice already says.

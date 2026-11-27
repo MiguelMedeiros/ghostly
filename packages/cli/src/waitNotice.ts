@@ -187,11 +187,14 @@ export function waitNotice(method: string, given: Record<string, unknown>, mode:
     const file = word(params.name) ?? (word(params.path) ? basename(params.path as string) : "the file");
     const chatRef = word(params.chat), chat = chatRef ?? "the contact";
     const list = chatRef ? ` (ghostly file list ${shellWord(chatRef, "<chat>")} says which)` : "";
-    // A group's file waits until a member's edge took its message.
-    const to = chatRef?.startsWith("group:") ? `a member's edge in group ${chatRef.slice("group:".length)} to take it` : `it to go out to ${chat}`;
+    // A group's file waits until a member's edge took its message, 30 s; a group named without `group:` only the engine
+    // tells from a chat, so with no `--timeout` the bound says both.
+    const groupId = chatRef?.startsWith("group:") ? chatRef.slice("group:".length) : undefined, inGroup = groupId !== undefined;
+    const to = inGroup ? `a member's edge in group ${groupId} to take it` : `it to go out to ${chat}`;
+    const bound = typeof params.timeout === "number" || inGroup ? `up to ${seconds} s` : `up to ${seconds} s, or 30 s in a group`;
     return {
-      waiting: `copying ${file} into the profile, then waiting for ${to} (up to ${seconds} s; Ctrl-C stops the send while it is copied in, then only the waiting)`,
-      stopped: `${file} was not sent to ${chat} if it was still being copied in; if it was in the chat, it is kept here and ${goesOn(mode)}${list}`,
+      waiting: `copying ${file} into the profile, then waiting for ${to} (${bound}; Ctrl-C stops the send while it is copied in, then only the waiting)`,
+      stopped: `${file} was not sent to ${chat} if it was still being copied in; if it was in the chat or group, it is kept here and ${goesOn(mode)}${list}`,
     };
   }
   const upTo = `up to ${seconds} s; Ctrl-C stops waiting`;
