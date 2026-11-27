@@ -112,16 +112,20 @@ export async function completeWithPipedEvidence(call: (params: Record<string, un
 
 /**
  * `settings set <key> <json-value>`'s value: from stdin when it is `-`, or when none is given and stdin is not a
- * terminal (a pipe nobody writes: the note, then the usage error, as for a join). A TURN password (`iceServers` with a
- * `credential`) given on the command line still goes, with the ps/history warning: `settings get` hides it as a secret.
+ * terminal (a pipe nobody writes: the note, then the usage error, as for a join). A terminal is refused for both, as
+ * every other value taken on stdin refuses it: typed there, a TURN password shows on the screen. A TURN password
+ * (`iceServers` with a `credential`) given on the command line still goes, with the ps/history warning: `settings get`
+ * hides it as a secret.
  */
 export async function settingValue(key: string, value: string | undefined, read: StdinRead, tty = false, note: (text: string) => void = () => {}): Promise<{ value: string; warning?: string }> {
-  // No value at all: the usage error every command gives (reason, then the usage line); an empty stdin after `-` says how.
+  // No value at all: the usage error every command gives (reason, then the usage line); an empty stdin after `-`, or a
+  // terminal there, says how.
   const usage = "Missing <json-value>: ghostly settings set <key> <json-value> [--force]";
+  const onStdin = `Missing <json-value> on stdin: … | ghostly settings set ${key} -`;
   if (value !== undefined && value !== "-") return { value, ...(key === "iceServers" && hasCredential(value) && { warning: `A TURN password on the command line shows in ps and the shell's history: give it on stdin instead (… | ghostly settings set ${key} -)` }) };
-  if (value === undefined && tty) throw new CliError("usage", usage);
+  if (tty) throw new CliError("usage", value === "-" ? onStdin : usage);
   const text = (value === "-" ? await read() : await readUnasked(read, note, { what: "the value", missing: "Missing <json-value>", command: `settings set ${key}`, as: "an argument" })).replace(/\r?\n$/, "");
-  if (!text.trim()) throw new CliError("usage", value === "-" ? `Missing <json-value> on stdin: … | ghostly settings set ${key} -` : usage);
+  if (!text.trim()) throw new CliError("usage", value === "-" ? onStdin : usage);
   return { value: text };
 }
 

@@ -328,7 +328,7 @@ describe("help", () => {
     expect(wide).toMatch(/^ {2}profile list {2,}Profiles, and which one is current$/m);
     // Piped, as grep reads it: no wrapping.
     const piped = (await ghostly(["help"], { env: { COLUMNS: "" } })).stdout;
-    expect(piped).toMatch(/^ {2}settings set <key> <json-value> \[--force\] {2,}Change one: relays, .* a TURN password stays out of ps$/m);
+    expect(piped).toMatch(/^ {2}settings set <key> <json-value> \[--force\] {2,}Change one: relays, .* a TURN password stays out of ps; pipe it, a terminal is refused$/m);
     expect(piped).toMatch(/^ {2}identity add <provider> \[subject\] .* \[--timeout s\]$/m);
   });
 
