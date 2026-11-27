@@ -194,7 +194,7 @@ describe("a turn read out while the active device removes a device", () => {
     const running = keeper().check(false);
     await new Promise((resolve) => setTimeout(resolve, 10));
     // Meanwhile the person removes the tablet: a new secret, and the old address's tombstone put.
-    const ports: SetMovePorts = { read: async () => record, amend: (patch) => store.amend("ghostly", patch), signer: signers[0], network };
+    const ports: SetMovePorts = { read: async () => record, amend: (patch) => store.amend("ghostly", typeof patch === "function" ? (patch(record) ?? {}) : patch), signer: signers[0], network };
     await moveSet(ports, { remove: slot(2).key });
     const moved = record.d;
     expect(moved).not.toBe(toBase64Url(oldD));
