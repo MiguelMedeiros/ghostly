@@ -288,7 +288,8 @@ export const BACKUP_METHODS: Record<string, Method> = {
         const chunk = held.length === 1 ? held[0] : Buffer.concat(held);
         held = [];
         heldBytes = 0;
-        await handle.write(chunk);
+        // A write may take only part of the chunk (a disk filling): the rest goes on, and the disk's error with it.
+        for (let at = 0; at < chunk.length;) at += (await handle.write(chunk, at, chunk.length - at)).bytesWritten;
       };
       const sink = { write: async (chunk: Uint8Array) => { held.push(chunk); heldBytes += chunk.length; if (heldBytes >= FRAME_BYTES) await flush(); } };
       let writer: BackupWriter;
