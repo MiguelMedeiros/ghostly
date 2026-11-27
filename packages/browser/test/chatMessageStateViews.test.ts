@@ -5,6 +5,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
 import type { EngineState, GroupView, StoredLink, StoredMessage } from "../src/shared/types";
+// guards: #9003
 
 /**
  * What changes in a 1:1 chat's messages (a delete here or the contact's for everyone, a pin or an unpin, a reaction,
