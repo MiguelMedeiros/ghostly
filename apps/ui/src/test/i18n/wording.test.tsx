@@ -51,8 +51,10 @@ describe.each(settingsWords)("$language says $word for Settings", ({ language, w
 
 describe("New chat is in sentence case", () => {
   it("in English, with no Title Case left", () => {
-    const titled = [...flatten(LOCALES.en)].filter(([, value]) => typeof value === "string" && /\bNew Chat\b/.test(value));
+    // But for the Mac menu bar's own item (File → New Chat), in Title Case as every item of a Mac menu is in English.
+    const titled = [...flatten(LOCALES.en)].filter(([key, value]) => typeof value === "string" && /\bNew Chat\b/.test(value) && key !== "app.menu.newChat");
     expect(titled.map(([key]) => key)).toEqual([]);
+    expect(lookup("en", "app.menu.newChat")).toBe("New Chat");
     expect(lookup("en", "sidebar.newChat")).toBe("New chat");
   });
 
