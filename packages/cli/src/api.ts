@@ -1086,9 +1086,14 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.verify"(ctx, params) {
     const link = chatOf(ctx, params, undefined, "only a chat has a code to compare");
-    const code = str(params, "code", true).replace(/\s+/g, "").toLowerCase();
-    const mine = link.pairing?.code?.replace(/\s+/g, "").toLowerCase();
+    // Whatever is between the groups (spaces, hyphens, colons, dots: as the contact wrote it) is nothing: the right code
+    // with hyphens was refused as a code that does not match, the warning of an attack for a way of writing it.
+    const bare = (text: string) => text.replace(/[\s:.\u2010-\u2015-]+/g, "").toLowerCase();
+    const code = bare(str(params, "code", true));
+    const shown = link.pairing?.code, mine = shown ? bare(shown) : undefined;
     if (!mine) throw new CliError("unavailable", "This chat shows no comparison code yet (it needs a live session)");
+    // A code of another length is one typed short or long, not a contact's that differs: said as that, not as an attack.
+    if (code.length !== mine.length) throw new CliError("bad_request", `The code given has ${code.length} characters, and the one this chat shows has ${mine.length} (${shown!.trim().split(/\s+/).length} groups, as chat show prints comparisonCode): check it was typed whole`);
     if (code !== mine) throw new CliError("refused", "The code does not match the one this side shows: do not trust this chat until you know why");
     await node(ctx).confirmPair({ linkId: link.id, code: link.pairing!.code! });
     return chatJson(findChat(state(ctx).links, link.id));

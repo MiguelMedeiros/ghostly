@@ -82,7 +82,7 @@ export const commands: Record<string, Command> = {
   "chat transport": { method: "chat.transport", usage: "chat transport <chat> <auto|dht|webrtc|iroh|hyperdht>", summary: "Choose what carries a chat", args: ["chat", "transport"], words: { transport: Object.keys(TRANSPORT_NAMES) }, params: (_, a) => ({ chat: a.chat, transport: a.transport }) },
   "chat verify": {
     method: "chat.verify", usage: "chat verify <chat> --code <code>", summary: "Mark a contact verified after comparing codes", args: ["chat"],
-    options: { code: { type: "string", description: "The code the contact reads out" } }, params: ({ options }, { chat }) => {
+    options: { code: { type: "string", description: "The code the contact reads out: the comparisonCode their chat show prints (spaces or hyphens between its groups, or none)" } }, params: ({ options }, { chat }) => {
       if (typeof options.code !== "string" || !options.code.trim()) throw new CliError("usage", "--code is needed: ghostly chat verify <chat> --code <code>");
       return { chat, code: options.code };
     },
