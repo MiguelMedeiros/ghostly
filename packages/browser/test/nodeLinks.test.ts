@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { LIMITS, createIdentity, createLink, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
+import { LIMITS, createIdentity, createLink, cutToUtf8Bytes, dhtFileId, sanitizeNick, type FileSink, type GhostLinkOptions } from "@ghostly/core";
 import { GROUP_ANCHOR_ANSWER_MS, GROUP_IROH_WEB_SLOTS, GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { setJoinTraceSink } from "../src/engine/joinTrace";
@@ -1149,6 +1149,43 @@ describe("the capability record of a chat (WISP 03)", () => {
     linkOf(chat.id).isDataLinkOpen = true;
     node["peerCapsChanged"](chat.id, { ...record, rev: 4, name: "Mallory" });
     expect(node.getState().links[0].peerNick).toBe("Bob");
+  });
+
+  it("keeps the whole name a session gave over the record's cut of it (64 bytes), and takes a new one", async () => {
+    // 30 characters of CJK: 90 bytes, a name the name step takes (64 characters) but the record carries only 21 of.
+    const whole = "山田花子".repeat(7) + "山田";
+    const chat = row({ peerNick: whole });
+    const { node, linkOf } = await started(chat);
+    linkOf(chat.id).isDataLinkOpen = false;
+    // The name as the record reader returns it (`CapsExchange.open` cleans it).
+    const record = { rev: 3, issued: 1, author: createIdentity().pubKeyZ32, versions: [1], transports: ["webrtc/1"], extensions: [], descriptors: {},
+      capabilities: ["chat/1", "dht-text/1"], name: sanitizeNick(cutToUtf8Bytes(whole, 64)) ?? "" };
+    node["peerCapsChanged"](chat.id, record);
+    expect(node.getState().links[0].peerNick).toBe(whole);
+    expect((await saved(chat.id))?.peerNick).toBe(whole);
+    // An app before 1.14 cut it by code points; the same name.
+    node["peerCapsChanged"](chat.id, { ...record, rev: 4, name: sanitizeNick([...whole].slice(0, 21).join("")) ?? "" });
+    expect(node.getState().links[0].peerNick).toBe(whole);
+    // A name the contact changed while away is taken, a shorter start of the old one too.
+    node["peerCapsChanged"](chat.id, { ...record, rev: 5, name: "山田" });
+    expect(node.getState().links[0].peerNick).toBe("山田");
+  });
+
+  it("keeps the whole name when the record's cut of it ends at a space the reader trims", async () => {
+    // 20 characters, an ideographic space, then the given name: the 64-byte cut ends at the space (63 bytes).
+    const whole = "山田花子".repeat(5) + "　太郎さん";
+    const chat = row({ peerNick: whole });
+    const { node, linkOf } = await started(chat);
+    linkOf(chat.id).isDataLinkOpen = false;
+    const record = { rev: 3, issued: 1, author: createIdentity().pubKeyZ32, versions: [1], transports: ["webrtc/1"], extensions: [], descriptors: {},
+      capabilities: ["chat/1", "dht-text/1"], name: sanitizeNick(cutToUtf8Bytes(whole, 64)) ?? "" };
+    expect(record.name).toBe("山田花子".repeat(5));
+    node["peerCapsChanged"](chat.id, record);
+    expect(node.getState().links[0].peerNick).toBe(whole);
+    expect((await saved(chat.id))?.peerNick).toBe(whole);
+    // The code-point cut of an app before 1.14, as read.
+    node["peerCapsChanged"](chat.id, { ...record, rev: 4, name: sanitizeNick([...whole].slice(0, 21).join("")) ?? "" });
+    expect(node.getState().links[0].peerNick).toBe(whole);
   });
 });
 
