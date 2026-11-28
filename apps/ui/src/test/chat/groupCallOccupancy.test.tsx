@@ -545,4 +545,44 @@ describe("the group's call button, by what the node says", () => {
     expect(screen.queryByTestId("group-call")).toBeNull();
     expect(asks()).toBe(2);
   });
+
+  it("left within 15 s of the last answer: not the answer from before joining (nobody in it), Join call until the node says", async () => {
+    answer(() => ({ ok: true, count: 0 }));
+    fakeEngine.on("groupCallToken", () => pass());
+    open();
+    await elapse(0);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "off");
+    fireEvent.click(screen.getByTestId("group-call-join"));
+    await elapse(100);
+    expect(screen.getByTestId("group-call")).toBeInTheDocument();
+    // Another member joined meanwhile, and stays when I leave 5 s later.
+    answer(() => ({ ok: true, count: 1, since: 1_794_700_800 }));
+    await elapse(5_000);
+    fireEvent.click(screen.getByTestId("group-call-leave"));
+    await elapse(0);
+    expect(screen.queryByTestId("group-call")).toBeNull();
+    const button = screen.getByTestId("group-call-join");
+    expect(button).toHaveAttribute("data-call", "unknown");
+    expect(button).toHaveAccessibleName("Join call");
+    // Asked once the floor from the last ask is out: then it says who is in it.
+    await elapse(OCCUPANCY_FLOOR_MS - 5_100);
+    expect(asks()).toBe(2);
+    expect(button).toHaveAttribute("data-call", "on");
+  });
+
+  it("closed in the call and opened again within 15 s: not the answer from before joining either", async () => {
+    answer(() => ({ ok: true, count: 0 }));
+    fakeEngine.on("groupCallToken", () => pass());
+    const group = community();
+    const first = open(group);
+    await elapse(0);
+    fireEvent.click(screen.getByTestId("group-call-join"));
+    await elapse(100);
+    expect(screen.getByTestId("group-call")).toBeInTheDocument();
+    first.unmount();
+    answer(() => ({ ok: true, count: 1, since: 1_794_700_800 }));
+    await elapse(3_000);
+    open(group);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+  });
 });
