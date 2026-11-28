@@ -294,7 +294,7 @@ function Tile({ person, you, kind, speaking, name, face, menu, whole = false }: 
  */
 export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true, error = null, nameOf: groupNameOf, raised = 0, moderator }: GroupCallViewProps) {
   const { t } = useI18n();
-  const moderation = useCallModeration(moderator, connected);
+  const moderation = useCallModeration(moderator, connected, call.participants);
   // How loud each of the others plays here, kept by their key past this call (lib/groupCallVolume.ts).
   const [, setVolumesSet] = useState(0);
   const setVolume = (identity: string, volume: number) => {

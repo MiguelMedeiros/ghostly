@@ -5,6 +5,7 @@
   "letBackIn": "允许{{name}}重新加入",
   "menu": "管理{{name}}",
   "muteMic": "静音麦克风",
+  "notMember": "只能管理群组成员",
   "rateLimited": "一次更改太多。请一分钟后再试。",
   "refused": "通话服务器未接受此操作",
   "remove": "移除",

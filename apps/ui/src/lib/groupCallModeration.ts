@@ -17,8 +17,11 @@ export interface GroupCallRoomState {
   banned: string[];
 }
 
-/** Why nothing happened: not the admin, the node's refusal, too many at once, a node without the route, no answer. */
-export type GroupCallModerationCode = "not_admin" | "refused" | "rate_limited" | "unsupported" | "unreachable";
+/**
+ * Why nothing happened: not the admin, the node's refusal, too many at once, a node without the route, no answer; and,
+ * told here and never by the node, a target the engine refuses because it is not another member's key (`not_member`).
+ */
+export type GroupCallModerationCode = "not_admin" | "not_member" | "refused" | "rate_limited" | "unsupported" | "unreachable";
 export type GroupCallModerationResult = { ok: true; state: GroupCallRoomState } | { ok: false; code: GroupCallModerationCode; retryAfter?: number };
 
 export interface GroupCallModeration {
@@ -28,13 +31,19 @@ export interface GroupCallModeration {
   src?: GroupCallSource[];
 }
 
-/** Sends one act. A throw (a request the engine refuses to sign, the engine gone) reads as no answer. */
+/** The engine's throw for a target that is not another member's key (engine/node.ts `groupCallModerate`). */
+const NOT_A_MEMBER_KEY = "target must be the key of another member";
+
+/**
+ * Sends one act. The engine's throw for a target that is not a member's key (a tile under another identity, as a
+ * node-run participant's) is `not_member`; any other throw (the engine gone) reads as no answer.
+ */
 export async function moderateGroupCall(ask: GroupCallModeration): Promise<GroupCallModerationResult> {
   const call = engine.call as unknown as (method: "groupCallModerate", params: GroupCallModeration) => Promise<GroupCallModerationResult>;
   try {
     return await call.call(engine, "groupCallModerate", ask);
-  } catch {
-    return { ok: false, code: "unreachable" };
+  } catch (cause) {
+    return { ok: false, code: (cause as { message?: unknown } | null)?.message === NOT_A_MEMBER_KEY ? "not_member" : "unreachable" };
   }
 }
 
@@ -43,8 +52,9 @@ export function moderationProblemText(code: GroupCallModerationCode, t: Translat
   switch (code) {
     case "unsupported": return t("groupCallModeration.unsupported");
     case "rate_limited": return t("groupCallModeration.rateLimited");
-    case "refused":
-    case "not_admin": return t("groupCallModeration.refused");
+    case "refused": return t("groupCallModeration.refused");
+    case "not_admin": return t("errors.group.adminOnly");
+    case "not_member": return t("groupCallModeration.notMember");
     default: return t("groupCallModeration.unreachable");
   }
 }
