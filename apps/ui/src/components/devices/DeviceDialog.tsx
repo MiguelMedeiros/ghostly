@@ -40,7 +40,9 @@ export function DeviceDialog({ title, onClose, testId, children }: { title: Reac
         <h2 id={`${id}-title`} className="text-base font-semibold min-w-0 break-words">{title}</h2>
         <button type="button" onClick={onClose} aria-label={t("common.close")} className="h-10 w-10 max-md:h-[44px] max-md:w-[44px] shrink-0 cursor-pointer rounded-lg text-xl hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">×</button>
       </div>
-      <div className="space-y-3 text-sm">{shown && children}</div>
+      {/* A word longer than its line breaks (a device's name of one word at a large text size on a phone): it ran past
+          the dialog's edge, cut, with the dialog scrolling sideways. `anywhere`, so a button's label shrinks with it. */}
+      <div className="space-y-3 text-sm [overflow-wrap:anywhere]">{shown && children}</div>
     </dialog>,
     document.body,
   );
