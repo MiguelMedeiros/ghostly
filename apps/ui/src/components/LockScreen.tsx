@@ -529,7 +529,7 @@ function OnCallCard({ call, labelId, profile }: { call: CallUnderLock; labelId: 
           <div className="flex w-24 flex-col items-center gap-2">
             <button type="button" onClick={call.toggleMute} data-testid="lock-on-call-mute" data-muted={call.muted || undefined}
               title={muteLabel} aria-label={muteLabel}
-              className={`${MUTE} ${call.muted ? "bg-danger/15 text-danger hover:bg-danger/25" : "bg-surface-hover text-text-primary hover:bg-surface"}`}>
+              className={`${MUTE} ${call.muted ? "bg-danger/15 text-danger-ink hover:bg-danger/25" : "bg-surface-hover text-text-primary hover:bg-surface"}`}>
               {call.muted ? <MicOffIcon /> : <MicIcon />}
             </button>
             <span aria-hidden="true" className="text-text-secondary text-xs">{muteLabel}</span>
