@@ -14,7 +14,7 @@ import { deviceSetView } from "../src/devices/links";
 import { openTurnKeeper } from "../src/devices/setup";
 import { DEVICE_KEYS_DB, closeDeviceKeysDb, loadDeviceSigningKey } from "../src/devices/signingKey";
 import { firstRecord, type DeviceRecord } from "../src/devices/state";
-import { closeDevicesDb, readDeviceRecord, setDeviceMirror } from "../src/devices/store";
+import { amendDevice, closeDevicesDb, readDeviceRecord, setDeviceMirror } from "../src/devices/store";
 import { dropDevicesDatabase, putDeviceRecord } from "./helpers/deviceRecord";
 import { FakeTurnNetwork } from "./helpers/turnNetwork";
 // covers: devices.enroll, devices.enroll.session
@@ -250,6 +250,49 @@ describe("adding a device", () => {
     const a = inviter(), b = joiner({ name: "Miguel's phone 📱📱" });
     await toDigits(a, b);
     expect(a.current()).toMatchObject({ device: "Miguel's phone" });
+  });
+
+  it("a new device named as a device of the set already is (two of a kind) is added under a name of its own: 2, then 3", async () => {
+    // The profile's first set: the joiner asks for the inviter's own name.
+    const a = inviter(), b = joiner({ name: "MacBook" });
+    await toDigits(a, b);
+    expect(a.current()).toMatchObject({ step: "confirm", device: "MacBook 2" });
+    await a.confirm(true);
+    await until(() => a.ended && b.ended);
+    expect(a.current()).toMatchObject({ step: "done", device: "MacBook 2" });
+    // A third, named as typed another way (case, an invisible joiner): still the same name.
+    pipe = new Pipe();
+    const a2 = inviter(), c = joiner({ profile: C, name: "macbook‍" });
+    await toDigits(a2, c);
+    expect(a2.current()).toMatchObject({ step: "confirm", device: "macbook 3" });
+    await a2.confirm(true);
+    await until(() => a2.ended && c.ended);
+    const ra = (await readDeviceRecord(A))!;
+    expect(ra.deviceSet.map((slot) => slot?.name ?? null)).toEqual(["MacBook", "MacBook 2", "macbook 3", null]);
+    // The new devices hold the set as the active device wrote it, their own name included.
+    expect((await readDeviceRecord(C))!.deviceSet).toEqual(ra.deviceSet);
+  });
+
+  it("a device renamed to the new device's name while the digits show: the slot and its unfinished note take a name of their own", async () => {
+    await (async () => { const a = inviter(), b = joiner(); await toDigits(a, b); await a.confirm(true); await until(() => a.ended && b.ended); })();
+    pipe = new Pipe();
+    const a = inviter(), c = joiner({ profile: C, name: "Firefox" });
+    await toDigits(a, c);
+    expect(a.current()).toMatchObject({ step: "confirm", device: "Firefox" });
+    // Phone is renamed Firefox on this device meanwhile.
+    const record = (await readDeviceRecord(A))!;
+    await amendDevice(A, { deviceSet: record.deviceSet.map((slot) => (slot?.name === "Phone" ? { ...slot, name: "Firefox" } : slot)) });
+    expect(await a.confirm(true)).toMatchObject({ step: "adding", device: "Firefox 2" });
+    expect((await readDeviceRecord(A))!.unfinishedGrants?.map((grant) => grant.name)).toEqual(["Firefox 2"]);
+    await until(() => a.ended && c.ended);
+    expect((await readDeviceRecord(A))!.deviceSet.map((slot) => slot?.name ?? null)).toEqual(["MacBook", "Firefox", "Firefox 2", null]);
+  });
+
+  it("a taken name that fills the 16 bytes gives up its end to the number, at a whole character", async () => {
+    // 16 bytes: "ã" takes 2, so the number's 2 bytes take the "ão" off.
+    const a = inviter({ name: "Computador João" }), b = joiner({ name: "Computador João" });
+    await toDigits(a, b);
+    expect(a.current()).toMatchObject({ device: "Computador Jo 2" });
   });
 });
 

@@ -1,6 +1,7 @@
 import { TURN_NAME_BYTES, turnName, utf8Encode } from "@ghostly/core";
 import { MAX_DEVICES, type DeviceRecord, type DeviceSlot } from "./state";
 import { readDeviceRecord } from "./store";
+import { sameName } from "./takeover";
 import type { TurnKeeper } from "./turn";
 
 /*
@@ -32,6 +33,30 @@ export function renamedDeviceName(name: unknown): string {
   if (kept === typed) return kept;
   if (utf8Encode(typed).length > TURN_NAME_BYTES) throw new RenameRefusal("long", `A device name holds at most ${TURN_NAME_BYTES} bytes.`);
   throw new RenameRefusal("name", "A device name cannot hold this character.");
+}
+
+/**
+ * The name a device joins the set under: its own (as the slot keeps it, `turnName`), or, when a device of the set has
+ * that name already as it is typed (`sameName`: two "Linux app", two "Chrome on Mac"), the first of "<name> 2",
+ * "<name> 3"… that none has, the name cut at a whole character to leave the number its bytes.
+ */
+export function distinctDeviceName(name: string, taken: readonly string[]): string {
+  const own = turnName(name) || "Device";
+  if (!taken.some((other) => sameName(other, own))) return own;
+  const Segmenter = typeof Intl === "undefined" ? undefined
+    : (Intl as unknown as { Segmenter?: new (locale: undefined, options: { granularity: "grapheme" }) => { segment(text: string): Iterable<{ segment: string }> } }).Segmenter;
+  const characters = Segmenter ? Array.from(new Segmenter(undefined, { granularity: "grapheme" }).segment(own), (s) => s.segment) : Array.from(own);
+  for (let n = 2; ; n++) {
+    const suffix = ` ${n}`;
+    let base = "", bytes = utf8Encode(suffix).length;
+    for (const character of characters) {
+      bytes += utf8Encode(character).length;
+      if (bytes > TURN_NAME_BYTES) break;
+      base += character;
+    }
+    const candidate = `${base.trimEnd()}${suffix}`;
+    if (!taken.some((other) => sameName(other, candidate))) return candidate;
+  }
 }
 
 export interface RenameOptions {
