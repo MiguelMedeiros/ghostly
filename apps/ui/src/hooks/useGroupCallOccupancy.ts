@@ -9,6 +9,8 @@ import { useWindowAway } from "../lib/windowAway";
  * (`groupCallOccupancy`), which signs the request with my member key: while the group is open, in sight (the page
  * shown and its window the focused one: a hidden tab or a window in the background asks nothing) and I'm not in its
  * call. At most once per `OCCUPANCY_FLOOR_MS` for a group on this page, however often it is opened or shown again.
+ * An answer that comes after the window went away and back, or after a change of the call or of "Hide my IP", is
+ * still shown while the group is open, for the same node and call and with "Hide my IP" off.
  *
  * Anything but a 200 says nothing about the call: the button shows as it would without the route. What comes next
  * depends on what came back, kept per call node (its origin) for as long as the app runs, so coming back to the group
@@ -44,8 +46,8 @@ export interface GroupCallOccupancyNow {
 
 /** When each group's call was last asked about on this page, so opening it again within the floor waits the rest. */
 const askedAt = new Map<string, number>();
-/** Each group's last answer and when it came: opened again within the floor, the header shows it at once. */
-const answers = new Map<string, { occupancy: GroupCallOccupancyNow; at: number }>();
+/** Each group's last answer, when it came and for which `call`: opened again within the floor, the header shows it at once. */
+const answers = new Map<string, { occupancy: GroupCallOccupancyNow; at: number; stamp: string }>();
 /** The `call` each group was last seen with, so a change of it is told. */
 const groupCalls = new Map<string, string>();
 /**
@@ -83,9 +85,10 @@ function retryAfterMs(seconds: number | null | undefined): number {
   return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : OCCUPANCY_RETRY_AFTER_MS;
 }
 
-function freshAnswer(groupId: string): GroupCallOccupancyNow | null {
+/** The group's last answer while within the floor, and only for the `call` it has now (not another node's). */
+function freshAnswer(groupId: string, stamp: string): GroupCallOccupancyNow | null {
   const kept = answers.get(groupId);
-  return kept && Date.now() - kept.at < OCCUPANCY_FLOOR_MS ? kept.occupancy : null;
+  return kept && kept.stamp === stamp && Date.now() - kept.at < OCCUPANCY_FLOOR_MS ? kept.occupancy : null;
 }
 
 /**
@@ -99,12 +102,21 @@ export function useGroupCallOccupancy(groupId: string, call: { sfu: string; e2ee
   const node = nodeOf(call?.sfu);
   const stamp = JSON.stringify(call ?? null);
   const key = `${groupId} ${node}`;
-  const [known, setKnown] = useState<{ key: string; occupancy: GroupCallOccupancyNow | null }>(() => ({ key, occupancy: freshAnswer(groupId) }));
+  const [known, setKnown] = useState<{ key: string; occupancy: GroupCallOccupancyNow | null }>(() => ({ key, occupancy: freshAnswer(groupId, stamp) }));
   /** The group and node the engine said I'm not a member of, while open: asked again only once opened again. */
   const outside = useRef<string | null>(null);
   /** "Hide my IP" as it is now, for an answer that comes after it changed. */
   const relayOnlyNow = useRef(relayOnly);
   relayOnlyNow.current = relayOnly;
+  /** The button's call as it is now, whether it is still shown, and its last ask: for an answer that comes late. */
+  const now = useRef({ key, stamp, mounted: false, lastAsk: 0 });
+  now.current.key = key;
+  now.current.stamp = stamp;
+  useEffect(() => {
+    const mine = now.current;
+    mine.mounted = true;
+    return () => { mine.mounted = false; };
+  }, []);
 
   useEffect(() => {
     // The group's call changed (another node, or the same one sealed or not): asked at once, even a node that once
@@ -131,6 +143,7 @@ export function useGroupCallOccupancy(groupId: string, call: { sfu: string; e2ee
     };
     const ask = async () => {
       askedAt.set(groupId, Date.now());
+      const mine = ++now.current.lastAsk;
       let result: GroupCallOccupancyResult | null = null;
       try {
         result = await engine.call("groupCallOccupancy", { groupId });
@@ -142,7 +155,7 @@ export function useGroupCallOccupancy(groupId: string, call: { sfu: string; e2ee
       let occupancy: GroupCallOccupancyNow | null = null;
       if (result?.ok) {
         occupancy = { count: result.count, ...(result.since !== undefined && { since: result.since }) };
-        answers.set(groupId, { occupancy, at: Date.now() });
+        answers.set(groupId, { occupancy, at: Date.now(), stamp });
         asks.failures = 0;
         asks.until = 0;
       } else {
@@ -158,9 +171,18 @@ export function useGroupCallOccupancy(groupId: string, call: { sfu: string; e2ee
         }
         // `refused`, `bad_reply` and a code this page does not know: the floor, as after a 200.
       }
-      if (!live) return;
-      setKnown({ key, occupancy });
-      plan();
+      if (live) {
+        setKnown({ key, occupancy });
+        plan();
+        return;
+      }
+      // Late: the effect ran again while this was asked (the window went away and back, "Hide my IP" or the group's
+      // call changed), and its next turn waits the floor from this ask. Still shown while the button is, for the same
+      // node and call, if no ask came after it and "Hide my IP" is off.
+      const shown = now.current;
+      if (shown.mounted && shown.lastAsk === mine && shown.key === key && shown.stamp === stamp && !relayOnlyNow.current && hiddenUnder === null) {
+        setKnown({ key, occupancy });
+      }
     };
     plan();
     return () => {

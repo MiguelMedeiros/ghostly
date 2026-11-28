@@ -56,7 +56,7 @@ const loadLivekit = async () => ({ Room: FakeRoom, RoomEvent, Track: { Source: {
 const pass = (): GroupCallPass => ({ url: "wss://sfu.ghostly.test", token: "pass-1", room: "g_x", identity: ME, expiresIn: 600 });
 
 /** The node's answer from now on, through the engine. */
-const answer = (handler: () => GroupCallOccupancyResult) => fakeEngine.on("groupCallOccupancy", handler);
+const answer = (handler: () => GroupCallOccupancyResult | Promise<GroupCallOccupancyResult>) => fakeEngine.on("groupCallOccupancy", handler);
 const asks = () => fakeEngine.callsTo("groupCallOccupancy").length;
 
 let visibility: DocumentVisibilityState = "visible";
@@ -168,6 +168,18 @@ describe("asking whether a group's call is on", () => {
     expect(asks()).toBe(11);
     await elapse(OCCUPANCY_FLOOR_MS);
     expect(asks()).toBe(12);
+    // No answer again: the backoff starts over at 15 s, then 30 s, not where it stood before the 200s.
+    answer(() => ({ ok: false, code: "no_answer" }));
+    await elapse(OCCUPANCY_FLOOR_MS);
+    expect(asks()).toBe(13);
+    await elapse(15_000 - 1);
+    expect(asks(), "the first no-answer after a 200 waits 15 s").toBe(13);
+    await elapse(1);
+    expect(asks()).toBe(14);
+    await elapse(30_000 - 1);
+    expect(asks(), "the second waits 30 s").toBe(14);
+    await elapse(1);
+    expect(asks()).toBe(15);
   });
 
   it("counts an engine that can't ask (an error) as no answer too", async () => {
@@ -385,6 +397,71 @@ describe("what the node's answer says of the next ask", () => {
     await elapse(OCCUPANCY_FLOOR_MS);
     expect(asks()).toBe(3);
     again.unmount();
+  });
+});
+
+describe("an answer that comes while the group's window went away and back, or its call or \"Hide my IP\" changed", () => {
+  /** The node's answer, `ms` after it was asked. */
+  const late = (ms: number, result: GroupCallOccupancyResult) => () => new Promise<GroupCallOccupancyResult>((resolve) => { setTimeout(() => resolve(result), ms); });
+
+  it("the window went behind another and came back while asking: shown once it comes, not 15 s later", async () => {
+    answer(late(2_000, { ok: true, count: 2, since: 1_794_700_800 }));
+    open();
+    await elapse(500);
+    setFocused(false);
+    await elapse(200);
+    setFocused(true);
+    await elapse(1_300 - 1);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+    await elapse(1);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "on");
+    expect(screen.getByTestId("group-call-join")).toHaveAccessibleDescription("2 in the call");
+    // And asked no sooner for it: 15 s after that ask.
+    expect(asks()).toBe(1);
+    await elapse(OCCUPANCY_FLOOR_MS - 2_000 - 1);
+    expect(asks()).toBe(1);
+    await elapse(1);
+    expect(asks()).toBe(2);
+  });
+
+  it("\"Hide my IP\" turned on while asking: the answer is not shown", async () => {
+    answer(late(2_000, { ok: true, count: 2, since: 1_794_700_800 }));
+    open();
+    await elapse(500);
+    act(() => fakeEngine.update({ settings: { relayOnly: true } }));
+    await elapse(2_000);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+  });
+
+  it("the group's call changed while asking (sealed now): only the new call's answer is shown", async () => {
+    let n = 0;
+    answer(() => (++n === 1 ? late(2_000, { ok: true, count: 2, since: 1_794_700_800 })() : { ok: true, count: 0 }));
+    const group = community();
+    const view = open(group);
+    await elapse(500);
+    const sealed = { ...group, call: { sfu: group.call!.sfu, e2ee: 1 } } as GroupView;
+    view.rerender(<GroupCallButton group={sealed} loadLivekit={loadLivekit} />);
+    await elapse(0);
+    expect(asks()).toBe(2);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "off");
+    // The first call's answer comes after: not shown.
+    await elapse(2_000);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "off");
+  });
+
+  it("the group's call names another node while it was closed: opened again, the old node's answer is not shown", async () => {
+    answer(() => ({ ok: true, count: 2, since: 1_794_700_800 }));
+    const group = community();
+    const first = open(group);
+    await elapse(0);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "on");
+    first.unmount();
+    await elapse(4_000);
+    answer(late(1_000, { ok: true, count: 0 }));
+    open({ ...group, call: { sfu: "https://moved.ghostly.test" } } as GroupView);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+    await elapse(1_000);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "off");
   });
 });
 
