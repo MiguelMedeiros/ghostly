@@ -1205,7 +1205,9 @@ export class GhostlyNode implements EngineImplementation {
   private readonly briefViews = new Map<string, FileTransferView>();
   /** files/3 in every chat: offers, resumable transfers, checked by digest (WISP 501 rev 0.3). */
   private readonly fileDesk = new FileDesk({
-    send: (linkId, frame) => this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
+    // A blocked contact's chat answers nothing of its files, as if this app were closed (`onFilesFrame`): taken as said.
+    send: (linkId, frame): boolean => this.blockedChat(this.links.get(linkId)?.stored) && this.fileDesk.receiverFrame(frame) ? true
+      : this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
     sendData: (linkId, id, offset, data) => this.links.get(linkId)?.link?.sendFileData(id, offset, data) ?? false,
     writable: (linkId) => this.links.get(linkId)?.link?.filesWritable(),
     receivedBytes: (linkId) => this.links.get(linkId)?.files.receivedBytes ?? 0,
