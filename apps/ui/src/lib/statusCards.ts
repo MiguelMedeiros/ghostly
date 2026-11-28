@@ -1,7 +1,7 @@
 import { ACTIVE_TASK_STATUSES, taskProgress, usageLeft, type AppCard, type RoutineCard, type RunResult, type StatusCard, type TaskCard, type TaskStatus, type UsageCard } from "@ghostly/core";
 import type { Translate } from "../contexts/I18nContext";
 import { installedApps } from "./apps/installed";
-import { sharedRows } from "./chatRows";
+import { sharedRows, sharedTail } from "./chatRows";
 import { isolate } from "./ownStatus";
 
 /*
@@ -126,6 +126,15 @@ export function routineStacksReader<R, M extends { id: string; card?: StatusCard
   return rows => {
     if (rows === list) return stacks;
     let from = sharedRows(list, rows);
+    // Rows that changed in their places, none of them a routine card before or after: the runs are the ones found before.
+    const end = rows.length === list.length ? list.length - sharedTail(list, rows) : -1;
+    const routine = (row: R) => messageOf(row)?.card?.kind === "routine";
+    let alike = end >= 0;
+    for (let i = from; alike && i < end; i++) alike = !routine(rows[i]!) && !routine(list[i]!);
+    if (alike) {
+      list = rows;
+      return stacks;
+    }
     const last = from ? messageOf(rows[from - 1]!) : undefined;
     if (last?.card?.kind === "routine") {
       while (from > 0) {

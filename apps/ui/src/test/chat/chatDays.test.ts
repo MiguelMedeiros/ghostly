@@ -60,6 +60,16 @@ describe("the days of a chat's rows as its list changes", () => {
     expect(read(list)).toBe(read(list));
   });
 
+  it("reads only an old row that changed in its place with its time (a reaction on it), not the history after it", () => {
+    const reads = { n: 0 };
+    const read = rowDaysReader<Row>(row => { reads.n++; return row.at; });
+    const rows: Row[] = Array.from({ length: 1_000 }, (_, i) => ({ id: `m${i}`, at: at(2026, 1, 1) + i * 3_600_000 }));
+    const days = read(rows);
+    reads.n = 0;
+    expect(read(rows.map((m, i) => (i === 100 ? { ...m } : m)))).toBe(days);
+    expect(reads.n).toBeLessThan(3);
+  });
+
   it("gives what rowDays gives, whatever happens to the list", () => {
     // A small generator with a fixed seed: the same lists on every run.
     let seed = 11;
@@ -74,6 +84,9 @@ describe("the days of a chat's rows as its list changes", () => {
       // The newest rows handed out anew, or one deleted.
       () => { list = [...list.slice(0, -3), ...list.slice(-3).map(m => ({ ...m }))]; },
       () => { list = list.filter((_, i) => i !== pick(list.length || 1)); },
+      // An old row changed in its place, with its time or with another (its place kept).
+      () => { const k = pick(list.length || 1); list = list.map((m, i) => (i === k ? { ...m } : m)); },
+      () => { const k = pick(list.length || 1); list = list.map((m, i) => (i === k ? { ...m, at: at(2026, 1, 1) + pick(400) * 3_600_000 } : m)); },
     ];
     for (let k = 0; k < 600; k++) {
       steps[pick(steps.length)]();

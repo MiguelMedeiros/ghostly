@@ -1,5 +1,5 @@
 import type { Translate } from "../locales/translate";
-import { sharedRows } from "./chatRows";
+import { sharedRows, sharedTail } from "./chatRows";
 import type { Language } from "./settings";
 import { formatAt } from "./time";
 
@@ -31,7 +31,8 @@ export function rowDays(times: readonly number[]): number[] {
 /**
  * `rowDays` for one chat's rows as its list changes, each row's time by `timeOf`: a row's day comes from the rows above
  * it, so the days of the rows a new list has the same from its start are the ones found before, and only the rest are
- * found. A new array for each new list; it is never changed once given.
+ * found. A new array for each new list but one whose rows changed in their places, each with its time; it is never
+ * changed once given.
  */
 export function rowDaysReader<R>(timeOf: (row: R) => number): (rows: readonly R[]) => readonly number[] {
   let list: readonly R[] = [];
@@ -39,7 +40,10 @@ export function rowDaysReader<R>(timeOf: (row: R) => number): (rows: readonly R[
   return rows => {
     if (rows === list) return days;
     const same = sharedRows(list, rows);
-    days = daysOn(days.slice(0, same), rows.length, i => timeOf(rows[i]!));
+    // Rows that changed in their places with their times (a reaction, an edit, a delivery mark): every day as it was.
+    let end = rows.length === list.length ? list.length - sharedTail(list, rows) : -1;
+    for (let i = same; i < end; i++) if (timeOf(rows[i]!) !== timeOf(list[i]!)) end = -1;
+    if (end < 0) days = daysOn(days.slice(0, same), rows.length, i => timeOf(rows[i]!));
     list = rows;
     return days;
   };

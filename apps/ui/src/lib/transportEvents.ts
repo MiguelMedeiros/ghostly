@@ -1,7 +1,7 @@
 import { TRANSPORTS, type IdentityTimelineEntry, type LiveAttempt, type PairedTransport, type TransportWait } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import type { TransportEntry, TransportEvent } from "@ghostly/browser/engine/transportLog";
-import { sharedRows } from "./chatRows";
+import { sharedRows, sharedTail } from "./chatRows";
 import { transportName } from "./connection";
 import { englishT, type Translate } from "../locales/translate";
 import { problemLine, problemText, sentences } from "./problemText";
@@ -230,6 +230,7 @@ export function mergeTimeline<M extends { timestamp: number }>(messages: readonl
  * `mergeTimeline` for one chat as its list changes. While its transport lines and identity shares are the same, the rows
  * up to the last message the new list has the same from its start are the ones given before (the same objects), and only
  * the rows after it are put together again: a message arriving in a chat of thousands costs what it does in a short one.
+ * A message changed in its place with its time (`changedInPlace`) gives a new row for it alone.
  */
 export function timelineMerger<M extends { timestamp: number }>(): (messages: readonly M[], lines: readonly TransportEntry[], identities?: readonly IdentityTimelineEntry[]) => TimelineRow<M>[] {
   let last: Merged<M> | undefined;
@@ -237,9 +238,24 @@ export function timelineMerger<M extends { timestamp: number }>(): (messages: re
   const alike = <T,>(a: readonly T[], b: readonly T[]) => a === b || (!a.length && !b.length);
   return (messages, lines, identities = []) => {
     const from = last && alike(last.lines, lines) && alike(last.identities, identities) ? last : undefined;
-    last = merge(messages, lines, identities, from && { ...from, same: from.messages === messages ? messages.length : sharedRows(from.messages, messages) });
+    last = (from && changedInPlace(from, messages)) ?? merge(messages, lines, identities, from && { ...from, same: from.messages === messages ? messages.length : sharedRows(from.messages, messages) });
     return last.out;
   };
+}
+
+/**
+ * The timeline of `from` with these messages, when they are its own but for some that changed in their places, each with
+ * its time (a reaction, an edit, a delivery mark on an old message): only their rows are new. Nothing else.
+ */
+function changedInPlace<M extends { timestamp: number }>(from: Merged<M>, messages: readonly M[]): Merged<M> | undefined {
+  const was = from.messages;
+  if (was === messages || was.length !== messages.length) return undefined;
+  const same = sharedRows(was, messages), end = was.length - sharedTail(was, messages);
+  if (same === was.length) return undefined;
+  for (let k = same; k < end; k++) if (messages[k]!.timestamp !== was[k]!.timestamp) return undefined;
+  const out = from.out.slice();
+  for (let k = same; k < end; k++) if (messages[k] !== was[k]) out[from.marks[k * 3]! - 1] = { kind: "message", message: messages[k]! };
+  return { ...from, messages, out };
 }
 
 interface Merged<M> {

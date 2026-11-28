@@ -1,6 +1,7 @@
 import { replySnippet, type StatusCard } from "@ghostly/core";
 import { replyRef, replyTo, type ReplyTarget } from "@ghostly/browser/shared/replies";
 import type { MessageReply } from "@ghostly/browser/shared/types";
+import { sharedRows, sharedTail } from "./chatRows";
 import { revealMessage } from "../hooks/useRowWindow";
 import { reducedMotion } from "./motion";
 import { filePreview, previewText } from "./chatList";
@@ -83,22 +84,24 @@ export function replyIndex(messages: readonly Quotable[], group = false, partial
  * rows keep their objects from one list to the next, but for the newest ones (`withWhole` in lib/storage), so only the
  * rows from the first that differs are read: a message arriving in a chat of thousands costs what it does in a short
  * one. So does a text I just sent taking its wire id in its row's place (`me_<time>`, which no reply can name, becomes
- * `me_<wire id>`). Any other list with a row gone, moved or named otherwise is read whole. An index it gave before
+ * `me_<wire id>`), and a row of a list as long changing (a reaction on an old message): the rows after it, the same, are
+ * not read either. Any other list with a row gone, moved or named otherwise is read whole. An index it gave before
  * shares its maps and sees the rows that came since: it is for the list being drawn.
  */
 export function replyIndexer(group = false): (messages: readonly Quotable[], partial?: boolean) => ReplyIndex {
   let list: readonly Quotable[] = [];
   let maps: ReplyIndex = { byId: new Map(), byRef: new Map() };
   return (messages, partial = false) => {
-    let same = 0;
-    while (same < list.length && list[same] === messages[same]) same++;
+    const same = sharedRows(list, messages);
+    // A list as long as the one before: the rows after the last that differs are in their place, as indexed.
+    const end = messages.length === list.length ? list.length - sharedTail(list, messages) : list.length;
     let kept = messages.length >= list.length;
-    for (let i = same; kept && i < list.length; i++) {
+    for (let i = same; kept && i < end; i++) {
       const was = list[i], now = messages[i], ref = replyRef(now, group);
       kept = was.id === now.id ? replyRef(was, group) === ref : !replyRef(was, group) && !maps.byId.has(now.id) && !(ref && maps.byRef.has(ref));
     }
     if (kept) {
-      for (let i = same; i < messages.length; i++) {
+      for (let i = same; i < end + messages.length - list.length; i++) {
         const message = messages[i], was = list[i], ref = replyRef(message, group), inPlace = was?.id === message.id;
         if (was && !inPlace) maps.byId.delete(was.id);
         maps.byId.set(message.id, message);
