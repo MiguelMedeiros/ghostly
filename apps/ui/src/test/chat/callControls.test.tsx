@@ -198,6 +198,27 @@ describe("sharing the screen from inside a call", () => {
     expect(screen.getByTestId("call-sharing")).toHaveAttribute("data-peer", "true");
   });
 
+  // A shared window, or a screen a busy link sends at 960 × 540, was cropped to its middle like a face: 26% of it showed
+  // on a phone held upright (measured in Chromium against the viewport).
+  it.each([[960, 540], [1920, 1080], [640, 480]])("in the whole window, shows the other side's %i × %i screen whole, fitted to the window", (width, height) => {
+    overlay({ remoteHasVideo: true, remoteIsScreenSharing: true });
+    const video = screen.getByTestId("remote-video");
+    Object.defineProperty(video, "videoWidth", { configurable: true, value: width });
+    Object.defineProperty(video, "videoHeight", { configurable: true, value: height });
+    fireEvent(video, new Event("resize"));
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "false");
+    expect(video).toHaveClass("absolute", "inset-0", "w-full", "h-full", "object-contain");
+    expect(video).not.toHaveClass("object-cover");
+  });
+
+  it("still fills the window with a camera's picture, cropped", () => {
+    overlay({ remoteHasVideo: true });
+    const video = screen.getByTestId("remote-video");
+    Object.defineProperty(video, "videoWidth", { configurable: true, value: 640 });
+    fireEvent(video, new Event("resize"));
+    expect(video).toHaveClass("object-cover");
+  });
+
   // agents#1630: a phone's camera held upright gives a 3:4 picture, 160 px high from 64 px down: the notice at a fixed
   // 10.5rem landed 48 px into it.
   it("on a phone, sits below your own picture whatever its shape: a camera held sideways or upright", () => {

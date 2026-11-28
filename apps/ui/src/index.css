@@ -550,7 +550,7 @@ html[data-standalone="true"] {
   left: calc(1rem + env(safe-area-inset-left));
 }
 
-/* The group call's tiles (its grid, or the shared screen and the faces beside it): 1rem from the sides past the notch
+/* The group call's tiles (its grid, or the faces over a shared screen): 1rem from the sides past the notch
    or Dynamic Island of a phone on its side, where the window is the wide layout and 16 px put a tile's muted mark under
    it. They end 1rem above the controls, which a phone lifts over its home bar (see below). */
 .call-tiles {

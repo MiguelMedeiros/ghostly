@@ -105,6 +105,54 @@ describe("a shared screen", () => {
     expect(within(screen.getByTestId("group-call-side")).getAllByTestId("group-call-tile").map((t) => t.dataset.identity)).toEqual(["me", "ana", "bo"]);
   });
 
+  // Laid out between the name row, the faces and the controls, a 1920 × 1080 screen had 60% of a 1280 × 800 window and
+  // 22% of a phone's (measured in Chromium against the viewport): fitted to the window, 90% and 26%.
+  it("fills the whole window edge to edge, fitted whole, with the faces drawn over it, on a phone too", () => {
+    const { rerenderWith } = view(state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } }), person("bo")] }));
+    const stage = screen.getByTestId("group-call-stage");
+    // Behind the name row, which stays in the flow; the faces over it let a tap through to that row but take their own.
+    expect(stage).toHaveClass("absolute", "inset-0", "-z-10");
+    expect(screen.getByTestId("group-call-faces")).toHaveClass("absolute", "inset-0", "z-10", "pointer-events-none");
+    expect(screen.getByTestId("group-call-side")).toHaveClass("pointer-events-auto");
+    expect(within(stage).getAllByTestId("group-call-tile")).toHaveLength(1);
+    const main = within(stage).getByTestId("group-call-tile");
+    expect(main).not.toHaveClass("rounded-xl");
+    expect(main.querySelector("video")).toHaveClass("absolute", "inset-0", "w-full", "h-full", "object-contain");
+    expect(stage.contains(screen.getByTestId("group-call-side"))).toBe(false);
+    // A phone's whole window is the whole screen while a screen is shown, not a sheet 24 px under its top.
+    const callWindow = screen.getByTestId("group-call");
+    expect(callWindow).toHaveClass("fixed", "inset-0");
+    expect(callWindow.className).not.toMatch(/max-md:top-/);
+    // So the name row and the faces start below an installed app's status bar.
+    expect(screen.getByTestId("group-call-top")).toHaveClass("pt-[calc(1.5rem+env(safe-area-inset-top))]");
+    expect(screen.getByTestId("group-call-top")).not.toHaveClass("pt-6");
+    expect(screen.getByTestId("group-call-faces")).toHaveClass("pt-[calc(3.5rem+env(safe-area-inset-top))]");
+    // The faces alone keep the sheet.
+    rerenderWith(state(2));
+    expect(screen.getByTestId("group-call")).toHaveClass("max-md:top-6");
+    expect(screen.getByTestId("group-call-top")).toHaveClass("pt-6");
+  });
+
+  // Over the picture in the theme's colours the ⓘ and its words were 2.3:1 on black in the light theme.
+  it("draws the name row's ⓘ and its words over the picture in white, and in the theme's colours over the faces alone", () => {
+    const { rerenderWith } = view(state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } })] }));
+    act(() => screen.getByTestId("group-call-info").click());
+    // On a black backing, as its words: white alone was 1.0:1 over a white shared screen. Open, white too: the accent
+    // it takes elsewhere was 3.2:1 on black in the light theme. Under the mouse too: its accent was 1.06 to 1.3:1 there.
+    expect(screen.getByTestId("group-call-info")).toHaveClass("bg-black/70", "text-white", "hover:bg-black/80", "hover:text-white", "aria-expanded:text-white");
+    expect(screen.getByTestId("group-call-info-text")).toHaveClass("bg-black/70", "text-white");
+    expect(screen.getByTestId("group-call-info-text")).not.toHaveClass("text-text-secondary");
+    // The group's name too: white on a white shared screen was 1.0:1.
+    expect(screen.getByTestId("group-call-name")).toHaveClass("bg-black/70", "text-white");
+    rerenderWith(state(2));
+    expect(screen.getByTestId("group-call-name")).not.toHaveClass("bg-black/70");
+    expect(screen.getByTestId("group-call-name")).toHaveClass("text-text-primary");
+    expect(screen.getByTestId("group-call-info")).not.toHaveClass("bg-black/70");
+    expect(screen.getByTestId("group-call-info")).not.toHaveClass("text-white");
+    expect(screen.getByTestId("group-call-info-text")).toHaveClass("text-text-secondary");
+    expect(screen.getByTestId("group-call-info-text")).not.toHaveClass("bg-black/70");
+  });
+
   it("plays a screen's sound beside its sharer's voice, and says on your own screen when it went without its sound", () => {
     const sound = new FakeTrack("audio") as unknown as MediaStreamTrack;
     const { rerenderWith } = view(state(0, {
@@ -200,10 +248,10 @@ describe("the tiles on a phone's safe areas", () => {
 
   it.each([
     ["the grid", state(2)],
-    ["the stage", state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } })] })],
+    ["the faces over a shared screen", state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } })] })],
   ])("%s keeps clear of the notch on either side and of the controls over a home bar", (_, call) => {
     view(call);
-    const area = screen.getByTestId(call.participants.some((p) => p.screen) ? "group-call-stage" : "group-call-grid");
+    const area = call.participants.some((p) => p.screen) ? screen.getByTestId("group-call-faces") : screen.getByTestId("group-call-grid");
     expect(area).toHaveClass("call-tiles");
     const rules = tileRules();
     // On its side the notch is on the left or the right: the tiles start 1rem past it.
