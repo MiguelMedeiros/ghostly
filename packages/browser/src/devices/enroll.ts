@@ -6,6 +6,7 @@ import {
   type PkarrTransport, type PollIntervals, type Signer, type TurnNetwork, type TurnRead,
 } from "@ghostly/core";
 import { isIosBrowserTab, type InstallEnv } from "./install";
+import { distinctDeviceName } from "./rename";
 import { DeviceSetError, deviceIdentity, firstTurn, openTurnKeeper } from "./setup";
 import { createDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
 import { MAX_DEVICES, MAX_UNFINISHED_GRANTS, type DeviceRecord, type DeviceSlot, type UnfinishedGrant } from "./state";
@@ -285,7 +286,8 @@ export class EnrollInviter extends Enrollment {
   private d!: Uint8Array;
   private record: DeviceRecord | null = null;
   private session: { peerKey: Uint8Array; hash: string } | null = null;
-  private joiner: { key: Uint8Array; name: string; kind: DeviceKind } | null = null;
+  /** `name` is the one it joins under (`distinctDeviceName`), `asked` the one its hello said. */
+  private joiner: { key: Uint8Array; name: string; asked: string; kind: DeviceKind } | null = null;
   private granted: { slots: EnrollSlot[]; ownSlot: number; turn: number; rev: number } | null = null;
   /** This enrollment makes the profile's first device set: its record was written, with a set of one, at the grant. */
   private first = false;
@@ -350,6 +352,12 @@ export class EnrollInviter extends Enrollment {
     return this.view;
   }
 
+  /** The names the set has besides the joiner's: this device's own alone while the profile has no set yet. */
+  private takenNames(record: DeviceRecord | null): string[] {
+    if (!record) return [turnName(this.options.name) || "Device"];
+    return record.deviceSet.flatMap((slot) => (slot ? [slot.name] : []));
+  }
+
   private async receive(frame: DeviceFrame): Promise<void> {
     if (this.over) return;
     const cancelled = enrollCancelReason(frame);
@@ -359,7 +367,8 @@ export class EnrollInviter extends Enrollment {
       const hello = readEnrollHello(frame, this.session.hash, this.key.publicKey, this.session.peerKey);
       if (!hello) { await this.fail("proof", "failed"); return; }
       // The first joiner that authenticated: the code is spent.
-      this.joiner = { key: hello.key, name: hello.name || "Device", kind: hello.kind };
+      // Under a name of its own in the set: a second "Linux app" is "Linux app 2" on every screen that names it.
+      this.joiner = { key: hello.key, name: distinctDeviceName(hello.name, this.takenNames(this.record)), asked: hello.name, kind: hello.kind };
       this.send(await enrollProofFrame(this.session.hash, this.key, hello.key));
       this.show({ role: "inviter", step: "confirm", digits: enrollDigits(this.session.hash, this.key.publicKey, hello.key), device: this.joiner.name, kind: hello.kind, ...(this.refused ? { refused: this.refused } : {}) });
       return;
@@ -400,6 +409,9 @@ export class EnrollInviter extends Enrollment {
       if (set.some((slot) => slot?.key === toBase64Url(joiner.key))) { await this.fail("failed", "failed", joiner.name); return this.view; }
       const free = set.indexOf(null);
       if (free < 0) { await this.fail("full", "full", joiner.name); return this.view; }
+      // A rename since the hello may have taken its name: the slot gets one none of the set has now.
+      joiner.name = distinctDeviceName(joiner.asked, this.takenNames(this.record));
+      note.name = joiner.name;
       slots = set.map((slot, i) => (i === free ? { key: joiner.key, name: joiner.name } : slot ? { key: fromBase64Url(slot.key), name: slot.name } : null));
       // Where the keeper will write: the next `rev` of this turn above all it saw (the turn moves on only when `rev` runs
       // out); `rev` 0 when this device never put a record (its first set's first grant did not finish).
