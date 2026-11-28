@@ -93,6 +93,7 @@ export class IdbFileBytes implements FileBytes {
         offset += value.length;
         onProgress?.(offset);
       }
+      if (offset === 0) await this.append(id, 0, new Uint8Array());
       await this.close(id);
     } catch (error) {
       await reader.cancel().catch(() => {});
@@ -107,6 +108,8 @@ export class IdbFileBytes implements FileBytes {
     return this.serial(id, async () => {
       const tail = await this.tail(id);
       if (offset !== tail.index * STEP + tail.length) throw new Error("File write out of order");
+      // A 0-byte file gets an empty chunk so size() returns 0 (not null) and blob() hands out an empty Blob.
+      if (bytes.length === 0 && tail.index === 0 && tail.length === 0) { tail.dirty = true; return; }
       let pos = 0;
       while (pos < bytes.length) {
         const take = Math.min(STEP - tail.length, bytes.length - pos);
