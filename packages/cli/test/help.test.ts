@@ -118,6 +118,31 @@ describe("help", () => {
     expect((chat.json.error as { message: string }).message).toBe("Unknown command: chat histroy (did you mean chat history? ghostly help chat history)");
   });
 
+  it("profile and settings alone name their commands with global options too, not an option as the command", async () => {
+    // Lifted after the command word, a global option was taken for the subcommand: `ghostly -p me profile` said
+    // "Unknown command: profile -p: ghostly profile takes …", as if -p were the mistake.
+    const dir = home("group-globals");
+    ok(await ghostly(["--home", dir, "profile", "create", "me"]));
+    const profile = "ghostly profile takes a command: create, list, use, show, set, backup, restore or picture (ghostly help profile)";
+    const settings = "ghostly settings takes a command: get or set (ghostly help settings)";
+    for (const [args, message] of [
+      [["--home", dir, "profile"], profile],
+      [["--home", dir, "-p", "me", "profile"], profile],
+      [["--home", dir, "--pretty", "profile"], profile],
+      [["profile", "--home", dir], profile],
+      [["--home", dir, "settings"], settings],
+      [["--home", dir, "-p", "me", "settings"], settings],
+      [["settings", "--home", dir, "--no-pretty"], settings],
+    ] as const) {
+      const result = await ghostly([...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(JSON.parse(result.stdout), args.join(" ")).toEqual({ error: { code: "usage", message } });
+    }
+    // The subcommand after them still is one.
+    expect(ok(await ghostly(["--home", dir, "-p", "me", "profile", "list"])).profiles).toEqual([{ name: "me", current: false, running: false }]);
+    expect(ok(await ghostly(["--home", dir, "-p", "me", "settings", "get"]))).toHaveProperty("online", true);
+  });
+
   it("a typo in a command or an option names what was meant, the command and its help", async () => {
     // Before: "Unknown command: sned hi (ghostly help)" (the text read as a command word), "Unknown option --wiat" (no
     // command, no help), and "put -- before text" from commands that take no text.

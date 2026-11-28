@@ -1958,13 +1958,15 @@ export async function main(input: string[]): Promise<number> {
   const three = two && third && !third.startsWith("-") ? `${two} ${third}` : "";
   // A command is one its table lists itself: every object has `constructor` and `toString`, which are no commands.
   const text = (name: string) => Object.hasOwn(TEXT_COMMANDS, name), table = (name: string) => Object.hasOwn(COMMANDS, name);
-  if (first === "profile" && !table(two)) { await profileCommand(second, argv.slice(2)); return 0; }
+  // Their word only when it is no option: lifted after `profile`, `-p me` was taken for the subcommand ("Unknown command:
+  // profile -p").
+  if (first === "profile" && !table(two)) { await profileCommand(two ? second : undefined, argv.slice(two ? 2 : 1)); return 0; }
   if (first === "daemon") { await daemonCommand(argv.slice(1)); return -1; }
   if (first === "listen") { await listenCommand(argv.slice(1)); return -1; }
   if (first === "engine") { await engineCommand(argv.slice(1)); return 0; }
   // A CLI profile is on this one device only: whatever follows `device`, the answer is why, and what to do instead.
   if (first === "device") throw new CliError("usage", `${SINGLE_DEVICE} (ghostly help device)`);
-  if (first === "settings") { await settingsCommand(second, argv.slice(2)); return 0; }
+  if (first === "settings") { await settingsCommand(two ? second : undefined, argv.slice(two ? 2 : 1)); return 0; }
   if (two === "identity add") { await identityAddCommand(argv.slice(2)); return 0; }
   if (two === "call pipe") { await callPipeCommand(argv.slice(2)); return -1; }
   if (three && table(three)) { await tableCommand(three, argv.slice(3)); return 0; }
