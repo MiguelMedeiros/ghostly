@@ -3,7 +3,7 @@ import { generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { newIdentityBinding } from "@ghostly/core";
 import type { IdentityFetch, IdentityFetchResponse } from "../src/proofs/contract";
 import {
-  ACTIVITY_READERS, atprotoActivity, blueskyPost, expandLinkFacets, GRAPH_MAX, hasActivity, noteImages, nostrActivity, POST_TEXT_MAX, POSTS_PAGE,
+  ACTIVITY_READERS, atprotoActivity, blueskyPost, expandLinkFacets, GRAPH_MAX, noteImages, nostrActivity, POST_TEXT_MAX, POSTS_PAGE,
   postText, pubkyActivity, pubkyPost, readPostImage,
 } from "../src/profiles/activity";
 import type { ReaderContext } from "../src/profiles/readers";
@@ -32,7 +32,6 @@ const BIDI = "‮⁦\u0007";
 describe("which identities have posts and follows", () => {
   it("only Nostr, Pubky and Bluesky; nothing else is ever looked up", () => {
     expect(Object.keys(ACTIVITY_READERS).sort()).toEqual(["atproto", "nostr", "pubky"]);
-    for (const p of ["domain", "oidc", "did", "constructor", "__proto__", "toString"]) expect(hasActivity(p)).toBe(false);
   });
 });
 

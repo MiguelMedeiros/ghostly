@@ -164,10 +164,6 @@ export function oidcProviders(testIssuer = configuredTestIssuer()): OidcProvider
   return [...Object.values(OIDC_PROVIDERS), ...(testIssuer ? [testProvider(testIssuer)] : [])];
 }
 
-export function oidcProvider(id: string, testIssuer = configuredTestIssuer()): OidcProvider | undefined {
-  return oidcProviders(testIssuer).find(p => p.id === id);
-}
-
 /** Every client ID this provider has, on any platform: a contact may use another platform than the prover. */
 export function audiences(provider: OidcProvider): string[] {
   return [...new Set(Object.values(provider.clientIds).filter((id): id is string => !!id))];
