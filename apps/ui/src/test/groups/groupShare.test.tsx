@@ -5,6 +5,7 @@ import { createIdentity, encodeGroupEntryLink } from "@ghostly/core";
 import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { GroupShareDialog } from "../../components/GroupLinkPanel";
 import { LeaveGroupDialog } from "../../components/LeaveGroupDialog";
+import { MakeAdminDialog } from "../../components/MakeAdminDialog";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -183,6 +184,13 @@ describe("a member's long one-word name", () => {
     expect(pill).toHaveTextContent(`${nick} joined`);
     // A flex item's least width is its longest word, unless it may shrink below it.
     expect(pill).toHaveClass("min-w-0", "break-words");
+  });
+
+  it("breaks onto the next line where Hand over admin names the member", () => {
+    renderApp(<MakeAdminDialog name={nick} linkEnds onClose={() => {}} onConfirm={() => {}} />);
+    const body = screen.getByTestId("group-make-admin-dialog").querySelector("p")!;
+    expect(body).toHaveTextContent(nick);
+    expect(body.closest(".break-words")).not.toBeNull();
   });
 });
 
