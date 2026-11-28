@@ -161,6 +161,31 @@ describe("a group's long one-word name", () => {
   });
 });
 
+// A name in chats is up to 64 characters: with no space in it, it ran past the leave dialog's edge, cut, and the
+// membership line's pill reached the screen's edge, its end cut on a 360-pixel phone.
+describe("a member's long one-word name", () => {
+  const nick = "maria.fernanda.albuquerque.vasconcelos.de.oliveira.santos.limaaa";
+  const ANA = "ana".padEnd(52, "y");
+  const ana: GroupMemberView = { key: ANA, role: "member", me: false, online: true, missing: 0, nick };
+
+  it("breaks onto the next line where the leave dialog names the next admin", () => {
+    renderApp(<LeaveGroupDialog group={admin({ profile: "community", members: [me, ana], community: { hub: false, hubs: 0, connected: 1 } })} onClose={() => {}} onConfirm={async () => {}} />);
+    const successor = screen.getByTestId("group-leave-successor");
+    expect(successor).toHaveTextContent(nick);
+    expect(successor.closest(".break-words")).not.toBeNull();
+  });
+
+  it("breaks onto the next line in a membership line", async () => {
+    fakeEngine.on("groupMessages", () => [{ linkId: `group:${ID}`, id: "e1", text: `${nick} joined`, sender: "peer", timestamp: 1, via: "datalink", event: "joined", member: ANA }]).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [admin({ members: [me, ana] })] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: `/group/${ID}` });
+    const pill = (await screen.findByTestId("group-event")).firstElementChild!;
+    expect(pill).toHaveTextContent(`${nick} joined`);
+    // A flex item's least width is its longest word, unless it may shrink below it.
+    expect(pill).toHaveClass("min-w-0", "break-words");
+  });
+});
+
 describe("GroupShareDialog", () => {
   it("is where a new group ends: ready, and on to the group", async () => {
     const onClose = vi.fn();
