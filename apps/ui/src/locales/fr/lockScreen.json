@@ -3,6 +3,7 @@
   "answerPassword": "Entrez votre mot de passe pour répondre",
   "enterPassword": "Entrez votre mot de passe pour déverrouiller",
   "incorrectPassword": "Mot de passe incorrect, réessayez",
+  "onCallWith": "En appel avec {{name}}",
   "title": "Ghostly est verrouillé",
   "tooManyAttempts": "Trop de tentatives. Réessayez dans {{seconds}} s",
   "unlock": "Déverrouiller"

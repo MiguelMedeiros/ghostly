@@ -14,6 +14,8 @@ import { initial } from "../lib/initial";
 import { errorText } from "../lib/errorText";
 import { fillNames } from "../lib/fillNodes";
 import { callWindowShown, watchWindowFilled, windowFilledNow } from "../lib/serviceWindows";
+// `mm:ss`, or `h:mm:ss` past the hour (an hour and five minutes read 65:00 before); the lock screen shows it too.
+import { callTime as formatDuration } from "../lib/callUnderLock";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -79,15 +81,6 @@ function Grips({ handleProps }: { handleProps: (corner: Corner) => Record<string
       ))}
     </>
   );
-}
-
-/** `mm:ss`, or `h:mm:ss` past the hour: an hour and five minutes read 65:00. */
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  const mmss = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  return h ? `${h}:${mmss}` : mmss;
 }
 
 export function CallOverlay({
