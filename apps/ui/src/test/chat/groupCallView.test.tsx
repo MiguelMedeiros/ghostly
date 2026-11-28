@@ -153,6 +153,35 @@ describe("a shared screen", () => {
     expect(screen.getByTestId("group-call-info-text")).not.toHaveClass("bg-black/70");
   });
 
+  // White at 10% under white icons was invisible over a bright shared screen, which reaches under the Small window
+  // button and the controls once it fills the window: a white document left only Hang up and a red mic or camera.
+  it("draws the controls and the Small window button over the picture on a black backing, and as before over the faces alone", () => {
+    const call = state(0, { local: person("me", { camera: true, tracks: { camera: video() } }), participants: [person("ana", { screen: true, tracks: { screen: video() } })] });
+    const { rerenderWith } = view(call, { devices: devicesWith(null) });
+    const buttons = () => ["group-call-minimize", "group-call-mic", "group-call-camera", "call-devices", "group-call-screen"].map((id) => screen.getByTestId(id));
+    for (const button of buttons()) {
+      expect(button).toHaveClass("bg-black/70", "text-white", "hover:bg-black/80");
+      expect(button).not.toHaveClass("bg-white/10");
+    }
+    rerenderWith({ ...call, participants: [person("ana")] });
+    for (const button of buttons()) {
+      expect(button).toHaveClass("bg-white/10", "text-white", "hover:bg-white/20");
+      expect(button).not.toHaveClass("bg-black/70");
+    }
+  });
+
+  // The small window, and the call pinned beside the chat, show the same shared screen under the same buttons.
+  it.each([[false, "small window"], [true, "pinned beside the chat"]])("draws them on a black backing in the small window too (pinned %s: %s)", (pinned) => {
+    if (!pinned) localStorage.setItem("ghostly_group_call_mini", "1");
+    const call = state(0, { local: person("me", { camera: true, tracks: { camera: video() } }), participants: [person("ana", { screen: true, tracks: { screen: video() } })] });
+    view(call, { devices: devicesWith(null), pinned });
+    expect(screen.getByTestId("group-call")).toHaveAttribute("data-mini", "true");
+    for (const id of ["group-call-minimize", "group-call-mic", "group-call-camera", "call-devices", "group-call-screen"]) {
+      expect(screen.getByTestId(id)).toHaveClass("bg-black/70", "text-white", "hover:bg-black/80");
+      expect(screen.getByTestId(id)).not.toHaveClass("bg-white/10");
+    }
+  });
+
   it("plays a screen's sound beside its sharer's voice, and says on your own screen when it went without its sound", () => {
     const sound = new FakeTrack("audio") as unknown as MediaStreamTrack;
     const { rerenderWith } = view(state(0, {
