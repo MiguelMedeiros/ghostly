@@ -215,7 +215,8 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     settings.lockScreen.enabled && !!settings.lockScreen.passwordHash);
 
   // While locked, the lock screen shows this call as the group's header names it, its time, and Mute and Leave call
-  // through this call's own controls, with no password (WISP 601 § Locked). Its time counts from when it connected.
+  // through this call's own controls, with no password (WISP 601 § Locked). Its time counts from when it connected; with
+  // its path to the node lost, it says Reconnecting in place of the time, as a 1:1 call's does.
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
   useEffect(() => {
     if (!on) setConnectedAt(null);
@@ -223,7 +224,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   }, [on, call.status]);
   useCallOnLockScreen(on ? {
     id: groupId, name: group.name || t("group.chat.unnamed"), named: true, photo: group.picture, group: true,
-    state: call.status === "connected" ? "connected" : "connecting", startedAt: connectedAt, muted: !call.local.mic,
+    state: call.status === "connected" ? (call.reconnecting ? "reconnecting" : "connected") : "connecting", startedAt: connectedAt, muted: !call.local.mic,
     toggleMute: () => void call.toggleMic(), end: leave,
   } : null);
 

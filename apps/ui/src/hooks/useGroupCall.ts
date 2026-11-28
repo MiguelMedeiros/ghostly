@@ -63,6 +63,8 @@ export interface GroupCallError {
 
 export interface GroupCall extends GroupCallState {
   status: GroupCallStatus;
+  /** In the room, but its path to the node is lost and LiveKit is getting it back (its `Reconnecting`, until `Reconnected`). */
+  reconnecting: boolean;
   error: GroupCallError | null;
   /** The status is "left" because the group's admin took you out of the room (WISP 602 § Moderation), not by your own Leave. */
   removedByAdmin: boolean;
@@ -347,6 +349,7 @@ function admit(pub: RemoteTrackPublication): void {
 export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, newest, loadLivekit, sealWaitMs = SEAL_WAIT_MS }: UseGroupCallOptions): GroupCall {
   const [state, setState] = useState<Snapshot>(EMPTY);
   const [status, setStatus] = useState<GroupCallStatus>("idle");
+  const [reconnecting, setReconnecting] = useState(false);
   const [error, setError] = useState<GroupCallError | null>(null);
   const [removedByAdmin, setRemovedByAdmin] = useState(false);
   const session = useRef<Session | null>(null);
@@ -390,6 +393,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     session.current = s;
     setState(EMPTY);
     setStatus("connecting");
+    setReconnecting(false);
     setError(null);
     setRemovedByAdmin(false);
 
@@ -425,7 +429,15 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
         const E = lk.RoomEvent;
         for (const event of [E.ParticipantConnected, E.ParticipantDisconnected, E.ParticipantNameChanged, E.TrackPublished,
           E.TrackUnpublished, E.TrackSubscribed, E.TrackUnsubscribed, E.TrackMuted, E.TrackUnmuted, E.LocalTrackPublished,
-          E.LocalTrackUnpublished, E.ActiveSpeakersChanged, E.Reconnected, E.ActiveDeviceChanged]) room.on(event, s.refresh);
+          E.LocalTrackUnpublished, E.ActiveSpeakersChanged, E.ActiveDeviceChanged]) room.on(event, s.refresh);
+        // The path to the node lost mid-call (a dropped link, another network): LiveKit gets it back by itself, or gives
+        // up (Disconnected). Said meanwhile, as a 1:1 call says it, not shown as connected.
+        const lost = (on: boolean) => { if (live && !s.ended) setReconnecting(on); };
+        for (const event of [E.Reconnecting, E.SignalReconnecting]) if (event) room.on(event, () => lost(true));
+        room.on(E.Reconnected, () => {
+          lost(false);
+          s.refresh();
+        });
         // LiveKit restarts your own microphone or camera by itself (a device came or went, access given back): the old
         // capture is stopped and a new one taken, told only on the track, and as a device change only when the device
         // differs. Read again then, or the device checks would take the stopped one for an unplugged device.
@@ -474,6 +486,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
           if (s.ended) return;
           void endSession(s);
           if (!live) return;
+          setReconnecting(false);
           setRemovedByAdmin(reason === PARTICIPANT_REMOVED);
           setStatus("left");
         });
@@ -659,5 +672,5 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     setStatus("left");
   }, []);
 
-  return { ...state, status, error, removedByAdmin, toggleMic, toggleCamera, toggleScreen, switchMicrophone, switchCamera, leave };
+  return { ...state, status, reconnecting: reconnecting && status === "connected", error, removedByAdmin, toggleMic, toggleCamera, toggleScreen, switchMicrophone, switchCamera, leave };
 }
