@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { createPublicKey, verify as nodeVerify } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, fromBase64Url, publicKeyFromZ32, type GroupMeta, type Roster } from "@ghostly/core";
+import { createIdentity, fromBase64Url, publicKeyFromZ32, verifyGroupCallModeration, type GroupMeta, type Roster } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { parseGroupCallRoomState, sendGroupCallModeration } from "../src/engine/groupCall";
 import { db } from "../src/engine/db";
@@ -54,6 +54,8 @@ describe("sending the request", () => {
     expect(sfu.seen[0].body).toMatchObject({ v: 1, g, k: admin.pubKeyZ32, room: `g_${g}`, act: "mute", target, src: ["microphone", "screen_share"] });
     expect(sfu.seen[0].init).toMatchObject({ method: "POST", redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store" });
     expect(new Headers(sfu.seen[0].init?.headers).get("Content-Type")).toBe("application/json");
+    // The sender is unchanged since the route shipped (1.13.0): core's node-side check takes its body as sent.
+    expect(verifyGroupCallModeration(sfu.seen[0].body, SFU, Date.now(), new Map())).toEqual({ ok: true, request: sfu.seen[0].body });
   });
 
   it("a key the node does not take as the admin is refused, once", async () => {

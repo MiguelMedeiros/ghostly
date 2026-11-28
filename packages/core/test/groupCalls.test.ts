@@ -181,6 +181,29 @@ describe("group call moderation request (WISP 602 § Moderation)", () => {
     ];
     for (const request of shapes) expect(verifyGroupCallModeration(request, SFU, NOW, new Map())).toEqual({ ok: false, reason: "malformed" });
   });
+
+  it("refuses a name or any other field the WISP does not list, signed as it stands, and one missing a field", () => {
+    const shapes: unknown[] = [
+      { ...mute(), name: "Ana" }, { ...mute(), why: "x".repeat(2000) }, { ...mute(), sig2: MODERATE_SIG },
+      (({ src: _src, ...rest }) => rest)(signGroupCallModeration({ sfu: SFU, g: G, act: "state", ts: TS, n: N }, SEED)),
+    ];
+    for (const request of shapes) expect(verifyGroupCallModeration(request, SFU, NOW, new Map())).toEqual({ ok: false, reason: "malformed" });
+  });
+
+  it("takes the WISP's vector as written there, and every act as the app's builder sends it over the wire", () => {
+    const vector = { v: 1, g: G, k: K, room: ROOM, act: "mute", target: TARGET, src: ["microphone"], ts: TS, n: N, sig: MODERATE_SIG };
+    expect(verifyGroupCallModeration(vector, SFU, NOW, new Map())).toEqual({ ok: true, request: vector });
+    // The builder (unchanged since the route shipped in 1.13.0) is what the app posts as JSON.
+    const acts = [
+      { act: "mute", target: TARGET, src: ["camera", "microphone", "screen_share"] }, { act: "allow", target: TARGET, src: ["microphone"] },
+      { act: "remove", target: TARGET }, { act: "unban", target: TARGET }, { act: "state" },
+    ] as const;
+    for (const ask of acts) {
+      const wire = JSON.parse(JSON.stringify(signGroupCallModeration({ sfu: SFU, g: G, ts: TS, n: N, ...ask }, SEED)));
+      expect(Object.keys(wire).sort()).toEqual(["act", "g", "k", "n", "room", "sig", "src", "target", "ts", "v"]);
+      expect(verifyGroupCallModeration(wire, SFU, NOW, new Map())).toEqual({ ok: true, request: wire });
+    }
+  });
 });
 
 // WISP 602 § Occupancy's test vector: the token request's key and inputs, under the occupancy tag.
