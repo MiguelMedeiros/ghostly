@@ -6,6 +6,7 @@ import { anyCallOn, endOtherCalls, setCallOn } from "@ghostly/react";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { GroupCallButton } from "../../components/GroupCallButton";
 import type { LivekitModule } from "../../hooks/useGroupCall";
+import { useCallsUnderLock } from "../../lib/callUnderLock";
 import { passRefreshInMs, type GroupCallPass } from "../../lib/groupCallPass";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
@@ -75,6 +76,8 @@ class FakeRoom {
   on(event: string, listener: (...args: unknown[]) => void) { this.listeners.set(event, listener); return this; }
   /** The node closing the room on this device, with LiveKit's reason (`DisconnectReason`). */
   drop(reason: number) { this.listeners.get("disconnected")?.(reason); }
+  /** A room event with nothing more, as LiveKit says it (its `RoomEvent` name). */
+  say(event: string) { this.listeners.get(event)?.(); }
   /** Someone comes into the room, as LiveKit says it. */
   arrive(person: ReturnType<typeof remote>) {
     this.remoteParticipants.set(person.identity, person);
@@ -326,6 +329,33 @@ describe("Join call in a group's header", () => {
 
     act(() => FakeRoom.rooms[0].arrive(remote(bo, "Bo")));
     await waitFor(() => expect(news()).toEqual(["Bo joined"]));
+  });
+
+  // A dropped link mid-call: LiveKit lost its path to the node and was getting it back, and the lock screen showed the
+  // group's call connected, its time running, as if everyone could still hear you. A 1:1 call says Reconnecting there.
+  it("on the lock screen, says Reconnecting while the room gets its path to the node back, and connected again after", async () => {
+    const LockCard = () => { const c = useCallsUnderLock()[0]; return <p data-testid="lock-card" data-at={c?.startedAt ?? ""}>{c?.state ?? "none"}</p>; };
+    answerPass(() => pass());
+    const group = community();
+    fakeEngine.update({ groups: [group] });
+    const { user } = renderApp(<><GroupCallButton group={group} loadLivekit={loadLivekit} /><LockCard /></>);
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(screen.getByTestId("lock-card")).toHaveTextContent("connected"));
+    // The time goes on from when the call first connected, not from 00:00 after each drop.
+    const at = screen.getByTestId("lock-card").dataset.at;
+    expect(at).toMatch(/^\d+$/);
+    for (const lost of ["Reconnecting", "SignalReconnecting"]) {
+      await new Promise((r) => setTimeout(r, 5));
+      act(() => FakeRoom.rooms[0].say(lost));
+      expect(screen.getByTestId("lock-card")).toHaveTextContent(/^reconnecting$/);
+      act(() => FakeRoom.rooms[0].say("Reconnected"));
+      expect(screen.getByTestId("lock-card")).toHaveTextContent(/^connected$/);
+      expect(screen.getByTestId("lock-card").dataset.at).toBe(at);
+    }
+    // LiveKit gave up: the call is over, nothing is left on the lock screen.
+    act(() => FakeRoom.rooms[0].say("Reconnecting"));
+    await act(async () => FakeRoom.rooms[0].drop(0));
+    expect(screen.getByTestId("lock-card")).toHaveTextContent("none");
   });
 });
 
