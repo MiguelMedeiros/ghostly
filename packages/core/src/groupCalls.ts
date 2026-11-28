@@ -147,15 +147,22 @@ function sourcesFit(act: GroupCallModerationAct, src: unknown): src is GroupCall
   return src.length > 0 && src.every((s, i) => (GROUP_CALL_SOURCES as readonly unknown[]).includes(s) && (i === 0 || src[i - 1] < s));
 }
 
+/** Whether `f` has exactly the keys `fields` (sorted, joined) lists: a request with any other key, or one missing, is out of shape. */
+const hasExactly = (f: Record<string, unknown>, fields: string) => Object.keys(f).sort().join() === fields;
+
+/** The fields WISP 602 § Moderation lists, sorted: there is no `name`, and any other field is refused. */
+const MODERATION_FIELDS = ["act", "g", "k", "n", "room", "sig", "src", "target", "ts", "v"].join();
+
 /**
- * The node's checks of a moderation request but the roster, in order: the shape (a known act, a `target` that is a
- * member key other than `k`, or `""` for `state`, and `src` as the act takes it), the time within `GROUP_CALL_SKEW_S`
- * of `now` (ms), a nonce not in `seen`, and the signature over the node's own origin `sfu`. A request that passes has
- * its nonce added to `seen`; entries older than `GROUP_CALL_NONCE_S` are dropped on the way.
+ * The node's checks of a moderation request but the roster, in order: the shape (exactly the WISP's fields, a known
+ * act, a `target` that is a member key other than `k`, or `""` for `state`, and `src` as the act takes it), the time
+ * within `GROUP_CALL_SKEW_S` of `now` (ms), a nonce not in `seen`, and the signature over the node's own origin `sfu`.
+ * A request that passes has its nonce added to `seen`; entries older than `GROUP_CALL_NONCE_S` are dropped on the way.
  */
 export function verifyGroupCallModeration(raw: unknown, sfu: string, now: number, seen: GroupCallNonces): { ok: true; request: GroupCallModeration } | { ok: false; reason: GroupCallRefusal } {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, reason: "malformed" };
   const f = raw as Record<string, unknown>;
+  if (!hasExactly(f, MODERATION_FIELDS)) return { ok: false, reason: "malformed" };
   const act = f.act as GroupCallModerationAct;
   if (f.v !== GROUP_CALL_VERSION || typeof f.g !== "string" || !GROUP_ID.test(f.g) || !isZ32Key(f.k) || f.room !== groupCallRoom(f.g) ||
     !(GROUP_CALL_MODERATION_ACTS as readonly unknown[]).includes(act) ||
@@ -219,7 +226,7 @@ export function signGroupCallOccupancy(input: { sfu: string; g: string; ts?: num
 export function verifyGroupCallOccupancy(raw: unknown, sfu: string, now: number, seen: GroupCallNonces): { ok: true; request: GroupCallOccupancyRequest } | { ok: false; reason: GroupCallRefusal } {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, reason: "malformed" };
   const f = raw as Record<string, unknown>;
-  if (Object.keys(f).sort().join() !== OCCUPANCY_FIELDS) return { ok: false, reason: "malformed" };
+  if (!hasExactly(f, OCCUPANCY_FIELDS)) return { ok: false, reason: "malformed" };
   if (f.v !== GROUP_CALL_VERSION || typeof f.g !== "string" || !GROUP_ID.test(f.g) || !isZ32Key(f.k) || f.room !== groupCallRoom(f.g) ||
     !Number.isSafeInteger(f.ts) || (f.ts as number) <= 0 || typeof f.n !== "string" || !NONCE.test(f.n) || toBase64Url(fromBase64Url(f.n)) !== f.n ||
     typeof f.sig !== "string" || !SIG.test(f.sig)) return { ok: false, reason: "malformed" };

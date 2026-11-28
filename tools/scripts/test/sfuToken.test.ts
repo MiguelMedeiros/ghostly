@@ -176,6 +176,8 @@ describe("the group-token mock's moderation route (POST /sfu/group-moderate)", (
     // The tags differ: a token request's signature is no moderation's, and back.
     expect(verifyModeration(ORIGIN, { ...MUTE, sig: sign(null, signedBytes(ORIGIN, MUTE), member).toString("base64url") })).toBe(false);
     expect(verifyRequest(ORIGIN, { ...VECTOR, sig: MUTE.sig })).toBe(false);
+    // Exactly the contract's fields: no `name`, no other key, none missing.
+    for (const body of [{ ...MUTE, name: "Ana" }, { ...MUTE, why: "x" }, (({ src: _src, ...rest }) => rest)(MUTE), null, [], "x"]) expect(verifyModeration(ORIGIN, body)).toBe(false);
   });
 
   let close: (() => Promise<void>)[] = [];
@@ -256,6 +258,8 @@ describe("the group-token mock's moderation route (POST /sfu/group-moderate)", (
     await refused(moderation({ act: "state", src: [] }), "a target on a state read");
     await refused(moderation({ ts: TS - 61 }), "a minute and a second old");
     await refused({ ...VECTOR, act: "mute", target: T, src: ["microphone"] }, "a token request");
+    await refused({ ...moderation(), name: "Ana" }, "a name, which it has not");
+    await refused({ ...moderation(), why: "x" }, "a field the contract has not");
     const once = moderation();
     expect((await moderate(once)).status).toBe(200);
     await refused(once, "the same nonce again");
