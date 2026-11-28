@@ -1,0 +1,1 @@
+The Implementation row names the app's occupancy hook: the app's `useGroupCallOccupancy.ts` asks the occupancy request (§ Occupancy) and shows the group's call as before while no node answers it. No rule of the profile changes.
