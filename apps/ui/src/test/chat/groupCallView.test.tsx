@@ -142,7 +142,11 @@ describe("a shared screen", () => {
     expect(screen.getByTestId("group-call-info")).toHaveClass("bg-black/70", "text-white", "hover:bg-black/80", "hover:text-white", "aria-expanded:text-white");
     expect(screen.getByTestId("group-call-info-text")).toHaveClass("bg-black/70", "text-white");
     expect(screen.getByTestId("group-call-info-text")).not.toHaveClass("text-text-secondary");
+    // The group's name too: white on a white shared screen was 1.0:1.
+    expect(screen.getByTestId("group-call-name")).toHaveClass("bg-black/70", "text-white");
     rerenderWith(state(2));
+    expect(screen.getByTestId("group-call-name")).not.toHaveClass("bg-black/70");
+    expect(screen.getByTestId("group-call-name")).toHaveClass("text-text-primary");
     expect(screen.getByTestId("group-call-info")).not.toHaveClass("bg-black/70");
     expect(screen.getByTestId("group-call-info")).not.toHaveClass("text-white");
     expect(screen.getByTestId("group-call-info-text")).toHaveClass("text-text-secondary");

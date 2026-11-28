@@ -388,7 +388,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
           {/* On a phone the row keeps 12 px (the ⓘ's grown side) from the Small window button and from the "N removed" chip.
               Over a shared screen the window starts at the phone's top, so the row starts below its status bar. */}
           <div data-testid="group-call-top" className={`call-top flex items-center justify-center gap-1.5 max-md:gap-3 px-16 max-md:px-[72px] ${presenter ? "pt-[calc(1.5rem+env(safe-area-inset-top))]" : "pt-6"} pb-2`}>
-            <p dir="auto" data-over-picture={presenter ? true : undefined} className="min-w-0 truncate text-text-primary font-medium">{groupName}</p>
+            {/* Over a shared screen the name is on a black chip too, as the ⓘ and "Removed": white alone vanished on a white screen. */}
+            <p dir="auto" data-over-picture={presenter ? true : undefined} data-testid="group-call-name" className={`min-w-0 truncate font-medium ${presenter ? "rounded-full bg-black/70 px-3 py-1 text-white" : "text-text-primary"}`}>{groupName}</p>
             {/* Its phone hit area reaches up into the window's top, not down onto the tiles drawn over it 8 px below. */}
             <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="group-call-info" className={`max-md:before:-top-4 max-md:before:-bottom-2 ${presenter ? "bg-black/70 text-white hover:bg-black/80 hover:text-white aria-expanded:text-white" : ""}`} />
             {moderation && <RemovedFromCall moderation={moderation} nameOf={(identity) => (groupNameOf ? groupNameOf(identity) : identity)} host={box} overPicture={!!presenter} />}
