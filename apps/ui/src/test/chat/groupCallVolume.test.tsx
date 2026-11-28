@@ -290,4 +290,25 @@ describe("each person's volume in a group call", () => {
     expect(screen.queryByTestId("group-call-volume-menu")).toBeNull();
     expect(volumeButton(ANA)).toHaveFocus();
   });
+
+  it("goes back to its button with Shift+Tab, and on past it with Tab, as a menu beside its button", async () => {
+    const { user } = view();
+    // Where Tab goes from the button with the menu shut.
+    volumeButton(ANA).focus();
+    await act(async () => { await user.keyboard("{Tab}"); });
+    const after = document.activeElement;
+    expect(after).not.toBe(volumeButton(ANA));
+
+    await user.click(volumeButton(ANA));
+    expect(screen.getByTestId("group-call-volume-slider")).toHaveFocus();
+    // Not Leave call, the call window's last button, with the menu still open over the tile.
+    await act(async () => { await user.keyboard("{Shift>}{Tab}{/Shift}"); });
+    expect(screen.queryByTestId("group-call-volume-menu")).toBeNull();
+    expect(volumeButton(ANA)).toHaveFocus();
+
+    await user.click(volumeButton(ANA));
+    await act(async () => { await user.keyboard("{Tab}"); });
+    expect(screen.queryByTestId("group-call-volume-menu")).toBeNull();
+    expect(document.activeElement).toBe(after);
+  });
 });
