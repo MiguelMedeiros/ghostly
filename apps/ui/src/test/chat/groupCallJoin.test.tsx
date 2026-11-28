@@ -534,6 +534,26 @@ describe("Join call after the admin removed you from the call (WISP 602 § Moder
   });
 });
 
+describe("Join call after this profile joined the call from another device", () => {
+  /** LiveKit's `DisconnectReason.DUPLICATE_IDENTITY`: a participant with your key came into the room from elsewhere. */
+  const DUPLICATE_IDENTITY = 2;
+
+  it("says the call went on on the other device, and Try again takes it back here", async () => {
+    answerPass(() => pass());
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(FakeRoom.rooms[0]?.connect).toHaveBeenCalled());
+    await act(async () => FakeRoom.rooms[0].drop(DUPLICATE_IDENTITY));
+    expect(screen.queryByTestId("group-call")).toBeNull();
+    expect(screen.getByTestId("group-call-problem-notice-title")).toHaveTextContent("You're in this call on another device");
+    expect(screen.getByTestId("group-call-join")).not.toHaveAttribute("aria-disabled");
+
+    await user.click(screen.getByTestId("group-call-retry"));
+    await waitFor(() => expect(FakeRoom.rooms[1]?.connect).toHaveBeenCalledWith("wss://sfu.ghostly.test", "pass-1", undefined));
+    expect(screen.queryByTestId("group-call-problem")).toBeNull();
+  });
+});
+
 describe("Join call where this app cannot join a group call", () => {
   const LINUX_DESKTOP = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
   const tauri = window as unknown as { __TAURI_INTERNALS__?: object };

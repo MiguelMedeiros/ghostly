@@ -25,6 +25,8 @@
   "endsCurrent": "Atender encerra sua chamada atual",
   "group": {
     "byAdminInfo": "O admin do grupo desligou isto para você nesta chamada. Você pode ligar de novo quando ele permitir.",
+    "elsewhere": "Você está nesta chamada em outro dispositivo",
+    "elsewhereInfo": "Este perfil entrou na chamada por outro dispositivo ou janela, então este saiu dela. Tente de novo para trazer a chamada para cá.",
     "endAndJoin": "Encerrar e entrar",
     "endOtherBody": "Entrar na chamada do grupo encerra a chamada em que você está.",
     "endOtherTitle": "Encerrar sua chamada?",

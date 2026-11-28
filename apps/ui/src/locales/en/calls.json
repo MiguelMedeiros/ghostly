@@ -25,6 +25,8 @@
   "endsCurrent": "Answering ends your current call",
   "group": {
     "byAdminInfo": "The group's admin turned this off for you in this call. You can turn it on again once they allow it.",
+    "elsewhere": "You're in this call on another device",
+    "elsewhereInfo": "This profile joined the call from another device or window, so this one left it. Try again to bring the call back here.",
     "endAndJoin": "End and join",
     "endOtherBody": "Joining the group's call ends the call you're on.",
     "endOtherTitle": "End your call?",
