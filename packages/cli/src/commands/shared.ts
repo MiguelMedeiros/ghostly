@@ -5,6 +5,7 @@ import { reactionEmoji } from "@ghostly/core";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
 import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl, statusCardBytes } from "@ghostly/core/statusCards";
+import { cleanName } from "../apiKit";
 import { decimalNumber, type OptionSpec, type Parsed } from "../args";
 import { CliError, localFileError, shownValue } from "../errors";
 import { userPath } from "../profiles";
@@ -231,6 +232,27 @@ export function typingWords(options: Parsed["options"]): { kind?: string; status
   }
   typingStatus(status, "--status", "usage");
   return { kind: options.kind as string | undefined, status };
+}
+
+/**
+ * A name the engine stores (`group create|rename <name...>`, `service add <name>`), refused before the profile opens
+ * when nothing in it shows once cleaned as the engine stores a name (apiKit `cleanName`, the one its `shownName` refuses
+ * as `bad_request`): spaces only, a zero-width space. A usage error (exit 2) that names the argument or option, as
+ * `--name` of `profile create|set` is. Before, a one-shot made and opened the profile and went online first (0.4 to
+ * 1.3 s), then the engine answered `bad_request` (exit 1) in words that named no argument. The API keeps its check for
+ * socket callers. Given back as it came: the engine cleans it.
+ */
+export function shownWord(value: string, name: string, empty = ""): string {
+  if (!cleanName(value, Infinity)) throw new CliError("usage", `${name} needs a character that shows${empty}`);
+  return value;
+}
+
+/**
+ * A chat's name on this side (`chat rename [name...]`, `--label` of `invite create|join`): blank (spaces, or "") is no
+ * name, as the engine takes it (api.ts `chatName`: the contact's own), and anything else is checked as `shownWord` checks.
+ */
+export function chatLabel(value: string | undefined, name: string): string | undefined {
+  return value === undefined || !value.trim() ? value : shownWord(value, name, " (an empty one gives back the contact's own)");
 }
 
 /**

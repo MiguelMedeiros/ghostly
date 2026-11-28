@@ -1,5 +1,5 @@
 import { CliError, shownValue } from "../errors";
-import { type Command, groupWait, here, picture, refs, showSecret, secret, cursor, pageLimit, reaction, timeout, typingFor, typingKind, typingWords } from "./shared";
+import { type Command, groupWait, here, picture, refs, showSecret, secret, cursor, pageLimit, reaction, shownWord, timeout, typingFor, typingKind, typingWords } from "./shared";
 
 const nameForce = { type: "boolean", description: "Use the name even if it looks like a seed, a key or ecash" } as const;
 const forced = (options: Record<string, unknown>) => (options.force === true ? { force: true } : {});
@@ -43,7 +43,7 @@ export const commands: Record<string, Command> = {
   "group create": {
     method: "group.create", usage: "group create <name...> [--mesh] [--force]", summary: "A community (anyone who has its link can join) or, with --mesh, a private group of up to 32",
     args: ["name..."], options: { mesh: { type: "boolean", description: "A private mesh of contacts instead of a community" }, force: nameForce },
-    params: ({ options }, { name }) => ({ name, profile: options.mesh ? "mesh" : "community", ...forced(options) }),
+    params: ({ options }, { name }) => ({ name: shownWord(name!, "<name>"), profile: options.mesh ? "mesh" : "community", ...forced(options) }),
   },
   "group decline": { method: "group.decline", usage: "group decline <group>", summary: "Decline an invitation to a group", args: ["group"], params: (_, { group }) => ({ group }) },
   "group forget": {
@@ -107,7 +107,7 @@ export const commands: Record<string, Command> = {
   },
   "group rename": {
     method: "group.rename", usage: "group rename <group> <name...> [--force] [--show-secret]", summary: "Rename the group (admin; the picture stays)", args: ["group", "name..."],
-    options: { ...showSecret, force: nameForce }, params: ({ options }, a) => ({ group: a.group, name: a.name, ...forced(options), ...secret(options) }),
+    options: { ...showSecret, force: nameForce }, params: ({ options }, a) => ({ group: a.group, name: shownWord(a.name!, "<name>"), ...forced(options), ...secret(options) }),
   },
   "group rotate": {
     method: "group.rotate", usage: "group rotate <group> [--show-secret]", summary: "A fresh group secret, members unchanged (admin)", args: ["group"],
