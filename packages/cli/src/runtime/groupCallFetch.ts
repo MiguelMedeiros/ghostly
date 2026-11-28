@@ -8,7 +8,7 @@ import { isPublicIp, publicOnlyLookup } from "./pushSend";
  * named: an HTTPS POST only at a public address, or at a name whose every address is public, checked when the
  * connection is made, as an identity's proof is read (./publicFetch.ts). No redirect is followed (one is answered as it
  * came: the engine takes only a 2xx), no proxy, no cookie. The engine bounds the time and the size of the reply.
- * A status a `Response` cannot carry (one HTTP has no room for, 600 and above) is no answer: built in the request's
+ * A status a `Response` cannot carry (one HTTP has no room for, 600 and above, or a 101) is no answer: built in the request's
  * callback, its throw went uncaught (a one-shot command crashed) and the engine's call never settled.
  */
 export function nodeGroupCallFetch(lookup: LookupFunction = publicOnlyLookup): typeof fetch {
@@ -32,10 +32,12 @@ export function nodeGroupCallFetch(lookup: LookupFunction = publicOnlyLookup): t
           return;
         }
         // A status that has no body (205 too) is built without one, as `fetch` builds it.
-        if (status === 204 || status === 205 || status === 304) { res.resume(); resolve(new Response(null, { status, headers: out })); return; }
+        if (status === 204 || status === 205 || status === 304) { res.destroy(); resolve(new Response(null, { status, headers: out })); return; }
         resolve(new Response(Readable.toWeb(res) as ReadableStream<Uint8Array>, { status, headers: out }));
       });
       req.on("error", reject);
+      // A 101 never reaches the callback: Node emits `upgrade` and drops the socket, and nothing else settles this.
+      req.on("upgrade", (_res, socket) => { socket.destroy(); reject(new TypeError("The node answered 101, not an answer")); });
       req.end(body);
     });
   };
