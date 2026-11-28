@@ -820,9 +820,10 @@ export function GroupChat() {
     return linkId ? links?.find(l => l.id === linkId)?.peerPubKeyZ32 : undefined;
   };
   const peerOf = (paymentId: string) => paymentPeers[paymentId] ?? "";
-  // A row of the timeline: an event, a payment's note, or a message.
+  // A row of the timeline: an event, a payment's note, or a message. A name of one long word (a member's, the group's)
+  // breaks inside the line: unbroken, the centred line ran off both sides of a phone.
   const row = (m: StoredMessage, inStack?: MessageAuthor) => m.event
-    ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center chat-text-system text-text-muted">{eventLine(m, group, t)}</span></div>
+    ? <div key={m.id} data-testid="group-event" className="flex justify-center mb-3.5 px-6"><span className="min-w-0 rounded-lg bg-surface-alt/90 px-3 py-1.5 text-center chat-text-system text-text-muted [overflow-wrap:anywhere]">{eventLine(m, group, t)}</span></div>
     // A note about a payment this device is part of is shown under its own bubble instead.
     : m.groupPay ? (ownNotes.has(m.groupPay.id) ? null : <GroupPaymentNote key={m.id} note={m.groupPay} group={group} />)
     : m.paymentId ? <div key={m.id} data-testid="group-payment">
