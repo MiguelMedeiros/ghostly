@@ -240,10 +240,11 @@ export function typingWords(options: Parsed["options"]): { kind?: string; status
  * as `bad_request`): spaces only, a zero-width space. A usage error (exit 2) that names the argument or option, as
  * `--name` of `profile create|set` is. Before, a one-shot made and opened the profile and went online first (0.4 to
  * 1.3 s), then the engine answered `bad_request` (exit 1) in words that named no argument. The API keeps its check for
- * socket callers. Given back as it came: the engine cleans it.
+ * socket callers. Given back as it came: the engine cleans it. A missing value (only a caller that skips the line's own
+ * check of required arguments has none) comes back as it is, for the engine to refuse as before.
  */
-export function shownWord(value: string, name: string, empty = ""): string {
-  if (!cleanName(value, Infinity)) throw new CliError("usage", `${name} needs a character that shows${empty}`);
+export function shownWord<T extends string | undefined>(value: T, name: string, empty = ""): T {
+  if (value !== undefined && !cleanName(value, Infinity)) throw new CliError("usage", `${name} needs a character that shows${empty}`);
   return value;
 }
 
