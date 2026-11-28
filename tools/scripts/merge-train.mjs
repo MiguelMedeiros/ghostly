@@ -906,6 +906,16 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const byNumber = new Map(queued.map((p) => [p.number, p]));
   const line = () => order(queued.filter((p) => !gone.has(p.number)));
   say(`${base}: ${queued.length} in line, ${batches.length} batch(es) open.`);
+  /**
+   * A pull request read again right before it lands, at the head `sha` the run read: its labels, draft and head, and a
+   * review that started on that head since (its comments, read again too). `out`: closed, pushed to, or out of the line.
+   */
+  const readAgain = async (n, sha) => {
+    const read = await gh.pull(n);
+    if (read.open && read.sha === sha && !onHold(read)) read.review = reviewHold(await gh.comments(n), read.sha, now, read.labels.includes(LABEL.priority));
+    read.out = !read.open || read.sha !== sha || !(inLine(read.labels) || also.includes(n));
+    return read;
+  };
 
   const leave = async (p, label, text) => {
     gone.add(p.number);
@@ -1206,11 +1216,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
      * the line and lands the ones ahead of it counts too. Returns that read when it changed or left the line, else null.
      */
     const leftSince = async (s) => {
-      const read = await gh.pull(s.number);
-      // A review that started since the line was read: its comment, read again too.
-      if (read.open && read.sha === s.sha && !onHold(read)) read.review = reviewHold(await gh.comments(s.number), read.sha, now, read.labels.includes(LABEL.priority));
-      const out = !read.open || read.sha !== s.sha || isHeld(read) || !(inLine(read.labels) || also.includes(s.number)) || (bySquash && read.draft);
-      return out ? read : null;
+      const read = await readAgain(s.number, s.sha);
+      return read.out || isHeld(read) || (bySquash && read.draft) ? read : null;
     };
 
     /**
@@ -1404,8 +1411,18 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   /**
    * Merges a lone pull request at its head. dev: GitHub's squash merge (refused unless up to date and green), so GitHub
    * writes the commit and signs it. An epic: a fast-forward to the pull request's own commits, which stay unsigned.
+   * Read again first, as a batch's members are (`leftSince`): a hold, a review, a draft, a push or `queue` taken off
+   * while this run read the line counts too, and it does not land (`left`). Held or a draft, it waits in line and keeps
+   * its place and its mark, as `flyAlone` leaves a held one; out of the line, the next run reads it again.
    */
   const landAlone = async (p) => {
+    const read = await readAgain(p.number, p.sha);
+    if (read.out || isHeld(read) || read.draft) {
+      if (read.out) gone.add(p.number);
+      else Object.assign(p, { labels: read.labels, review: read.review, draft: read.draft });
+      say(`#${p.number} changed or left the line since this run read it, so it does not land alone.`);
+      return { ok: false, left: true };
+    }
     let r;
     if (base === "dev") {
       const { title, message } = squashMessage(p, await gh.pullCommits(p.number));
@@ -1471,7 +1488,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const tip = await gh.branchSha(base);
     if (!rerun && p.ci === "success" && (await gh.behindBy(tip, p.sha)) === 0) {
       const r = await landAlone(p);
-      if (r.ok) return null;
+      if (r.ok || r.left) return null;
       if (past) return pastBatchWay(p, r.message);
       // Refused while up to date and green (squash merges turned off, a merge GitHub has not worked out yet): a batch
       // lands another way, so it never blocks the line.
@@ -1583,7 +1600,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     }
     if (p.ci === "success") {
       const r = await landAlone(p);
-      if (r.ok) return null;
+      if (r.ok || r.left) return null;
       // A base or head that moved under the merge: the next run rebases it onto the new tip, or reads its new head.
       if (r.status === 409 || /Base branch was modified/.test(r.message ?? "")) {
         say(`::warning::Could not land #${p.number}: ${r.message}`);
@@ -1662,7 +1679,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       const upToDate = base === "dev" && (await gh.behindBy(await gh.branchSha(base), p.sha)) === 0;
       if (upToDate && p.ci === "success") {
         const r = await landAlone(p);
-        if (r.ok) continue;
+        if (r.ok || r.left) continue;
         say(`::warning::Could not merge #${p.number} alone: ${r.message}`);
         // A base or head that moved under the merge: the next run reads it again.
         if (r.status === 409 || /Base branch was modified/.test(r.message ?? "")) continue;
