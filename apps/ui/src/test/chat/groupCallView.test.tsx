@@ -153,6 +153,37 @@ describe("a shared screen", () => {
     expect(screen.getByTestId("group-call-info-text")).not.toHaveClass("bg-black/70");
   });
 
+  // The screen fills the window under the controls: white on a 10% white tint was 1.0:1 over a white shared screen, and
+  // the danger red on its own tint 2.0:1 there.
+  it("draws the call's buttons over the picture on a black chip, and an off one on the danger fill", () => {
+    const sharing = { participants: [person("ana", { screen: true, tracks: { screen: video() } })] };
+    const { rerenderWith } = view(state(0, { ...sharing, local: person("me", { camera: true }) }), { devices: devicesWith(null) });
+    for (const id of ["group-call-mic", "group-call-camera", "group-call-screen", "call-devices", "group-call-minimize"]) {
+      expect(screen.getByTestId(id)).toHaveClass("bg-black/70", "text-white", "hover:bg-black/80");
+      expect(screen.getByTestId(id)).not.toHaveClass("bg-white/10");
+    }
+    rerenderWith(state(0, { ...sharing, local: person("me", { mic: false, camera: false }) }));
+    for (const id of ["group-call-mic", "group-call-camera"]) {
+      expect(screen.getByTestId(id)).toHaveClass("bg-danger-fill", "text-white");
+      expect(screen.getByTestId(id)).not.toHaveClass("bg-danger/30");
+    }
+    // The faces alone keep the window's own look.
+    rerenderWith(state(1));
+    for (const id of ["group-call-mic", "group-call-screen", "call-devices", "group-call-minimize"]) {
+      expect(screen.getByTestId(id)).toHaveClass("bg-white/10");
+      expect(screen.getByTestId(id)).not.toHaveClass("bg-black/70");
+    }
+  });
+
+  it("draws the ⓘ beside the controls over the picture on a black chip too", () => {
+    const held = { mic: true, camera: false, screen: false };
+    const sharing = { participants: [person("ana", { screen: true, tracks: { screen: video() } })] };
+    const { rerenderWith } = view(state(0, { ...sharing, local: person("me", { mic: false, byAdmin: held }) }));
+    expect(screen.getByTestId("group-call-by-admin-info")).toHaveClass("bg-black/70", "text-white", "hover:text-white", "aria-expanded:text-white");
+    rerenderWith(state(1, { local: person("me", { mic: false, byAdmin: held }) }));
+    expect(screen.getByTestId("group-call-by-admin-info")).not.toHaveClass("bg-black/70");
+  });
+
   it("plays a screen's sound beside its sharer's voice, and says on your own screen when it went without its sound", () => {
     const sound = new FakeTrack("audio") as unknown as MediaStreamTrack;
     const { rerenderWith } = view(state(0, {
