@@ -23,10 +23,10 @@ import { renderApp } from "../render";
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 /** The Android app's `call_service` (CallService.kt) and its notification's Hang up (`call-hang-up`). */
-const tauri = vi.hoisted(() => ({
-  invoke: vi.fn(async (command: string, _args?: unknown): Promise<unknown> => (command === "call_service" ? true : command === "native_notification_permission" ? "granted" : undefined)),
-  hangUp: undefined as (() => void) | undefined,
-}));
+const tauri = vi.hoisted(() => {
+  const answer = async (command: string, _args?: unknown): Promise<unknown> => (command === "call_service" ? true : command === "native_notification_permission" ? "granted" : undefined);
+  return { answer, invoke: vi.fn(answer), hangUp: undefined as (() => void) | undefined };
+});
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: tauri.invoke,
   listen: async (name: string, handler: () => void) => {
@@ -334,6 +334,7 @@ describe("a group call in the Android app", () => {
   afterEach(() => {
     delete (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__;
     tauri.invoke.mockClear();
+    tauri.invoke.mockImplementation(tauri.answer);
     tauri.hangUp = undefined;
   });
 
@@ -358,6 +359,46 @@ describe("a group call in the Android app", () => {
     await waitFor(() => expect(screen.queryByTestId("group-call")).toBeNull());
     expect(FakeRoom.rooms[1].disconnect).toHaveBeenCalled();
     expect(serviceTold()[serviceTold().length - 1]).toBeNull();
+  });
+
+  // Past GROUP_CALL_MUTED_ABOVE people the call joins muted: a listener sent to Home or with the screen off had no call
+  // service, and Android froze the app out of sight, the call with it.
+  it("holds the call service for a call joined muted, and tells it again once the microphone is on", async () => {
+    (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(ANDROID);
+    FakeRoom.others = Array.from({ length: 8 }, (_, i) => remote(`p${i}`.padEnd(52, "x"), `P${i}`));
+    answerPass(() => pass());
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(screen.getByTestId("group-call")).toHaveAttribute("data-count", "9"));
+    expect(FakeRoom.rooms[0].localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    await waitFor(() => expect(serviceTold()).toEqual([{ name: "Club", video: false }]));
+    // Held: turning the microphone on asks nothing more.
+    await user.click(screen.getByTestId("group-call-mic"));
+    await waitFor(() => expect(FakeRoom.rooms[0].localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true, expect.anything()));
+    expect(serviceTold()).toEqual([{ name: "Club", video: false }]);
+    await user.click(screen.getByTestId("group-call-leave"));
+    await waitFor(() => expect(serviceTold()).toEqual([{ name: "Club", video: false }, null]));
+  });
+
+  it("tells the call service again once the microphone is on, when its start was refused before it was allowed", async () => {
+    (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(ANDROID);
+    // Android 14 and up: no microphone service before RECORD_AUDIO is granted (CallTypes.kt), the start says false.
+    let allowed = false;
+    tauri.invoke.mockImplementation(async (command: string) => (command === "call_service" ? allowed : tauri.answer(command)));
+    FakeRoom.others = Array.from({ length: 8 }, (_, i) => remote(`p${i}`.padEnd(52, "x"), `P${i}`));
+    answerPass(() => pass());
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    await waitFor(() => expect(serviceTold()).toEqual([{ name: "Club", video: false }]));
+    allowed = true;
+    await user.click(screen.getByTestId("group-call-mic"));
+    await waitFor(() => expect(serviceTold()).toEqual([{ name: "Club", video: false }, { name: "Club", video: false }]));
+    // Muted again, it is not told again: it holds.
+    await user.click(screen.getByTestId("group-call-mic"));
+    await user.click(screen.getByTestId("group-call-mic"));
+    expect(serviceTold()).toHaveLength(2);
   });
 
   it("holds nothing outside the Android app", async () => {
