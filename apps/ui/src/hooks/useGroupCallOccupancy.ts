@@ -10,7 +10,8 @@ import { useWindowAway } from "../lib/windowAway";
  * shown and its window the focused one: a hidden tab or a window in the background asks nothing) and I'm not in its
  * call. At most once per `OCCUPANCY_FLOOR_MS` for a group on this page, however often it is opened or shown again.
  * An answer that comes after the window went away and back, or after a change of the call or of "Hide my IP", is
- * still shown while the group is open, for the same node and call and with "Hide my IP" off.
+ * still shown while the group is open, for the same node and call and with "Hide my IP" off. One from before I joined
+ * the call is not shown once I leave it: not known until the node answers again.
  *
  * Anything but a 200 says nothing about the call: the button shows as it would without the route. What comes next
  * depends on what came back, kept per call node (its origin) for as long as the app runs, so coming back to the group
@@ -103,6 +104,13 @@ export function useGroupCallOccupancy(groupId: string, call: { sfu: string; e2ee
   const stamp = JSON.stringify(call ?? null);
   const key = `${groupId} ${node}`;
   const [known, setKnown] = useState<{ key: string; occupancy: GroupCallOccupancyNow | null }>(() => ({ key, occupancy: freshAnswer(groupId, stamp) }));
+  // In the call, the answer from before joining says nothing of it once I leave (I may have started it, others stay
+  // on): not known until the node is asked again.
+  const [wasEnabled, setWasEnabled] = useState(enabled);
+  if (wasEnabled !== enabled) {
+    setWasEnabled(enabled);
+    if (!enabled) setKnown({ key, occupancy: null });
+  }
   /** The group and node the engine said I'm not a member of, while open: asked again only once opened again. */
   const outside = useRef<string | null>(null);
   /** "Hide my IP" as it is now, for an answer that comes after it changed. */
@@ -130,6 +138,12 @@ export function useGroupCallOccupancy(groupId: string, call: { sfu: string; e2ee
     }
     // "Hide my IP" changed since the engine said `hidden`: asked as before.
     if (hiddenUnder !== null && hiddenUnder !== relayOnly) hiddenUnder = null;
+    // Opened again within the floor after leaving the call, its answer from before is not shown either; nor one to an
+    // ask from before joining that comes in the call: that ask counts as an older one.
+    if (!enabled) {
+      answers.delete(groupId);
+      now.current.lastAsk += 1;
+    }
     if (!enabled || away) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -155,7 +169,7 @@ export function useGroupCallOccupancy(groupId: string, call: { sfu: string; e2ee
       let occupancy: GroupCallOccupancyNow | null = null;
       if (result?.ok) {
         occupancy = { count: result.count, ...(result.since !== undefined && { since: result.since }) };
-        answers.set(groupId, { occupancy, at: Date.now(), stamp });
+        if (now.current.lastAsk === mine) answers.set(groupId, { occupancy, at: Date.now(), stamp });
         asks.failures = 0;
         asks.until = 0;
       } else {

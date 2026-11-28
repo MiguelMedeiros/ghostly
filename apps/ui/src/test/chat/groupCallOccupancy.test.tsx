@@ -58,6 +58,8 @@ const pass = (): GroupCallPass => ({ url: "wss://sfu.ghostly.test", token: "pass
 /** The node's answer from now on, through the engine. */
 const answer = (handler: () => GroupCallOccupancyResult | Promise<GroupCallOccupancyResult>) => fakeEngine.on("groupCallOccupancy", handler);
 const asks = () => fakeEngine.callsTo("groupCallOccupancy").length;
+/** The node's answer, `ms` after it was asked. */
+const late = (ms: number, result: GroupCallOccupancyResult) => () => new Promise<GroupCallOccupancyResult>((resolve) => { setTimeout(() => resolve(result), ms); });
 
 let visibility: DocumentVisibilityState = "visible";
 const setShown = (shown: boolean) => act(() => {
@@ -401,9 +403,6 @@ describe("what the node's answer says of the next ask", () => {
 });
 
 describe("an answer that comes while the group's window went away and back, or its call or \"Hide my IP\" changed", () => {
-  /** The node's answer, `ms` after it was asked. */
-  const late = (ms: number, result: GroupCallOccupancyResult) => () => new Promise<GroupCallOccupancyResult>((resolve) => { setTimeout(() => resolve(result), ms); });
-
   it("the window went behind another and came back while asking: shown once it comes, not 15 s later", async () => {
     answer(late(2_000, { ok: true, count: 2, since: 1_794_700_800 }));
     open();
@@ -544,5 +543,74 @@ describe("the group's call button, by what the node says", () => {
     await elapse(0);
     expect(screen.queryByTestId("group-call")).toBeNull();
     expect(asks()).toBe(2);
+  });
+
+  it("left within 15 s of the last answer: not the answer from before joining (nobody in it), Join call until the node says", async () => {
+    answer(() => ({ ok: true, count: 0 }));
+    fakeEngine.on("groupCallToken", () => pass());
+    open();
+    await elapse(0);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "off");
+    fireEvent.click(screen.getByTestId("group-call-join"));
+    await elapse(100);
+    expect(screen.getByTestId("group-call")).toBeInTheDocument();
+    // Another member joined meanwhile, and stays when I leave 5 s later.
+    answer(() => ({ ok: true, count: 1, since: 1_794_700_800 }));
+    await elapse(5_000);
+    fireEvent.click(screen.getByTestId("group-call-leave"));
+    await elapse(0);
+    expect(screen.queryByTestId("group-call")).toBeNull();
+    const button = screen.getByTestId("group-call-join");
+    expect(button).toHaveAttribute("data-call", "unknown");
+    expect(button).toHaveAccessibleName("Join call");
+    // Asked once the floor from the last ask is out: then it says who is in it.
+    await elapse(OCCUPANCY_FLOOR_MS - 5_100);
+    expect(asks()).toBe(2);
+    expect(button).toHaveAttribute("data-call", "on");
+  });
+
+  it("closed in the call and opened again within 15 s: not the answer from before joining either", async () => {
+    answer(() => ({ ok: true, count: 0 }));
+    fakeEngine.on("groupCallToken", () => pass());
+    const group = community();
+    const first = open(group);
+    await elapse(0);
+    fireEvent.click(screen.getByTestId("group-call-join"));
+    await elapse(100);
+    expect(screen.getByTestId("group-call")).toBeInTheDocument();
+    first.unmount();
+    answer(() => ({ ok: true, count: 1, since: 1_794_700_800 }));
+    await elapse(3_000);
+    open(group);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+  });
+
+  it("an answer from before joining that comes in the call: not shown once I leave", async () => {
+    answer(late(2_000, { ok: true, count: 0 }));
+    fakeEngine.on("groupCallToken", () => pass());
+    open();
+    await elapse(0);
+    fireEvent.click(screen.getByTestId("group-call-join"));
+    await elapse(100);
+    await elapse(2_000);
+    answer(() => ({ ok: true, count: 1, since: 1_794_700_800 }));
+    fireEvent.click(screen.getByTestId("group-call-leave"));
+    await elapse(0);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
+  });
+
+  it("an answer from before joining that comes in the call, closed and opened again within 15 s: not shown either", async () => {
+    answer(late(2_000, { ok: true, count: 0 }));
+    fakeEngine.on("groupCallToken", () => pass());
+    const group = community();
+    const first = open(group);
+    await elapse(0);
+    fireEvent.click(screen.getByTestId("group-call-join"));
+    await elapse(100);
+    first.unmount();
+    answer(() => ({ ok: true, count: 1, since: 1_794_700_800 }));
+    await elapse(3_000);
+    open(group);
+    expect(screen.getByTestId("group-call-join")).toHaveAttribute("data-call", "unknown");
   });
 });
