@@ -37,6 +37,8 @@ export const LOCKFILES = [
   { ecosystem: "npm", file: "native/transports/hyperdht/package-lock.json" },
   // The HyperDHT relay for browsers, as its image installs it.
   { ecosystem: "npm", file: "infra/services/hyperdht-relay/package-lock.json" },
+  // The self-hostable Pkarr relay proxy (Batch GET/PUT + WS/SSE push), as its image installs it.
+  { ecosystem: "npm", file: "infra/services/pkarr-relay/package-lock.json" },
   // Iroh for browsers: packages/iroh-web/pkg, which the web app loads, is built from it.
   { ecosystem: "crates.io", file: "native/transports/iroh-web/Cargo.lock" },
   // The translation runtime: its node_modules go into the archive the Desktop downloads with a first language model.
