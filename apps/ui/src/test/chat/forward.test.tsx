@@ -538,6 +538,26 @@ describe("choosing several", () => {
   }
   const messages = [message({ id: "a", text: "first", timestamp: 1 }), message({ id: "p", paymentId: "pay-1", timestamp: 2 }), message({ id: "b", text: "second", timestamp: 3 })];
 
+  it("a change of the chat goes over its history only while messages are chosen", async () => {
+    // The rows drawn without the list's own map, so only the hook's pass over it counts.
+    function Rows({ messages }: { messages: ChatMessage[] }) {
+      const forwarding = useForwarding("link-bo", messages);
+      return <>{Array.from(messages, m => <MessageBubble key={m.id} message={m} peerPubKey="peer" onDelete={() => {}} {...forwarding.rowProps(m)} />)}{forwarding.bar}</>;
+    }
+    const { user, rerender } = renderApp(<Rows messages={messages} />);
+    // A message that came while nothing is chosen (each one, mark and reaction of a long chat): the history is not indexed.
+    const came = [...messages, message({ id: "c", text: "third", timestamp: 4 })];
+    const indexed = vi.spyOn(came, "map");
+    rerender(<Rows messages={came} />);
+    expect(indexed).not.toHaveBeenCalled();
+    // Chosen, one deleted meanwhile is let go.
+    await user.click(screen.getAllByTestId("message-options")[0]!);
+    await user.click(screen.getByTestId("message-select-start"));
+    expect(screen.getByTestId("select-bar")).toBeInTheDocument();
+    rerender(<Rows messages={came.filter(m => m.id !== "a")} />);
+    expect(screen.queryByTestId("select-bar")).toBeNull();
+  });
+
   it("Select starts it; rows become checkboxes, a payment cannot be chosen, Forward takes them in order", async () => {
     const { user } = renderApp(<Timeline messages={messages} />);
     await user.click(screen.getAllByTestId("message-options")[2]!);
