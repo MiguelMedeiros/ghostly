@@ -273,6 +273,46 @@ describe("[text](url) links", () => {
     }
   });
 
+  it("reads a space narrower than a word's between two letters of a host as no gap", () => {
+    const spaces = [..."             "];
+    for (const space of spaces) {
+      for (const label of [`paypal.c${space}om`, `gmail.c${space}om`, `paypal.c${space}o${space}m`]) {
+        const name = `${label} U+${space.codePointAt(0)!.toString(16)}`;
+        expect(labelMisleads(label, "https://evil.example/login"), name).toBe(true);
+        expect(link(`[${label}](https://evil.example/login)`), name).toMatchObject({ data: { showUrl: true } });
+      }
+      expect(labelMisleads(`ghostly.t${space}ools`, "https://ghostly.tools/docs")).toBe(false);
+      expect(labelMisleads(`1${space}000 sats`, "https://ghostly.tools/docs")).toBe(false);
+    }
+  });
+
+  it("still reads such a space as a gap when that names another host (paypal.com<em space>secure.net)", () => {
+    for (const space of [..."\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f"]) {
+      const name = `U+${space.codePointAt(0)!.toString(16)}`;
+      expect(labelMisleads(`paypal.com${space}secure.net`, "https://paypal.comsecure.net/login"), name).toBe(true);
+      expect(labelMisleads(`paypal.com${space}login`, "https://paypal.comlogin/"), name).toBe(true);
+      // A mark on the space draws there (an underline), and the gap still reads as none.
+      expect(labelMisleads(`paypal.c${space}\u0332om`, "https://evil.example/login"), name).toBe(true);
+    }
+  });
+
+  it("reads a text with a wide and a narrow space at each width (secure<em space>paypal.c<hair space>om)", () => {
+    for (const wide of [..."\u2000\u2001\u2002\u2003\u2007"]) {
+      for (const narrow of [..."\u200a\u2006\u2009\u202f"]) {
+        const name = `U+${wide.codePointAt(0)!.toString(16)} U+${narrow.codePointAt(0)!.toString(16)}`;
+        expect(labelMisleads(`secure${wide}paypal.c${narrow}om`, "https://securepaypal.com/login"), name).toBe(true);
+        expect(labelMisleads(`Login${wide}paypal.c${narrow}om`, "https://loginpaypal.com/"), name).toBe(true);
+        expect(labelMisleads(`paypal.c${narrow}om${wide}pany`, "https://paypal.company/login"), name).toBe(true);
+      }
+    }
+  });
+
+  it("reads a mark between two narrow spaces as no gap (paypal.c<s><U+0332><s>om)", () => {
+    for (const space of [..."\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u202f\u205f"]) {
+      expect(labelMisleads(`paypal.c${space}\u0332${space}om`, "https://evil.example/login"), `U+${space.codePointAt(0)!.toString(16)}`).toBe(true);
+    }
+  });
+
   it("reads a combining mark as part of the host it sits in, as a browser does", () => {
     for (const label of ["paypal\u0332.com", "paypal.c\u0332om", "wiki\u0307.com", "paypal\u0320.com", "paypal.\u0332com", "paypal.co\u0332m"]) {
       expect(labelMisleads(label, "https://evil.example/login"), label).toBe(true);

@@ -78,6 +78,27 @@ function readDots(text: string): string {
  * word's space, a no-break one and an ideographic one show their gap and are left alone.
  */
 const SPACE_BY_DOT = /[\u2000-\u200a\u202f\u205f]+(?=\.)|(?<=\.)[\u2000-\u200a\u202f\u205f]+/gu;
+/**
+ * The same spaces between two letters or digits too ("paypal.c om"), a mark beside the space included (a
+ * one-character look either side, so a run of marks costs no more than a run of letters). Some of them read as no
+ * gap, others (the em space) as a word's: a label is read both with `SPACE_BY_DOT` and with this, and either reading
+ * naming another host counts, so neither "paypal.c om" nor "paypal.com secure.net" passes.
+ */
+const NARROW_SPACE =
+  /[\u2000-\u200a\u202f\u205f]+(?=\.)|(?<=\.)[\u2000-\u200a\u202f\u205f]+|(?<=[\p{L}\p{N}\p{M}])[\u2000-\u200a\u202f\u205f]+(?=[\p{L}\p{N}\p{M}])/gu;
+/** Any of those spaces, to tell how many kinds a label holds. */
+const TYPO_SPACE = /[\u2000-\u200a\u202f\u205f]/gu;
+/**
+ * The same spaces, narrowest first (hair, six-per-em, thin and narrow no-break, punctuation and medium mathematical,
+ * four-per-em, three-per-em, en and figure, em): a reading takes out those up to one width and keeps the wider ones as
+ * gaps, as the eye does when one text holds an em space and a hair space ("secure paypal.c om").
+ */
+const BY_WIDTH = ["\u200a", "\u2006", "\u2009\u202f", "\u2008\u205f", "\u2005", "\u2004", "\u2000\u2002\u2007", "\u2001\u2003"].map(
+  (_, i, all) => {
+    const set = all.slice(0, i + 1).join("");
+    return new RegExp(`[${set}]+(?=\\.)|(?<=\\.)[${set}]+|(?<=[\\p{L}\\p{N}\\p{M}])[${set}]+(?=[\\p{L}\\p{N}\\p{M}])`, "gu");
+  },
+);
 
 /**
  * A whole emoji: a keycap ("1️⃣"), a flag drawn from tags (🏴 and its tag letters), or pictographs joined by zero-width
@@ -107,7 +128,17 @@ export function labelMisleads(label: string, url: string): boolean {
   const target = hostOf(url);
   if (!target) return true;
   if (CONTROL.test(label) || new RegExp(INVISIBLE.source, "u").test(label.replace(EMOJI, ""))) return true;
-  const text = readDots(readDots(label).replace(SPACE_BY_DOT, "").normalize("NFKC"));
+  const read = (spaces: RegExp) => readDots(readDots(label).replace(spaces, "").normalize("NFKC"));
+  // Two kinds of those spaces in one text can be one gap the eye sees and one it does not: read it at each width too.
+  // Only then, so a text with one kind costs two readings.
+  const kinds = new Set(label.match(TYPO_SPACE));
+  const readings = new Set([read(SPACE_BY_DOT), read(NARROW_SPACE), ...(kinds.size > 1 ? BY_WIDTH.map(read) : [])]);
+  for (const text of readings) if (namesAnotherHost(text, target)) return true;
+  return false;
+}
+
+/** Whether one reading of a link's text names a host that is not the link's `target` (nor one it sits under). */
+function namesAnotherHost(text: string, target: string): boolean {
   for (const found of text.matchAll(ADDRESS)) {
     const written = found[0];
     const bare = written.replace(/^[a-z][a-z\d+.-]*:\/\//i, "");
