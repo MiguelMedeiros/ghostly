@@ -1,3 +1,5 @@
+import { applySpeaker } from "./mediaDevices";
+
 /*
  * How loud each person in a group call plays on this device, by their key: set from their tile, heard by you alone,
  * and kept for the next call with them until the app closes. 1 is as they send it, 0 mutes them for you.
@@ -15,6 +17,41 @@ export const gainPlays = (speaker?: string): boolean => typeof AudioContext === 
 
 /** The loudest a person can be set to here, on `speaker`: past 1 only through a gain. */
 export const volumeMaxOn = (speaker?: string): number => gainPlays(speaker) ? VOLUME_MAX : 1;
+
+/** The Web Audio context everyone plays through on a speaker ("" the default), and how many gains use it. */
+const contexts = new Map<string, { context: AudioContext; users: number }>();
+
+/**
+ * The context to play someone through a gain on `speaker`, one for everyone there: each context is a sound path of its
+ * own (in Chromium ~1% of a core each, 24 people turned up took 6.5 s of CPU every 10 s with one each and 4.5 s with
+ * one for all), and one started by a gesture starts them all. `release` gives it back; the last one closes it, unless
+ * another gain took it in the same turn (a track replaced, a level moved past 100%). Throws where none can be made.
+ */
+export function callAudioContext(speaker?: string): { context: AudioContext; release: () => void } {
+  const sink = speaker ?? "";
+  let shared = contexts.get(sink);
+  if (!shared || shared.context.state === "closed") {
+    shared = { context: new AudioContext(), users: 0 };
+    contexts.set(sink, shared);
+    void applySpeaker(shared.context, speaker).catch(() => {});
+  }
+  const mine = shared;
+  mine.users += 1;
+  let released = false;
+  return {
+    context: mine.context,
+    release: () => {
+      if (released) return;
+      released = true;
+      mine.users -= 1;
+      queueMicrotask(() => {
+        if (mine.users > 0 || contexts.get(sink) !== mine) return;
+        contexts.delete(sink);
+        void mine.context.close().catch(() => {});
+      });
+    },
+  };
+}
 
 /** Whether an <audio>'s own volume can be set from script: iOS ignores it, and reads back 1. */
 export function elementTakesVolume(): boolean {

@@ -22,7 +22,7 @@ import { InfoButton } from "./layout/Section";
 import { useCallModeration, type GroupCallModerator } from "../hooks/useCallModeration";
 import { ModerationProblem, RemovedFromCall, TileModerationMenu } from "./GroupCallModerationMenu";
 import { TileVolume } from "./GroupCallVolume";
-import { elementTakesVolume, gainPlays, setVolumeOf, volumeMaxOn, volumeOf } from "../lib/groupCallVolume";
+import { callAudioContext, elementTakesVolume, gainPlays, setVolumeOf, volumeMaxOn, volumeOf } from "../lib/groupCallVolume";
 
 /** One person in a group call, as `useGroupCall` gives them: what they send, and the tracks to show and play. */
 export interface GroupCallParticipant {
@@ -187,34 +187,46 @@ function TrackAudio({ track, speaker, volume = 1, testId = "group-call-audio" }:
   useEffect(() => {
     const element = ref.current;
     if (!throughGain || !element) return;
-    let context: AudioContext;
+    // One context for everyone on this speaker (`callAudioContext`), this person's own gain in it.
+    let player: ReturnType<typeof callAudioContext> | undefined;
+    let source: MediaStreamAudioSourceNode;
     let gain: GainNode;
     try {
-      context = new AudioContext();
-      gain = context.createGain();
+      player = callAudioContext(speaker);
+      gain = player.context.createGain();
       gain.gain.value = level.current;
-      context.createMediaStreamSource(new MediaStream([track])).connect(gain).connect(context.destination);
+      source = player.context.createMediaStreamSource(new MediaStream([track]));
+      source.connect(gain).connect(player.context.destination);
     } catch {
       // no Web Audio for this track: it plays at 1
+      player?.release();
       return;
     }
-    // The element is muted only while the gain plays, and only for this gain (a closed one's late resume says nothing).
+    const { context, release } = player;
+    // The element is muted only while the gain plays, and only for this gain (a replaced one's late resume says nothing).
+    const mine = { context, gain, live: () => {} };
     const live = () => {
-      if (boost.current?.context !== context) return;
+      if (boost.current !== mine) return;
       const plays = context.state === "running";
       element.muted = plays || level.current === 0;
       // Not yet: the element plays them, as close to the level as it can.
       if (!plays) element.volume = Math.min(1, level.current);
     };
-    boost.current = { context, gain, live };
-    context.onstatechange = live;
+    mine.live = live;
+    boost.current = mine;
+    context.addEventListener("statechange", live);
     live();
     void context.resume().catch(() => {}).then(live);
-    void applySpeaker(context, speaker).catch(() => {});
     return () => {
       boost.current = null;
-      context.onstatechange = null;
-      void context.close().catch(() => {});
+      context.removeEventListener("statechange", live);
+      try {
+        source.disconnect();
+        gain.disconnect();
+      } catch {
+        // already let go
+      }
+      release();
       element.muted = level.current === 0;
     };
   }, [throughGain, track, speaker]);
