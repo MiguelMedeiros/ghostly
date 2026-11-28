@@ -22,9 +22,31 @@ describe("a link's text with a letter that has a dot below", () => {
   });
 });
 
+describe("a link's text with a ring below a letter", () => {
+  it("reads the ring as the dot between a host's labels", () => {
+    // Alone, or with a dot below on the same letter: they draw in one place.
+    for (const label of ["paypal̥com", "paypal̥̣com"]) {
+      expect(labelMisleads(label, "https://evil.example/login"), label).toBe(true);
+    }
+    expect(link("[paypal̥com](https://evil.example/login)")).toMatchObject({ data: { showUrl: true } });
+  });
+});
+
+describe("a link's text with a raised or small dot between its words", () => {
+  // The Aegean word separator dot draws as a middle dot, the black very small square like U+22C5.
+  it("reads it as the dot between a host's labels", () => {
+    for (const dot of ["\u{10101}", "⬝"]) {
+      const label = `paypal${dot}com`;
+      expect(labelMisleads(label, "https://evil.example/login"), label).toBe(true);
+      expect(link(`[${label}](https://evil.example/login)`), label).toMatchObject({ data: { showUrl: true } });
+    }
+  });
+});
+
 describe("a link's text with another script's dot below on a letter", () => {
-  // Thai and Lao phinthu, Hebrew hiriq and lower dot, Arabic dot below: on an "l" each draws like U+0323 ("paypaḷcom").
-  const marks = ["ฺ", "຺", "ִ", "ׅ", "ٜ"];
+  // Thai and Lao phinthu, Hebrew hiriq and lower dot, Arabic dot below and tone dot below: on an "l" each draws like
+  // U+0323 ("paypaḷcom").
+  const marks = ["ฺ", "຺", "ִ", "ׅ", "ٜ", "࣭"];
 
   it("reads the mark as the dot between a host's labels", () => {
     for (const mark of marks) {
@@ -59,7 +81,7 @@ describe("a link's text with another script's dot below on a letter", () => {
   });
 
   it("leaves the mark alone in a word of its own script", () => {
-    for (const label of ["ภิกฺขุ", "שִׁיר חָדָשׁ", "שׁלֹמֹהׅ ודוד", "بٜسم الله", "ธมฺม Dhamma", "שִׁיר song", "ພຸດ຺ທະ"]) {
+    for (const label of ["ภิกฺขุ", "שִׁיר חָדָשׁ", "שׁלֹמֹהׅ ודוד", "بٜسم الله", "ب࣭سم الله", "ธมฺม Dhamma", "שִׁיר song", "ພຸດ຺ທະ"]) {
       expect(labelMisleads(label, "https://evil.example/login"), label).toBe(false);
     }
   });

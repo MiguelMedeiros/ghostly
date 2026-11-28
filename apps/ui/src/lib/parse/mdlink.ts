@@ -37,12 +37,13 @@ const FILE_IN_PATH = /\.(?:md|py|rs|sh)$/i;
  * become a space and an accent) and after it ("･" becomes "・").
  */
 const DOTS =
-  /[\u00b7\u02d9\u0660\u06d4\u06f0\u0701\u0702\u0f0b\u0f0c\u1427\u16eb\u2022\u2024\u2027\u2219\u22c5\u2e30\u2e31\u2e33\u2e3c\u3002\u30fb\u318d\ua4f8\ua60e\ua78f\uff0e\uff61\u{10a50}\u2981]/gu;
+  /[\u00b7\u02d9\u0660\u06d4\u06f0\u0701\u0702\u0f0b\u0f0c\u1427\u16eb\u2022\u2024\u2027\u2219\u22c5\u2e30\u2e31\u2e33\u2e3c\u3002\u30fb\u318d\ua4f8\ua60e\ua78f\uff0e\uff61\u{10a50}\u{10101}\u2981\u2b1d]/gu;
 /**
- * Combining dots below a letter ("paypaḷcom"), several on one letter included: they draw in one place, so they are one
- * dot, and none beside a written one ("paypaḷ.com"). Only other marks between two of them, so the run has one reading.
+ * Combining dots below a letter ("paypaḷcom") and the ring below, which draws as one at a label's size, several on one
+ * letter included: they draw in one place, so they are one dot, and none beside a written one ("paypaḷ.com"). Only
+ * other marks between two of them, so the run has one reading.
  */
-const MARK_DOTS = /(\.\p{M}*)?[̣\u{1d16d}](?:[^\P{M}̣\u{1d16d}]*[̣\u{1d16d}])*(\p{M}*\.)?/gu;
+const MARK_DOTS = /(\.\p{M}*)?[̣̥\u{1d16d}](?:[^\P{M}̣̥\u{1d16d}]*[̣̥\u{1d16d}])*(\p{M}*\.)?/gu;
 /**
  * A word: letters with their marks, and digits, across the narrow spaces that read as no gap (as `SPACE_BY_DOT` has
  * them), so a space of a pixel or two cannot set a stroke letter and its mark off as a word of their own script.
@@ -55,10 +56,11 @@ const scriptDot = (script: string, marks: string) => ({
   other: new RegExp(`(?=\\p{L})[^\\p{sc=${script}}\\p{sc=Common}\\p{sc=Inherited}]`, "u"),
 });
 /**
- * Thai and Lao phinthu, the Hebrew hiriq and lower dot and the Arabic dot below draw on an "l" like U+0323. "ภิกฺขุ"
- * and "שִׁיר" keep theirs; on a letter of the script that looks like an "l", in a Latin word, it is a dot ("paypaๅฺcom").
+ * Thai and Lao phinthu, the Hebrew hiriq and lower dot and the Arabic dot below and tone dot below draw on an "l" like
+ * U+0323. "ภิกฺขุ" and "שִׁיר" keep theirs; on a letter of the script that looks like an "l", in a Latin word, it is a
+ * dot ("paypaๅฺcom").
  */
-const SCRIPT_DOTS = [scriptDot("Thai", "ฺ"), scriptDot("Lao", "຺"), scriptDot("Hebrew", "ִׅ"), scriptDot("Arabic", "ٜ")];
+const SCRIPT_DOTS = [scriptDot("Thai", "ฺ"), scriptDot("Lao", "຺"), scriptDot("Hebrew", "ִׅ"), scriptDot("Arabic", "ٜ࣭")];
 
 /** The label with each thing that reads as the dot between a host's labels written as one ".". */
 function readDots(text: string): string {
