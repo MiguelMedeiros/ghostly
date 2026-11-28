@@ -67,3 +67,25 @@ describe("a message arriving in an open chat", () => {
     expect(saves() - before).toBe(0);
   });
 });
+
+describe("a reaction on an old message of an open chat", () => {
+  /*
+   * The open chat reads its list again after each mirror (`loadShownSession`), and its walks (lib/chatRows) read only the
+   * rows whose objects changed. The stored copy, written again for the chat list's note of the reaction, was parsed into
+   * new objects for its rows: every row from the old one to the end read as changed, the whole history.
+   */
+  it("hands the open chat its list with every other row as the same object", async () => {
+    const { loadShownSession } = await import("../../lib/storage");
+    const { sharedRows, sharedTail } = await import("../../lib/chatRows");
+    const { linkId, row } = await longChat("c");
+    const before = loadShownSession("c")!.messages;
+    const saved = saves();
+    fakeEngine.emit({ kind: "message-changes", linkId, messages: [row(5, { reactions: { peer: { e: "👍", n: 1, at: NOW } } })], deleted: [] });
+    await tick();
+    expect(saves() - saved).toBe(1);
+    const after = loadShownSession("c")!.messages;
+    expect(after[5]!.reactions).toBeDefined();
+    expect(sharedRows(before, after)).toBe(5);
+    expect(sharedTail(before, after)).toBe(N - 6);
+  });
+});

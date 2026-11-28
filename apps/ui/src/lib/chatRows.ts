@@ -1,6 +1,7 @@
 /*
  * A chat's list as it changes, for the page that shows it: it gets a new list with each message, whose rows keep their
- * objects but for the ones that changed (`withWhole` in lib/storage, the mirror in platform/sync). So what a walk found
+ * objects but for the ones that changed (the mirror in platform/sync; lib/storage's `withWhole` for the rows its stored
+ * copy left out, `keepRows` for the ones it holds, parsed again after each save). So what a walk found
  * in the rows before the first that differs still holds, and so does what it found in the rows after the last that
  * differs: a message arriving in a chat of thousands costs what it does in a short one, and so does a reaction, an edit
  * or a delivery mark on one of its oldest messages.

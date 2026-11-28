@@ -320,6 +320,7 @@ function forgetKey(key: string): void {
     chatKeyWrites++;
   }
   if (unsaved.delete(key) && !unsaved.size) tellUnsaved();
+  shownBefore.delete(key);
   localStorage.removeItem(key);
 }
 
@@ -838,9 +839,40 @@ export function loadShownSession(sessionId: string): ChatSession | null {
   return readShown(sessionId)?.session ?? null;
 }
 
+/**
+ * Per key, the session the page's one cache last parsed: kept when the chat is forgotten (`forgetShownSession`), so the
+ * read that follows still hands out the rows it reads the same as the same objects (`keepRows`).
+ */
+const shownBefore = new Map<string, ChatSession>();
+
 /** Reads a chat again from what is stored next time it is asked for (one this page just wrote, or meant to). */
 export function forgetShownSession(sessionId: string): void {
-  shownCache.delete(getKey(sessionId));
+  const key = getKey(sessionId);
+  const hit = shownCache.get(key);
+  if (hit) shownBefore.set(key, hit.session);
+  shownCache.delete(key);
+}
+
+/** Each row a stored copy was parsed into, with the text it was parsed from (`keepRows`). */
+const rowTexts = new WeakMap<ChatMessage, string>();
+
+/**
+ * A stored copy parsed again (written since: a reaction, a mark, the chat list's note), with the rows it read the same
+ * as the copy before as the objects that copy handed out: the open chat's walks (lib/chatRows) tell the rows that did
+ * not change by their object, and a reaction on an old message reads only the rows around it. A row is kept by the text
+ * it was parsed from, so one changed in place since is not.
+ */
+function keepRows(session: ChatSession, before: ChatSession | undefined): ChatSession {
+  const rows = session?.messages;
+  if (!Array.isArray(rows)) return session;
+  const old = before?.messages?.length ? new Map(before.messages.map((m) => [m.id, m])) : undefined;
+  for (let i = 0; i < rows.length; i++) {
+    const text = JSON.stringify(rows[i]);
+    const kept = old?.get(rows[i]?.id);
+    if (kept && rowTexts.get(kept) === text) rows[i] = kept;
+    else if (rows[i] && typeof rows[i] === "object") rowTexts.set(rows[i], text);
+  }
+  return session;
 }
 
 /**
@@ -849,7 +881,9 @@ export function forgetShownSession(sessionId: string): void {
  */
 function readThrough(key: string, raw: string, cache?: SessionCache): { parsed: ChatSession; session: ChatSession } {
   const hit = cache?.get(key);
-  const parsed = hit?.raw === raw ? hit.session : parseSession(raw);
+  const before = cache === shownCache ? shownBefore.get(key) : undefined;
+  if (before) shownBefore.delete(key);
+  const parsed = hit?.raw === raw ? hit.session : keepRows(parseSession(raw), hit?.session ?? before);
   // With its older messages, the same object while neither it nor its whole history changed (the sync's reconcile
   // tells an unchanged list by its sessions' identity).
   const list = parsed.older ? whole.get(parsed.id) : undefined;
