@@ -65,6 +65,8 @@ export interface PeerLinkState {
   sessionOffers?: { mine: string[]; peer: string[] | null };
   /** Paired chats: why a call cannot be placed right now, or null when it can. */
   callsUnavailable?: string | null;
+  /** 1:1 chats: its contact is blocked here (`setContactBlocked`); nothing it sends is taken, its apps' frames neither. */
+  blocked?: true;
   /** Ways of paying this device allows in this chat. */
   paymentMethods?: Record<PaymentMethodName, boolean>;
   /** For each way of paying, the networks this chat takes it on (its cards on the Accept side). */

@@ -45,6 +45,7 @@
   },
   "card": {
     "ask": "Chiedi a {{name}} un link",
+    "blocked": "Hai bloccato {{name}}. Sbloccalo per usare le app insieme",
     "contactCannot": "L'app di {{name}} non esegue ancora app",
     "installed": "Installata",
     "join": "Entra",

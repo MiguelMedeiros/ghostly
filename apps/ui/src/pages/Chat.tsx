@@ -26,6 +26,7 @@ import { appWithContact, chatAppOver, takeOpenRequest, useChatAppCovers, useOpen
 import { useToast } from "../hooks/useToast";
 import { Toast } from "../components/ui/Toast";
 import { openAppInChat } from "../lib/apps/installed";
+import { stopAppsIn } from "../lib/apps/open";
 import { rowDaysReader } from "../lib/chatDays";
 import { readContactNick, rowPicker, type NickRead } from "../lib/chatRows";
 import { appErrorText } from "../lib/apps/errors";
@@ -608,12 +609,18 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (!visible || !appHere || !openRequested) return;
     const request = takeOpenRequest(appHere);
     if (!request) return;
+    // Nothing opens with a blocked contact: + → Apps says why.
+    if (chatLink?.blocked) { setShowApps(true); return; }
     void openAppInChat(request.app, appHere, request.options).catch((e: unknown) => {
       const why = appErrorText(e, t);
       if (chatAppOver(appHere)) sayAppWhy(why, request.app.title);
       else { setAppsError(why); setShowApps(true); }
     });
-  }, [visible, appHere, openRequested, t, sayAppWhy]);
+  }, [visible, appHere, openRequested, chatLink?.blocked, t, sayAppWhy]);
+  // The contact blocked (here, or on another device): their app frames are dropped from now on, so an app running with
+  // them (its panel, a full-screen one, a Desktop window) would wait for them for good. It stops, as a call with them ends.
+  const appsBlocked = !!appHere && !!chatLink?.blocked;
+  useEffect(() => { if (appsBlocked && appHere) stopAppsIn(appHere); }, [appsBlocked, appHere]);
   /**
    * The message of mine the composer edits (WISP 400 § Edits): a paired chat's only. Only while the chat has it: deleted
    * meanwhile (from its own ⋮, or for everyone), the edit ends, its words with it, and the draft set aside comes back.
@@ -1493,7 +1500,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
 
       {showApps && appsOn && chatLink && params && (
-        <ChatAppsDialog linkId={chatLink.id} name={shownName} error={appsError} onClose={() => { setShowApps(false); setAppsError(null); }} onCovered={sayAppWhy}
+        <ChatAppsDialog linkId={chatLink.id} name={shownName} blocked={!!chatLink.blocked} error={appsError} onClose={() => { setShowApps(false); setAppsError(null); }} onCovered={sayAppWhy}
           waiting={appsComposerHint(platform?.getPeer(params.peerPubKeyB64), shownName, t)} />
       )}
       {showServices && params && (
