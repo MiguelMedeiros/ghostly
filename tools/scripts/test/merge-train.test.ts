@@ -3630,6 +3630,79 @@ describe("a pull request on hold (queue:hold)", () => {
     expect(said(repo, 11)).toMatch(/1st\*\*\. Waiting: it is on hold/);
   });
 
+  // A lone one is read again right before its merge, as a batch's members are: a change made after the run read the
+  // line (here in its read of the position comments' editors, the first one after) counts too.
+  const meanwhile = (repo: ReturnType<typeof fakeRepo>, change: () => void) => {
+    const lastEditors = repo.gh.lastEditors;
+    repo.gh.lastEditors = async (ids) => (change(), (repo.gh.lastEditors = lastEditors), lastEditors(ids));
+  };
+
+  it("never merges a lone one in flight put on hold while the run that would land it reads the line; it keeps its place and mark", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.settle();
+    const mark = repo.alone(11);
+    meanwhile(repo, () => hold(repo, 11));
+    const r = await repo.run();
+    expect(repo.merges).toEqual([]);
+    expect(r.merged).toEqual([]);
+    expect(r.log).toContain("#11 changed or left the line since this run read it, so it does not land alone.");
+    expect(repo.pulls.get(11)).toMatchObject({ open: true, labels: [LABEL.queue, HELD] });
+    expect(said(repo, 11)).toMatch(/1st\*\*\. Waiting: it is on hold/);
+    expect(repo.alone(11)).toMatchObject({ sha: mark!.sha, baseSha: mark!.baseSha });
+    repo.pulls.get(11)!.labels = [LABEL.queue];
+    expect((await repo.run()).merged).toEqual([11]);
+  });
+
+  it("never merges a lone one up to date and green put on hold while the run reads the line", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    meanwhile(repo, () => hold(repo, 11));
+    const r = await repo.run();
+    expect(repo.merges).toEqual([]);
+    expect(r).toMatchObject({ merged: [], dropped: [], inFlight: null });
+    expect(repo.pulls.get(11)).toMatchObject({ open: true, labels: [LABEL.queue, HELD] });
+    expect(said(repo, 11)).toMatch(/1st\*\*\. Waiting: it is on hold/);
+  });
+
+  it("never fast-forwards an epic to a lone one put on hold while the run reads the line", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { base: "epic/x", behind: true });
+    await repo.run({ base: "epic/x" });
+    repo.settle();
+    meanwhile(repo, () => hold(repo, 11));
+    const r = await repo.run({ base: "epic/x" });
+    expect(repo.landed).toEqual([]);
+    expect(repo.tips["epic/x"]).toBe("epic0");
+    expect(r.merged).toEqual([]);
+  });
+
+  it("never merges a lone one in flight taken out of the line while the run reads it", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.settle();
+    meanwhile(repo, () => (repo.pulls.get(11)!.labels = []));
+    const r = await repo.run();
+    expect(repo.merges).toEqual([]);
+    expect(r.merged).toEqual([]);
+    expect(repo.pulls.get(11)).toMatchObject({ open: true, labels: [] });
+  });
+
+  it("never merges a lone one in flight with changes needed on its head posted while the run reads the line", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.settle();
+    const head = repo.pulls.get(11)!.sha;
+    meanwhile(repo, () => repo.comments.get(11)!.push({ id: 8000, body: `Review: changes needed (head ${head})`, user: { login: "MiguelMedeiros" }, created_at: "2026-10-09T10:00:00Z", author_association: "OWNER" }));
+    const r = await repo.run();
+    expect(repo.merges).toEqual([]);
+    expect(r.merged).toEqual([]);
+    expect(repo.comments.get(11)!.filter((c) => c.user?.login === "train").at(-1)!.body).toMatch(/Waiting: a reviewer asked for changes on its head at 10:00 UTC/);
+  });
+
   it("does not cancel a held one's own full CI while it waits behind the base", async () => {
     const repo = fakeRepo();
     for (const n of [11, 12]) repo.add(n);
