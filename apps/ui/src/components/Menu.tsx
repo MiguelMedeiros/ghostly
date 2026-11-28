@@ -218,8 +218,9 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
     // the page, behind whatever layer it opened from (a whole-window call), the menu still open. It takes the place a
     // menu beside its button has: Tab goes on from the button, Shift+Tab goes back to it, and the menu closes. Its own
     // stops, not only its rows: a group call's volume menu is a slider alone, and Shift+Tab from it went to Leave call.
-    const stops = ref.current ? tabbables(ref.current) : [];
-    if (portal && !phone && (e.key === "Tab" || e.code === "Tab") && stops.length) {
+    const tab = portal && !phone && (e.key === "Tab" || e.code === "Tab");
+    const stops = tab && ref.current ? tabbables(ref.current) : [];
+    if (tab && stops.length) {
       const opener = openedFrom.current;
       const leaving = e.shiftKey ? document.activeElement === stops[0] : document.activeElement === stops[stops.length - 1];
       if (!leaving || !(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected) return;
