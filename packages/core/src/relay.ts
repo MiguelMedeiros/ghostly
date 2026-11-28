@@ -1,5 +1,6 @@
 import type { Identity } from "./identity";
 import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, PKARR_FUTURE_SKEW_MS, readOwnRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
+import { BATCH_CAPABILITY_TTL_MS, BATCH_MAX_KEYS, BATCH_WINDOW_MS, BatchCapabilityCache, batchResponseMaxBytes, encodeBatchRequest, isBatchUnsupportedStatus, parseBatchResponse, type BatchCapabilityState, type BatchKeyResult } from "./relayBatch";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
 import { DiscoveryBudgetError, isDiscoveryBudgetError, PublishFailedError, publishedNowhere, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
 import { linkTraceOn, traceLink } from "./linkTrace";
@@ -512,6 +513,14 @@ export interface RelayTransportOptions {
   breaker?: RelayBreakerOptions;
   /** Where a relay that trips or recovers is reported; never with a key. `console.info` by default. */
   log?: (line: string) => void;
+  /** Coalesce concurrent reads per relay into `POST <relay>/batch` with automatic fallback to `GET /<key>`. True by default. */
+  batch?: boolean;
+  /** Maximum keys coalesced into one `POST <relay>/batch` request (`BATCH_MAX_KEYS`, clamped to 1..64). */
+  batchMaxKeys?: number;
+  /** Coalescing window in ms before flushing a pending batch (`BATCH_WINDOW_MS`, 0 = next microtask). */
+  batchWindowMs?: number;
+  /** How long a relay's batch support or fallback status is cached (`BATCH_CAPABILITY_TTL_MS`). */
+  batchCapabilityTtlMs?: number;
 }
 
 /** What `answer` says, or false when it has not said within `ms`. */
@@ -715,9 +724,19 @@ export class RelayTransport implements PkarrTransport {
   /** Keys whose last read was answered 404: their next read hedges later (`HEDGE_MISSING_MS`). */
   private readonly missing = new Set<string>();
   private readonly listeners = new Set<(change?: DiscoveryChange) => void>();
+  /** Batch GET settings, per-relay capability cache and open coalescing batches (`${relay} ${lane}`). */
+  private readonly batchEnabled: boolean;
+  private readonly batchMaxKeys: number;
+  private readonly batchWindowMs: number;
+  private readonly batchCapability: BatchCapabilityCache;
+  private readonly pendingBatches = new Map<string, PendingBatch>();
 
   constructor(options: RelayTransportOptions = {}) {
     this.relays = [];
+    this.batchEnabled = options.batch ?? true;
+    this.batchMaxKeys = Math.max(1, Math.min(BATCH_MAX_KEYS, Math.floor(options.batchMaxKeys ?? BATCH_MAX_KEYS)));
+    this.batchWindowMs = Math.max(0, options.batchWindowMs ?? BATCH_WINDOW_MS);
+    this.batchCapability = new BatchCapabilityCache(options.batchCapabilityTtlMs ?? BATCH_CAPABILITY_TTL_MS);
     this.setRelays(options.relays ?? DEFAULT_RELAYS);
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.fetchFn = options.fetch ?? ((...args) => fetch(...args));
@@ -759,7 +778,14 @@ export class RelayTransport implements PkarrTransport {
     this.networkCooldown.clear();
     this.coolingDown.clear();
     this.slowUntil.clear();
+    this.batchCapability.clear();
     this.changed("recovered");
+  }
+
+  /** Cached batch GET support status for `relay` (`supported`, `unsupported`, or `unknown`). */
+  batchSupport(relay: string): BatchCapabilityState {
+    const normalized = normalizeRelayUrl(relay);
+    return normalized ? this.batchCapability.get(normalized) : "unknown";
   }
 
   /**
@@ -800,6 +826,7 @@ export class RelayTransport implements PkarrTransport {
       .map(normalizeRelayUrl)
       .filter((r): r is string => r !== null);
     this.relays = [...new Set(normalized)];
+    this.batchCapability.prune(new Set(this.relays));
   }
 
   describe(): { protocol: string; relays: string[] } {
@@ -1200,14 +1227,18 @@ export class RelayTransport implements PkarrTransport {
     // The soonest a relay passed over for its budget takes a request again, and whether one was down instead.
     let budgetWait = Infinity, down = false;
     const who = asker(options, false);
+    const lane = batchLaneOf(who);
     const tried = new Set<string>();
     let hedgeAfter = options.background ? Infinity : this.missing.has(pubKeyZ32) ? Math.max(this.hedgeMs, HEDGE_MISSING_MS) : this.hedgeMs;
 
+    const asked = new Map<string, ReadAttempt>();
+    let lastAsked = 0;
     /**
-     * The next relay to ask, its request taken from its budget, or null. A hedge (`hedge`) goes only to a relay with
-     * requests to spare; one passed over for that is still there if the relay asked fails.
+     * Picks the next relay to ask, either joining an open batch in the same `(relay, lane)` (costing zero extra HTTP
+     * round-trips), opening a new coalescing batch, or sending a direct single GET when batching is disabled, the
+     * relay is cached as single-GET only, or the request is a half-open circuit-breaker probe.
      */
-    const next = (hedge: boolean): string | null => {
+    const ask = (hedge: boolean): boolean => {
       for (const relay of order) {
         // Taken off the list (`setRelays`) since this read began: not asked, not even as a hedge or in a failed one's place.
         if (tried.has(relay) || !this.relays.includes(relay)) continue;
@@ -1221,24 +1252,31 @@ export class RelayTransport implements PkarrTransport {
           if (this.breaker.blockedKind(relay) === "throttled") budgetWait = Math.min(budgetWait, blocked); else down = true;
           continue;
         }
+        // Piggyback on an open batch for the same relay and budget lane: zero extra HTTP requests against the minute.
+        const existing = relay !== probe && this.canBatch(relay) ? this.openBatchFor(relay, lane, pubKeyZ32) : undefined;
+        if (existing) {
+          if (hedge && !this.hedgeRoom(relay)) continue;
+          tried.add(relay);
+          this.noteBatchPiggyback(relay, who, pubKeyZ32, Date.now());
+          asked.set(relay, this.joinBatch(existing, pubKeyZ32, who));
+          lastAsked = Date.now();
+          return true;
+        }
         // Asked before `take`, which notes a refusal (a chat's need, a waiting write): a hedge not sent is no refusal.
         if (hedge && (this.heldFor(relay, who, Date.now(), pubKeyZ32) > 0 || !this.hedgeRoom(relay))) continue;
         tried.add(relay);
         if (!this.take(relay, who, pubKeyZ32)) { budgetWait = Math.min(budgetWait, this.heldFor(relay, who, Date.now(), pubKeyZ32)); continue; }
         if (relay === probe) this.breaker.beginAllDown(relay); else this.breaker.begin(relay);
-        return relay;
+        // Half-open probes go as a single GET so a probe never sends a large batch to a recovering relay.
+        const isProbing = relay === probe || this.breaker.blockedFor(relay) > 0;
+        const attempt = this.canBatch(relay) && !isProbing
+          ? this.startBatch(relay, lane, pubKeyZ32, who)
+          : this.readFromRelay(relay, pubKeyZ32);
+        asked.set(relay, attempt);
+        lastAsked = Date.now();
+        return true;
       }
-      return null;
-    };
-
-    const asked = new Map<string, ReadAttempt>();
-    let lastAsked = 0;
-    const ask = (hedge: boolean): boolean => {
-      const relay = next(hedge);
-      if (!relay) return false;
-      asked.set(relay, this.readFromRelay(relay, pubKeyZ32));
-      lastAsked = Date.now();
-      return true;
+      return false;
     };
     ask(false);
 
@@ -1262,18 +1300,26 @@ export class RelayTransport implements PkarrTransport {
       asked.delete(attempt.relay);
       const relay = attempt.relay;
       if (outcome.kind === "packet" || outcome.kind === "missing") { winner = { attempt, outcome }; break; }
-      if (outcome.kind === "throttled") {
+      if (outcome.kind === "held") {
+        budgetWait = Math.min(budgetWait, outcome.waitMs);
+      } else if (outcome.kind === "throttled") {
         budgetWait = Math.min(budgetWait, this.coolDown(relay, outcome.response));
-        this.answered(relay, { kind: "throttled", reason: "rate limited (429)" });
+        if (!attempt.shared || !attempt.shared.failureReported) {
+          if (attempt.shared) attempt.shared.failureReported = true;
+          this.answered(relay, { kind: "throttled", reason: "rate limited (429)" });
+        }
       } else if (outcome.kind === "failed") {
         // In a browser a rate-limited answer often arrives without CORS headers and
         // surfaces as a network error. Back off this operation and try the next relay.
         // Unlike an observable 429, this does not establish a relay-wide limit.
-        this.networkCooldown.set(`GET ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
-        this.answered(relay, { kind: "error", reason: outcome.reason });
+        if (!attempt.shared || !attempt.shared.failureReported) {
+          if (attempt.shared) attempt.shared.failureReported = true;
+          this.networkCooldown.set(`GET ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
+          this.answered(relay, { kind: "error", reason: outcome.reason });
+        }
         down = true;
       }
-      // A relay that failed is replaced at once, with no hedge delay.
+      // A relay that failed (or held a fallback read) is replaced at once, with no hedge delay.
       ask(false);
     }
 
@@ -1290,14 +1336,20 @@ export class RelayTransport implements PkarrTransport {
         if (this.missing.size > READ_TURNS_KEPT) this.missing.delete(this.missing.values().next().value!);
       }
       if (took <= SLOW_MS) {
-        this.answered(relay, undefined, "GET");
+        if (!attempt.shared?.hasInvalidPacket) this.answered(relay, undefined, "GET");
         this.slowUntil.delete(relay);
       } else {
         // It answered this kind of request: an earlier failure of it no longer keeps the next one back.
         this.networkCooldown.delete(`GET ${relay}`);
         // A slow packet counts against the relay; a slow 404 says nothing (every relay takes seconds to give one).
-        if (outcome.kind === "packet") this.slow(relay);
-        else this.breaker.cancel(relay);
+        if (outcome.kind === "packet") {
+          if (!attempt.shared || !attempt.shared.slowReported) {
+            if (attempt.shared) attempt.shared.slowReported = true;
+            this.slow(relay);
+          }
+        } else if (!attempt.shared) {
+          this.breaker.cancel(relay);
+        }
       }
       // The relays still asked are dropped, after the winner's own outcome (a probe that answered is a relay to ask
       // again). One asked no later than the winner, which a relay beat with the packet, is slow. So is one beaten by a 404
@@ -1305,8 +1357,14 @@ export class RelayTransport implements PkarrTransport {
       // and never answers was asked first in every read of a key nobody published yet, each one 6 s, and never tripped.
       for (const loser of asked.values()) {
         loser.controller.abort();
-        if (loser.started <= attempt.started && (outcome.kind === "packet" || Date.now() - loser.started >= HEDGE_MISSING_MS)) this.slow(loser.relay);
-        else this.breaker.cancel(loser.relay);
+        if (loser.started <= attempt.started && (outcome.kind === "packet" || Date.now() - loser.started >= HEDGE_MISSING_MS)) {
+          if (!loser.shared || !loser.shared.slowReported) {
+            if (loser.shared) loser.shared.slowReported = true;
+            this.slow(loser.relay);
+          }
+        } else if (!loser.shared) {
+          this.breaker.cancel(loser.relay);
+        }
       }
       this.lastRelay = relay;
       this.answeredRead(pubKeyZ32);
@@ -1370,25 +1428,304 @@ export class RelayTransport implements PkarrTransport {
   /** One GET of a key at one relay, which `controller` drops. Never rejects: what happened is the outcome. */
   private readFromRelay(relay: string, pubKeyZ32: string): ReadAttempt {
     const controller = new AbortController(), started = Date.now();
-    const done = (async (): Promise<ReadOutcome> => {
-      let status = 0;
-      try {
-        let payload: Uint8Array | undefined;
-        const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" }, async (r, signal) => {
-          status = r.status;
-          if (r.ok && r.status !== 404) payload = await readRelayBody(r, signal);
-        }, controller.signal);
-        status = response.status;
-        if (response.status === 429) return { kind: "throttled", response };
-        if (response.status === 404) return { kind: "missing" };
-        if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
-        return { kind: "packet", packet: parseRelayPayload(pubKeyZ32, payload!) };
-      } catch {
-        if (controller.signal.aborted) return { kind: "cancelled" };
-        return { kind: "failed", reason: status >= 200 && status < 300 ? "invalid packet" : status ? `HTTP ${status}` : "no answer" };
-      }
-    })();
+    const done = this.fetchSingleKey(relay, pubKeyZ32, controller.signal);
     return { relay, controller, started, done };
+  }
+
+  /** Fetches and verifies one key from `relay` with `GET /<key>`. Never rejects: what happened is the outcome. */
+  private async fetchSingleKey(relay: string, pubKeyZ32: string, signal: AbortSignal): Promise<ReadOutcome> {
+    let status = 0;
+    try {
+      let payload: Uint8Array | undefined;
+      const response = await this.request(`${relay}/${pubKeyZ32}`, { method: "GET" }, async (r, s) => {
+        status = r.status;
+        if (r.ok && r.status !== 404) payload = await readRelayBody(r, s);
+      }, signal);
+      status = response.status;
+      if (response.status === 429) return { kind: "throttled", response };
+      if (response.status === 404) return { kind: "missing" };
+      if (!response.ok) throw new Error(`${relay} responded ${response.status}`);
+      return { kind: "packet", packet: parseRelayPayload(pubKeyZ32, payload!) };
+    } catch {
+      if (signal.aborted) return { kind: "cancelled" };
+      return { kind: "failed", reason: status >= 200 && status < 300 ? "invalid packet" : status ? `HTTP ${status}` : "no answer" };
+    }
+  }
+
+  /** Whether `relay` may coalesce reads into `POST /batch` (enabled, cap >= 2, and not cached as unsupported). */
+  private canBatch(relay: string): boolean {
+    return this.batchEnabled && this.batchMaxKeys >= 2 && this.batchCapability.get(relay) !== "unsupported";
+  }
+
+  /** An open coalescing batch for `(relay, lane)` that can accept `pubKeyZ32` without exceeding `batchMaxKeys`. */
+  private openBatchFor(relay: string, lane: BatchLane, pubKeyZ32: string): PendingBatch | undefined {
+    const batch = this.pendingBatches.get(`${relay} ${lane}`);
+    if (!batch || batch.flushed) return undefined;
+    if (batch.waiters.size >= this.batchMaxKeys && !batch.waiters.has(pubKeyZ32)) return undefined;
+    return batch;
+  }
+
+  /** Opens a new coalescing batch for `(relay, lane)` after the lead read passed budget accounting. */
+  private startBatch(relay: string, lane: BatchLane, pubKeyZ32: string, who: Asker): ReadAttempt {
+    const batch: PendingBatch = { relay, lane, waiters: new Map(), flushed: false };
+    this.pendingBatches.set(`${relay} ${lane}`, batch);
+    const attempt = this.joinBatch(batch, pubKeyZ32, who);
+    if (this.batchWindowMs > 0) batch.timer = setTimeout(() => this.flushBatch(batch), this.batchWindowMs);
+    else queueMicrotask(() => this.flushBatch(batch));
+    return attempt;
+  }
+
+  /** Adds a read waiter to `batch`, returning its `ReadAttempt` with an independent abort controller. */
+  private joinBatch(batch: PendingBatch, pubKeyZ32: string, who: Asker): ReadAttempt {
+    const controller = new AbortController(), started = Date.now();
+    let settle!: (outcome: ReadOutcome) => void;
+    const done = new Promise<ReadOutcome>((resolve) => { settle = resolve; });
+    const attempt: ReadAttempt = { relay: batch.relay, controller, started, done };
+    const waiter: BatchWaiter = { pubKeyZ32, who, controller, started, settle, settled: false, attempt };
+    const list = batch.waiters.get(pubKeyZ32);
+    if (list) list.push(waiter); else batch.waiters.set(pubKeyZ32, [waiter]);
+    // If the batch reached its key cap, detach it from pendingBatches so further reads open a fresh batch,
+    // and flush immediately when a timer window is active.
+    if (batch.waiters.size >= this.batchMaxKeys) {
+      const slot = `${batch.relay} ${batch.lane}`;
+      if (this.pendingBatches.get(slot) === batch) this.pendingBatches.delete(slot);
+      if (batch.timer) this.flushBatch(batch);
+    }
+    return attempt;
+  }
+
+  private finishWaiter(waiter: BatchWaiter, outcome: ReadOutcome): void {
+    if (waiter.settled) return;
+    waiter.settled = true;
+    waiter.settle(outcome);
+  }
+
+  /**
+   * Records non-budget signaling metadata for a read piggybacking onto an open batch.
+   * Per-key turn timestamps are updated once the batch actually sends, so a 404/405/501 fallback keeps original turns.
+   */
+  private noteBatchPiggyback(relay: string, who: Asker, key: string, now: number): void {
+    if (who.urgent && !who.background) {
+      this.urgentAt = now;
+      if (isChat(who)) this.chatNeed(key, now);
+    }
+    if (isAwaitedRead(who)) this.awaitedAt = now;
+    if (isDoorRead(who)) this.doorWaiting.delete(relay);
+    if (isGroupAnswerRead(who)) this.answerReadWaiting.get(relay)?.delete(key);
+  }
+
+  /** Marks per-key read turn timestamps for every key served by a batch HTTP request. */
+  private markBatchTurnsServed(active: Map<string, BatchWaiter[]>, now: number): void {
+    for (const [key, list] of active) {
+      for (const { who } of list) {
+        if (isGroupRead(who) || isChatWatch(who)) {
+          this.readTurns.set(key, {
+            servedAt: now, askedAt: now, waiting: false, watch: isWatch(who) || isChatWatch(who), lane: watchLane(who),
+            ...(isGroupAnswerRead(who) ? { answer: true } : {}),
+          });
+        }
+        if (isTurnRead(who)) this.keyTurns.set(key, { servedAt: now, askedAt: now, waiting: false, who });
+      }
+    }
+  }
+
+  private flushBatch(batch: PendingBatch): void {
+    if (batch.flushed) return;
+    batch.flushed = true;
+    if (batch.timer) { clearTimeout(batch.timer); batch.timer = undefined; }
+    const slot = `${batch.relay} ${batch.lane}`;
+    if (this.pendingBatches.get(slot) === batch) this.pendingBatches.delete(slot);
+
+    const active = new Map<string, BatchWaiter[]>();
+    for (const [key, list] of batch.waiters) {
+      const alive: BatchWaiter[] = [];
+      for (const w of list) {
+        if (w.settled) continue;
+        if (w.controller.signal.aborted) { this.finishWaiter(w, { kind: "cancelled" }); continue; }
+        alive.push(w);
+      }
+      if (alive.length) active.set(key, alive);
+    }
+    if (active.size === 0) return;
+
+    if (!this.relays.includes(batch.relay)) {
+      for (const list of active.values()) for (const w of list) this.finishWaiter(w, { kind: "skipped" });
+      return;
+    }
+
+    const keys = [...active.keys()];
+    if (keys.length === 1) {
+      this.runSingleForWaiters(batch.relay, keys[0], active.get(keys[0])!);
+      return;
+    }
+    if (!this.canBatch(batch.relay)) {
+      this.fallbackBatchToSingle(batch.relay, active, true);
+      return;
+    }
+    void this.executeBatch(batch.relay, keys, active);
+  }
+
+  /** Ties individual waiter abort signals to one shared fetch controller: aborts the HTTP request only when all waiters abort. */
+  private watchWaiterAborts(waiters: BatchWaiter[]): { controller: AbortController; detach: () => void } {
+    const controller = new AbortController();
+    const checkAllAborted = () => {
+      if (waiters.every((w) => w.settled || w.controller.signal.aborted)) controller.abort();
+    };
+    const cleanups: (() => void)[] = [];
+    for (const w of waiters) {
+      const onAbort = () => {
+        this.finishWaiter(w, { kind: "cancelled" });
+        checkAllAborted();
+      };
+      if (w.controller.signal.aborted) onAbort();
+      else {
+        w.controller.signal.addEventListener("abort", onAbort, { once: true });
+        cleanups.push(() => w.controller.signal.removeEventListener("abort", onAbort));
+      }
+    }
+    const detach = () => { for (const off of cleanups) off(); };
+    if (controller.signal.aborted) detach();
+    return { controller, detach };
+  }
+
+  /** Runs one `GET /<key>` and fans out the outcome to one or more coalesced waiters for that key. */
+  private runSingleForWaiters(relay: string, key: string, waiters: BatchWaiter[]): void {
+    const shared: SharedBatchReport | undefined = waiters.length > 1
+      ? { failureReported: false, slowReported: false, hasInvalidPacket: false }
+      : undefined;
+    if (shared) for (const w of waiters) w.attempt.shared = shared;
+
+    const { controller, detach } = this.watchWaiterAborts(waiters);
+    if (controller.signal.aborted) return;
+    void this.fetchSingleKey(relay, key, controller.signal).then((outcome) => {
+      detach();
+      for (const w of waiters) this.finishWaiter(w, outcome);
+    });
+  }
+
+  /** Sends one `POST <relay>/batch` for `keys` (2..batchMaxKeys), verifying each packet and falling back on 404/405/501. */
+  private async executeBatch(relay: string, keys: string[], active: Map<string, BatchWaiter[]>): Promise<void> {
+    const shared: SharedBatchReport = { failureReported: false, slowReported: false, hasInvalidPacket: false };
+    const allWaiters: BatchWaiter[] = [];
+    for (const list of active.values()) {
+      for (const w of list) {
+        w.attempt.shared = shared;
+        allWaiters.push(w);
+      }
+    }
+
+    const { controller: fetchController, detach } = this.watchWaiterAborts(allWaiters);
+    if (fetchController.signal.aborted) return;
+
+    let status = 0;
+    let rawBody: Uint8Array | undefined;
+    try {
+      const response = await this.request(
+        `${relay}/batch`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json" },
+          body: encodeBatchRequest(keys),
+        },
+        async (r, signal) => {
+          status = r.status;
+          if (r.ok) rawBody = await readRelayBody(r, signal, batchResponseMaxBytes(keys.length));
+        },
+        fetchController.signal,
+      );
+      status = response.status;
+      detach();
+
+      if (isBatchUnsupportedStatus(status)) {
+        this.batchCapability.mark(relay, false, Date.now());
+        this.breaker.cancel(relay);
+        this.fallbackBatchToSingle(relay, active, false);
+        return;
+      }
+      if (status === 429) {
+        for (const w of allWaiters) this.finishWaiter(w, { kind: "throttled", response });
+        return;
+      }
+      if (!response.ok || !rawBody) {
+        for (const w of allWaiters) this.finishWaiter(w, { kind: "failed", reason: `HTTP ${status}` });
+        return;
+      }
+
+      let parsed: Map<string, BatchKeyResult>;
+      try {
+        parsed = parseBatchResponse(keys, rawBody);
+      } catch {
+        for (const w of allWaiters) this.finishWaiter(w, { kind: "failed", reason: "invalid batch response" });
+        return;
+      }
+
+      const now = Date.now();
+      this.batchCapability.mark(relay, true, now);
+      this.markBatchTurnsServed(active, now);
+      for (const result of parsed.values()) {
+        if (result.kind === "invalid") { shared.hasInvalidPacket = true; break; }
+      }
+      for (const [key, list] of active) {
+        const result = parsed.get(key) ?? { kind: "missing" };
+        const outcome: ReadOutcome =
+          result.kind === "packet" ? { kind: "packet", packet: result.packet }
+          : result.kind === "missing" ? { kind: "missing" }
+          : { kind: "failed", reason: "invalid packet" };
+        for (const w of list) this.finishWaiter(w, outcome);
+      }
+    } catch {
+      detach();
+      if (fetchController.signal.aborted) {
+        for (const w of allWaiters) this.finishWaiter(w, { kind: "cancelled" });
+        return;
+      }
+      const reason = status >= 200 && status < 300 ? "invalid batch response" : status ? `HTTP ${status}` : "no answer";
+      for (const w of allWaiters) this.finishWaiter(w, { kind: "failed", reason });
+    }
+  }
+
+  /** Falls back a coalesced batch to individual `GET /<key>` requests while honoring budget and breaker state. */
+  private fallbackBatchToSingle(relay: string, active: Map<string, BatchWaiter[]>, firstAlreadyBudgeted: boolean): void {
+    let reuseFirst = firstAlreadyBudgeted;
+    for (const [key, list] of active) {
+      const alive = list.filter((w) => !w.settled && !w.controller.signal.aborted);
+      if (!alive.length) continue;
+      for (const w of alive) {
+        w.attempt.shared = undefined;
+        w.attempt.started = Date.now();
+      }
+      if (!this.relays.includes(relay)) {
+        for (const w of alive) this.finishWaiter(w, { kind: "skipped" });
+        continue;
+      }
+      const limited = this.rateLimitedFor(relay);
+      if (limited > 0) {
+        for (const w of alive) this.finishWaiter(w, { kind: "held", waitMs: limited });
+        continue;
+      }
+      const blocked = this.breaker.blockedFor(relay);
+      if (blocked > 0) {
+        const throttled = this.breaker.blockedKind(relay) === "throttled";
+        for (const w of alive) this.finishWaiter(w, throttled ? { kind: "held", waitMs: blocked } : { kind: "failed", reason: "left alone" });
+        continue;
+      }
+      if (this.networkCoolingDown(relay, "GET")) {
+        for (const w of alive) this.finishWaiter(w, { kind: "failed", reason: "no answer" });
+        continue;
+      }
+      if (reuseFirst) {
+        reuseFirst = false;
+      } else {
+        const lead = alive[0];
+        if (!this.take(relay, lead.who, key)) {
+          const waitMs = this.heldFor(relay, lead.who, Date.now(), key);
+          for (const w of alive) this.finishWaiter(w, { kind: "held", waitMs });
+          continue;
+        }
+        this.breaker.begin(relay);
+      }
+      this.runSingleForWaiters(relay, key, alive);
+    }
   }
 
   /**
@@ -2105,14 +2442,44 @@ export class RelayTransport implements PkarrTransport {
   }
 }
 
+/** Budget lane for batch coalescing: reads only coalesce within the same priority class. */
+type BatchLane = "chat" | "group" | "bg";
+const batchLaneOf = (who: Asker): BatchLane => (who.background ? "bg" : who.group ? "group" : "chat");
+
+interface SharedBatchReport {
+  failureReported: boolean;
+  slowReported: boolean;
+  hasInvalidPacket: boolean;
+}
+
+interface BatchWaiter {
+  pubKeyZ32: string;
+  who: Asker;
+  controller: AbortController;
+  started: number;
+  settle: (outcome: ReadOutcome) => void;
+  settled: boolean;
+  attempt: ReadAttempt;
+}
+
+interface PendingBatch {
+  relay: string;
+  lane: BatchLane;
+  waiters: Map<string, BatchWaiter[]>;
+  flushed: boolean;
+  timer?: ReturnType<typeof setTimeout>;
+}
+
 /** What one relay did with a read (`readFromRelay`); `cancelled`: this client dropped it. */
 type ReadOutcome =
   | { kind: "packet"; packet: SignedPacket }
   | { kind: "missing" }
   | { kind: "throttled"; response: Response }
   | { kind: "failed"; reason: string }
+  | { kind: "held"; waitMs: number }
+  | { kind: "skipped" }
   | { kind: "cancelled" };
-interface ReadAttempt { relay: string; controller: AbortController; started: number; done: Promise<ReadOutcome> }
+interface ReadAttempt { relay: string; controller: AbortController; started: number; done: Promise<ReadOutcome>; shared?: SharedBatchReport }
 
 /**
  * A relay's answer body, at most RELAY_PAYLOAD_MAX_BYTES: refused on a larger `content-length` before anything is
