@@ -138,8 +138,12 @@ export function useGroupCallOccupancy(groupId: string, call: { sfu: string; e2ee
     }
     // "Hide my IP" changed since the engine said `hidden`: asked as before.
     if (hiddenUnder !== null && hiddenUnder !== relayOnly) hiddenUnder = null;
-    // Opened again within the floor after leaving the call, its answer from before is not shown either.
-    if (!enabled) answers.delete(groupId);
+    // Opened again within the floor after leaving the call, its answer from before is not shown either; nor one to an
+    // ask from before joining that comes in the call: that ask counts as an older one.
+    if (!enabled) {
+      answers.delete(groupId);
+      now.current.lastAsk += 1;
+    }
     if (!enabled || away) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -165,7 +169,7 @@ export function useGroupCallOccupancy(groupId: string, call: { sfu: string; e2ee
       let occupancy: GroupCallOccupancyNow | null = null;
       if (result?.ok) {
         occupancy = { count: result.count, ...(result.since !== undefined && { since: result.since }) };
-        answers.set(groupId, { occupancy, at: Date.now(), stamp });
+        if (now.current.lastAsk === mine) answers.set(groupId, { occupancy, at: Date.now(), stamp });
         asks.failures = 0;
         asks.until = 0;
       } else {
