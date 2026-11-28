@@ -94,6 +94,8 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   // A stopped app with no Run anyway runs nowhere: being online would not open it, so no line says it waits for that.
   const runAnyway = app?.run.status === "removed";
   const waiting = stopped && !runAnyway ? null : appsUnavailable(block, title, contact, t);
+  // A blocked contact's card says so, and neither Open nor Join goes: their app frames are dropped, so the app would
+  // wait for them for good.
   const open = (runAnyway = false) => {
     if (opening) return;
     setError(null); setOpening(runAnyway ? "anyway" : "open");
@@ -127,8 +129,8 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       {waiting && <p className="chat-text-card-line text-text-secondary" data-testid="app-card-waiting">{waiting}</p>}
       {error && <p role="alert" dir={ownDirection(error)} className="chat-text-card-line text-danger-ink" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
-        {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
-          : card.url ? <Button ref={joinRef} variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
+        {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" disabled={block === "blocked"} loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
+          : card.url ? <Button ref={joinRef} variant="primary" data-testid="app-card-install" disabled={block === "blocked"} onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
             : <span ref={askRef} tabIndex={-1} className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : withName(t("apps.card.ask", { name: NAME }), contact)}</span>}
         {runAnyway && <Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => setDetails(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>

@@ -118,6 +118,7 @@ const deletions = new Map<string, number>();
 /**
  * Stops every app still running in the chat `linkId` and says nothing: the chat was deleted, and the engine refuses its
  * storage and its frames from now on. The web's panel went with the chat already; a Desktop app window has no panel.
+ * Its contact blocked, too (Chat.tsx): the engine drops their app frames from now on.
  */
 export function stopAppsIn(linkId: string): void {
   deletions.set(linkId, (deletions.get(linkId) ?? 0) + 1);

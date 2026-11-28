@@ -116,7 +116,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
       let takenDown: AppTakedown | null = null;
       const runAnyway = options?.runAnyway === true;
       const unregister = registerRunningApp({
-        ref, digest: entry.digest, runAnyway,
+        ref, digest: entry.digest, runAnyway, linkId,
         takeDown: (takedown) => { takenDown = takedown; running?.stop(); },
         stop: () => running?.stop(),
       });
@@ -209,7 +209,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     };
     let takenDown: AppTakedown | null = null;
     const unregister = registerRunningApp({
-      ref, digest: entry.digest, runAnyway: options?.runAnyway === true,
+      ref, digest: entry.digest, runAnyway: options?.runAnyway === true, linkId,
       takeDown: (takedown) => { takenDown = takedown; running.stop(); },
       stop: () => running.stop(),
     });

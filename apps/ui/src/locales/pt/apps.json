@@ -45,6 +45,7 @@
   },
   "card": {
     "ask": "Peça a {{name}} um link para ele",
+    "blocked": "Você bloqueou {{name}}. Desbloqueie para usar apps juntos",
     "contactCannot": "O app de {{name}} ainda não roda apps",
     "installed": "Instalado",
     "join": "Entrar",
