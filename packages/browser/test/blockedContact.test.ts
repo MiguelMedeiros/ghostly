@@ -53,6 +53,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     sendFile = vi.fn(async () => {});
     sendMessage = vi.fn(async () => null);
     sendWake = vi.fn();
+    sendGroupFrame = vi.fn();
     validateText = vi.fn(() => null);
     setCallSignal = vi.fn(async () => {});
     setTyping = vi.fn();
@@ -215,6 +216,33 @@ describe("a blocked contact", () => {
     await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
     await peer.onGroupFrame(accept);
     expect(contactFrame).toHaveBeenLastCalledWith(chat.id, accept);
+  });
+
+  it("lets me into none of its groups by an invitation I accepted before the block: its welcome is dropped, and my accept goes no more", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const link = linkOf(chat.id) as unknown as { options: Recorded["options"]; sendGroupFrame: ReturnType<typeof vi.fn> };
+    const peer = link.options.events;
+    const contactFrame = vi.spyOn(node["groups"], "handleContactFrame").mockResolvedValue();
+    const g = "g".repeat(22);
+    const accept = { t: "group-accept", g, key: createIdentity().pubKeyZ32 };
+    const host = node["groups"]["host"] as { sendOnLink(linkId: string, frame: Record<string, unknown>): void };
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    await peer.onGroupFrame({ t: "group-chain", g, commits: [] });
+    await peer.onGroupFrame({ t: "group-welcome", g });
+    expect(contactFrame).not.toHaveBeenCalled();
+    // My accept (pressed, or said again while the welcome does not come) does not reach the blocked contact.
+    host.sendOnLink(chat.id, accept);
+    expect(link.sendGroupFrame).not.toHaveBeenCalled();
+    // The signaling of a group both are in still goes both ways.
+    host.sendOnLink(chat.id, { t: "group-signal", g });
+    expect(link.sendGroupFrame).toHaveBeenCalledTimes(1);
+    // Unblocked, the invitation goes on.
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    host.sendOnLink(chat.id, accept);
+    expect(link.sendGroupFrame).toHaveBeenLastCalledWith(accept);
+    await peer.onGroupFrame({ t: "group-welcome", g });
+    expect(contactFrame).toHaveBeenLastCalledWith(chat.id, { t: "group-welcome", g });
   });
 
   it("cannot be called: its answer would be dropped, so its chat says why and no call rings it for nothing", async () => {
