@@ -350,7 +350,6 @@ export const ACTIVITY_READERS: Readonly<Record<string, ActivityReader>> = {
   pubky: pubkyActivity,
   atproto: atprotoActivity,
 };
-export const hasActivity = (provider: string) => Object.prototype.hasOwnProperty.call(ACTIVITY_READERS, provider);
 
 /**
  * A post's picture, on the reader's tap: from the fixed picture hosts (Nostr), the Pubky index, or the Bluesky

@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { fromBase64, toBase64, utf8Encode } from '../src/bytes';
-import { parseSshPublicKey, parseSshSignature, sameSshKey, sshKeyDigestHex, sshSignCommand, SshSigError, verifySshSignature, SSHSIG_MAX_ARMOR } from '../src/sshsig';
+import { parseSshPublicKey, parseSshSignature, sameSshKey, sshSignCommand, SshSigError, verifySshSignature, SSHSIG_MAX_ARMOR } from '../src/sshsig';
 import fixture from './fixtures/sshsig/sshsig-vectors.json';
 // covers: proofs.ssh
 
@@ -107,8 +108,7 @@ describe('SSH public keys', () => {
     const key = parseSshPublicKey(`${v.publicKey} someone@laptop\n`);
     expect(key.line).toBe(v.publicKey);
     expect(key.fingerprint).toMatch(/^SHA256:[A-Za-z0-9+/]{43}$/);
-    expect(sshKeyDigestHex(key)).toMatch(/^[0-9a-f]{64}$/);
-    expect(Buffer.from(sshKeyDigestHex(key), 'hex').toString('base64').replace(/=+$/, '')).toBe(key.fingerprint.slice(7));
+    expect(key.fingerprint.slice(7)).toBe(createHash('sha256').update(key.blob).digest('base64').replace(/=+$/, ''));
     expect(parseSshPublicKey(byName('sk-ed25519').publicKey).application).toBe('ssh:');
     expect(parseSshPublicKey(`\n\t ${v.publicKey.replace(' ', '\t')}\t a comment \n\n`).line).toBe(v.publicKey);
     expect(() => parseSshPublicKey(`${v.publicKey} a comment\nand another line`)).toThrow();

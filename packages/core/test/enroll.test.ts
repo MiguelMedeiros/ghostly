@@ -6,7 +6,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, it } from "vitest";
 import {
   DEVICE_INVITE_BYTES, DEVICE_INVITE_LIFETIME_S, createChatInvite, createDeviceInvite, deviceInviteExpired, deviceInviteJoinerKeyZ32, deviceInviteJoinerParams, encodeDeviceInvite,
-  enrollCancelFrame, enrollCancelReason, enrollDigits, enrollGrantFrame, enrollHelloFrame, enrollMessage, enrollProofFrame, formatEnrollDigits, fromBase64Url,
+  enrollCancelFrame, enrollCancelReason, enrollDigits, enrollGrantFrame, enrollHelloFrame, enrollMessage, enrollProofFrame, fromBase64Url,
   identityFromSeed, identityFromSeedB64, readDeviceInvite, readEnrollGrant, readEnrollHello, readInviteCode, seedSigner, toBase64Url, toZ32, utf8Encode,
   verifyEnrollProof, type DeviceInvite,
 } from "../src/index";
@@ -200,7 +200,6 @@ describe("enroll/1", () => {
   it("the digits are six, the same on both ends, and change with the session and with either key", () => {
     const digits = enrollDigits(HASH, inviter.publicKey, joiner.publicKey);
     expect(digits).toMatch(/^\d{6}$/);
-    expect(formatEnrollDigits("482913")).toBe("482 913");
     expect(enrollDigits(bytesToHex(seed("another transcript")), inviter.publicKey, joiner.publicKey)).not.toBe(digits);
     expect(enrollDigits(HASH, seedSigner(seed("impostor")).publicKey, joiner.publicKey)).not.toBe(digits);
     expect(enrollDigits(HASH, inviter.publicKey, seedSigner(seed("impostor")).publicKey)).not.toBe(digits);

@@ -623,6 +623,32 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(sha(t.got(bob, id, auto.messageId).bytes!)).toBe(auto.meta.d);
   });
 
+  it("resuming a paused file checks room against the bytes still to come, not its whole size", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const store = t.files.get(bob)!.store;
+    const total = 400_000, cut = 256 * 1024;
+    let holding = true;
+    t.hold = (from, to, frame) => holding && from === alice && to === bob && frame.t === "pf-data" && (frame.offset as number) >= cut;
+    const sent = await t.send(alice, id, pattern(total, 11));
+    await t.world.until(() => (t.got(bob, id, sent.messageId).transfer?.transferred ?? 0) >= cut, 60_000);
+    const fileId = t.got(bob, id, sent.messageId).message!.file!.id;
+    await bob.groups.haltFile(fileId, true);
+    await t.world.run(1_000);
+    holding = false;
+    const left = total - (t.got(bob, id, sent.messageId).transfer?.transferred ?? 0);
+    expect(left).toBeGreaterThan(0);
+    // Less than the bytes still to come: refused.
+    store.roomLeft = left - 1;
+    await expect(bob.groups.downloadFile(fileId)).rejects.toThrow("Not enough space on this device for this file");
+    // More than the bytes still to come, though less than the whole file: resumes and finishes.
+    store.roomLeft = left + 10_000;
+    expect(store.roomLeft).toBeLessThan(total);
+    await bob.groups.downloadFile(fileId);
+    await t.world.until(() => t.done(bob, id, sent.messageId), 60_000);
+    expect(sha(t.got(bob, id, sent.messageId).bytes!)).toBe(sent.meta.d);
+  });
+
   /**
    * Each file fetched by itself was checked against the room alone, not beside the files already coming: six 8 MiB files
    * with 38.9 MiB free were all asked for, and the two past the room ended "Not enough space". Each counts the ones

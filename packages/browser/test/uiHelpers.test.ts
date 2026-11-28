@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { createLink, encodeInviteCode } from "@ghostly/core";
-import { parseInvite, buildInviteUrl, chatPath } from "../../../apps/ui/src/lib/url";
+import { readInvite, chatPath } from "../../../apps/ui/src/lib/url";
 import { findMoney } from "../../../apps/ui/src/lib/money";
 import { formatFileSize } from "../../../apps/ui/src/lib/format";
 // covers: invite.invalid, invite.link, payments.cashu.token-card, payments.lightning.invoice-card, files.size-label
@@ -12,11 +12,12 @@ it("reads an invite however it is pasted, and nothing that only looks like one",
   const code = encodeInviteCode(invite);
   const expected = { seedB64: invite.seedB64, peerPubKeyB64: invite.peerPubKeyZ32, encKeyB64: invite.encKeyB64 };
   for (const pasted of [code, `  ${code}\n`, `https://app.ghostly.tools/#/chat/${code}`, `/chat/${code}`, `join me: https://x.example/#/chat/${code}`])
-    expect(parseInvite(pasted), pasted.slice(0, 40)).toMatchObject(expected);
+    expect(readInvite(pasted), pasted.slice(0, 40)).toMatchObject({ ok: true, keys: expected });
   for (const junk of ["", "   ", "not an invite", "javascript:alert(1)", "https://evil.example/#/chat/nope", "/chat/", code.slice(0, 20)])
-    expect(parseInvite(junk), junk).toBeNull();
-  const url = buildInviteUrl("https://app.ghostly.tools", invite.seedB64, invite.peerPubKeyZ32, invite.encKeyB64);
-  expect(parseInvite(url)).toMatchObject(expected);
+    expect(readInvite(junk).ok, junk).toBe(false);
+  // An older link, its three parts in the address.
+  const url = `https://app.ghostly.tools/#/chat/${invite.seedB64}/${invite.peerPubKeyZ32}/${invite.encKeyB64}`;
+  expect(readInvite(url)).toMatchObject({ ok: true, keys: expected });
   // The address the app routes to carries a session id, never the keys.
   expect(chatPath("abc/def")).toBe("/chat/abc%2Fdef");
 });

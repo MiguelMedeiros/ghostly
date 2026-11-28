@@ -42,11 +42,6 @@ export function sparkAddressKind(address: unknown, network: SparkNetwork): "addr
 
 export const isSparkAddress = (address: unknown, network: SparkNetwork): boolean => sparkAddressKind(address, network) !== undefined;
 
-/** The Spark network a string belongs to, from its prefix alone (`spark1…` Bitcoin, `sparkrt1…` regtest). */
-export function sparkNetworkOf(address: string): SparkNetwork | undefined {
-  return SPARK_NETWORKS.find((network) => sparkAddressKind(address, network) !== undefined);
-}
-
 /** What a Spark invoice asks for, read from the invoice itself (the payer's wallet checks it again). */
 export interface SparkInvoiceDetails {
   /** Sats asked; absent when the payer chooses. */

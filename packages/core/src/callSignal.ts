@@ -124,14 +124,6 @@ export interface CallMedia {
   choosesDevices?: boolean;
 }
 
-export function compressSdp(sdp: string): string {
-  return btoa(sdp);
-}
-
-export function decompressSdp(compressed: string): string {
-  return atob(compressed);
-}
-
 /**
  * The apps' STUN servers. No candidate pool: a call's connection is made when the call is placed and its offer follows
  * at once, so pre-gathered sessions save no time, and each one opens its own sockets, asks every STUN server and takes

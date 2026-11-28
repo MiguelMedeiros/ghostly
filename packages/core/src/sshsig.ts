@@ -228,11 +228,6 @@ export async function verifySshSignature(armored: string, message: Uint8Array | 
 /** Whether two keys are the same, comparing wire blobs (comments never matter). */
 export const sameSshKey = (a: Pick<SshPublicKey, 'blob'>, b: Pick<SshPublicKey, 'blob'>) => bytesEqual(a.blob, b.blob);
 
-/** 32-byte digest of the key blob as lowercase hex: the fingerprint's bytes, in the
- * shape peer-proof external keys already use. */
-export const sshKeyDigestHex = (key: Pick<SshPublicKey, 'blob'>) =>
-  Array.from(sha256(key.blob), b => b.toString(16).padStart(2, '0')).join('');
-
 /** A POSIX shell one-liner that signs `statement` exactly (no trailing newline) and
  * prints the armored signature. Refuses anything that would need escaping, so what
  * is shown is what gets signed. */
