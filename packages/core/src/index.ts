@@ -7,6 +7,7 @@ export * from "./dns";
 export * from "./pkarr";
 export * from "./transport";
 export * from "./relay";
+export * from "./relayBatch";
 export * from "./turnRecord";
 export * from "./turnRead";
 export * from "./signer";
