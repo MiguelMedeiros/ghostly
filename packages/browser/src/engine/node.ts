@@ -57,7 +57,7 @@ import { GROUP_CALL_MODERATION_ACTS, GROUP_CALL_SOURCES, isZ32Key, type GroupCal
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WAKE_ONLINE_BATCH, WAKE_ONLINE_BATCH_MS, WAKE_ONLINE_DELAY_MS, WAKE_ONLINE_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
-import { CapsExchange, DHT_FILE_CAPABILITY, DHT_FILE_TOO_LARGE, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, dhtFileId, type DhtFileAnnouncement, type DhtPacketFacts, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
+import { CAPS_LIMITS, CapsExchange, DHT_FILE_CAPABILITY, DHT_FILE_TOO_LARGE, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, dhtFileId, type DhtFileAnnouncement, type DhtPacketFacts, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, parseLinkPreview, pairedMessageFrame, pairedMessageFits, pairedEditFits, PAIRED_FRAME_TOO_LARGE, MESSAGE_PACED, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   presenceSeenAt,
@@ -10203,7 +10203,7 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     const methods = live?.stored.paymentMethods ?? {};
     const cashu = methods.cashu !== false, lightning = methods.lightning !== false;
-    const name = cutToUtf8Bytes(this.sharedNick ?? "", 64);
+    const name = cutToUtf8Bytes(this.sharedNick ?? "", CAPS_LIMITS.nameBytes);
     return {
       versions: [1],
       transports: this.runnableTransports(live),
@@ -10269,7 +10269,12 @@ export class GhostlyNode implements EngineImplementation {
     live.link?.learnPeerTransports(record.transports.filter((t): t is PairedTransport => (TRANSPORTS as readonly string[]).includes(t)), dialDescriptors(record.descriptors), true);
     live.link?.learnPeerChoice(record.choice, true);
     if (live.link?.isDataLinkOpen) return;
-    if (record.name !== (live.stored.peerNick ?? "")) {
+    // The record carries 64 bytes of a name (`capsContent`; by code points before 1.14) and a session the whole of it:
+    // the record's cut of the name a session gave is that name, not a new one.
+    const known = live.stored.peerNick ?? "", bytes = (s: string) => new TextEncoder().encode(s).length;
+    const byCodePoints = () => { const cps = [...known]; while (bytes(cps.join("")) > CAPS_LIMITS.nameBytes) cps.pop(); return cps.join(""); };
+    const cutOfKnown = bytes(known) > CAPS_LIMITS.nameBytes && (record.name === cutToUtf8Bytes(known, CAPS_LIMITS.nameBytes) || record.name === byCodePoints());
+    if (record.name !== known && !cutOfKnown) {
       live.stored = { ...live.stored, peerNick: record.name };
       void db.patchLink(linkId, { peerNick: record.name });
     }
