@@ -322,6 +322,24 @@ function heldFilesOf(files: readonly HandoffFile[]): HeldFile[] {
   return [...byDigest.values()].sort((a, b) => b.size - a.size).slice(0, MAX_HELD_FILES);
 }
 
+/**
+ * What a `handoff-have` or `handoff-manifest` list read across frames (`more: true`) may hold before its last frame:
+ * entries (a digest, a part, a file id) and the characters of their names. Far above a profile's (some 35,000 files
+ * make about 70,000 entries); a list past either is not one this app sends, and ends the handoff as damaged.
+ */
+export const HANDOFF_LIST_MAX_ENTRIES = 500_000;
+export const HANDOFF_LIST_MAX_CHARS = 64 * 1024 * 1024;
+
+/** A list read so far: true while it stays within `HANDOFF_LIST_MAX_ENTRIES` and `HANDOFF_LIST_MAX_CHARS`. */
+function listFits(size: { entries: number; chars: number }, names: readonly string[]): boolean {
+  size.entries += names.length;
+  for (const name of names) size.chars += name.length;
+  return size.entries <= HANDOFF_LIST_MAX_ENTRIES && size.chars <= HANDOFF_LIST_MAX_CHARS;
+}
+const emptyHave = (): { d: string[]; p: Record<string, number>; size: { entries: number; chars: number } } => ({ d: [], p: {}, size: { entries: 0, chars: 0 } });
+const emptyManifest = (): { parts: HandoffPart[]; later: HandoffPart[]; ids: Record<string, string[]>; size: { entries: number; chars: number } } =>
+  ({ parts: [], later: [], ids: {}, size: { entries: 0, chars: 0 } });
+
 /** Which file ids each digest is. */
 function idsOf(files: readonly HandoffFile[]): Record<string, string[]> {
   const ids: Record<string, string[]> = {};
@@ -458,7 +476,7 @@ export class HandoffGiver {
   private secret: Uint8Array | null = null;
   private pake: PakeGiver | null = null;
   private have: { d: Set<string>; p: Record<string, number> } | null = null;
-  private haveBuffer: { d: string[]; p: Record<string, number> } = { d: [], p: {} };
+  private haveBuffer = emptyHave();
   private sender: PartSender;
   private planned: { total: number; later: number; parts: HandoffPart[] } | null = null;
   private failure: HandoffFailure | undefined;
@@ -909,11 +927,17 @@ export class HandoffGiver {
     // An earlier attempt the taker did not see end, while this device offers a new one: the offer again.
     if (this.phase === "offered") { if (from === this.peer && !have.more) this.offer(); return; }
     if (from !== this.peer || (this.phase !== "pass1" && this.phase !== "pass2")) return;
+    if (!listFits(this.haveBuffer.size, [...have.d, ...Object.keys(have.p)])) {
+      this.haveBuffer = emptyHave();
+      this.out(handoffCancelFrame("damaged"));
+      if (this.phase === "pass2") { this.failure = "damaged"; await this.backToActive(); } else this.reset("damaged");
+      return;
+    }
     this.haveBuffer.d.push(...have.d);
     Object.assign(this.haveBuffer.p, have.p);
     if (have.more) return;
     this.have = { d: new Set(this.haveBuffer.d), p: this.haveBuffer.p };
-    this.haveBuffer = { d: [], p: {} };
+    this.haveBuffer = emptyHave();
     const session = this.sessionFor(from);
     if (!session?.key || !session.peer) return;
     void this.sendPass(session).catch(() => this.reset("failed"));
@@ -1076,7 +1100,7 @@ export class HandoffGiver {
     this.failure = undefined; this.failed = {}; this.stays = []; this.retry = undefined; this.have = null; this.planned = null; this.pake = null; this.secret = null; this.bundleMade = null;
     this.cancelAsked = false;
     // A list cut off as an earlier handoff stopped is not part of this one's.
-    this.haveBuffer = { d: [], p: {} };
+    this.haveBuffer = emptyHave();
     this.offerHellos.clear();
     this.sender = new PartSender(this.now);
   }
@@ -1091,7 +1115,7 @@ export class HandoffGiver {
     this.failure = failure;
     this.refused = refused;
     this.cancelAsked = false;
-    this.pake = null; this.have = null; this.haveBuffer = { d: [], p: {} }; this.planned = null; this.secret = null; this.bundleMade = null;
+    this.pake = null; this.have = null; this.haveBuffer = emptyHave(); this.planned = null; this.secret = null; this.bundleMade = null;
     this.changed();
   }
 
@@ -1195,7 +1219,7 @@ export class HandoffTaker {
   private staging: HandoffStaging | null = null;
   private later = 0;
   private offerBytes = 0;
-  private manifestBuffer: { parts: HandoffPart[]; later: HandoffPart[]; ids: Record<string, string[]> } = { parts: [], later: [], ids: {} };
+  private manifestBuffer = emptyManifest();
   private pass: 1 | 2 = 1;
   private incoming = new Map<string, InPart>();
   /** Every file id of the giver, by digest, as the manifests said. */
@@ -1581,12 +1605,23 @@ export class HandoffTaker {
   private async onManifest(from: string, frame: DeviceFrame): Promise<void> {
     const manifest = readHandoffManifest(frame);
     if (!manifest || from !== this.peer || this.phase !== "receiving") return;
+    const names = [...manifest.parts, ...manifest.later].map((part) => part[0] + part[2]);
+    for (const [digest, list] of Object.entries(manifest.ids)) names.push(digest, ...list);
+    if (!listFits(this.manifestBuffer.size, names)) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
     this.manifestBuffer.parts.push(...manifest.parts);
     this.manifestBuffer.later.push(...manifest.later);
     Object.assign(this.manifestBuffer.ids, manifest.ids);
     if (manifest.more) return;
     const { parts, later, ids } = this.manifestBuffer;
-    this.manifestBuffer = { parts: [], later: [], ids: {} };
+    this.manifestBuffer = emptyManifest();
+    // A file id is one file: one listed under two digests would have two parts written into one staged file.
+    const digestOfId = new Map<string, string>();
+    for (const [digest, list] of Object.entries(ids)) {
+      for (const id of list) {
+        if ((digestOfId.get(id) ?? digest) !== digest) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
+        digestOfId.set(id, digest);
+      }
+    }
     this.copyStarted = true;
     this.pass = manifest.pass;
     this.ids = ids;
@@ -1935,7 +1970,7 @@ export class HandoffTaker {
     if (this.timer) clearTimeout(this.timer);
     clearInterval(this.idleTimer);
     this.phase = "idle";
-    this.pake = null; this.bundle = null; this.devices = null; this.incoming.clear(); this.manifestBuffer = { parts: [], later: [], ids: {} };
+    this.pake = null; this.bundle = null; this.devices = null; this.incoming.clear(); this.manifestBuffer = emptyManifest();
     await this.staging?.dropRest().catch(() => {});
     const record = await this.ports.records.read().catch(() => null);
     if (record?.handoff?.role === "taking" && takes(record.state)) await this.ports.records.amend({ handoff: { ...record.handoff, step: "stopped", secret: undefined }, fetchFiles: undefined }).catch(() => {});
