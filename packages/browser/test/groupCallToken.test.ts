@@ -100,6 +100,23 @@ describe("asking the node", () => {
     await expect(ask(once(async () => Response.json({ url: "https://x", token: "t", room: `g_${g}`, identity: me.pubKeyZ32, expiresIn: 600 })))).rejects.toThrow(failed);
   });
 
+  // Node's `https.request` (the CLI's fetch) rejects a timed-out request with an AbortError whose cause is the
+  // TimeoutError, where a browser's fetch rejects with the TimeoutError itself: both are the node not answering in time.
+  it("a timeout said as an AbortError, with the TimeoutError as its cause or as the signal's reason, is a timeout too", async () => {
+    const once = (error: () => Error) => vi.fn(async () => { throw error(); }) as unknown as typeof fetch;
+    const late = "call.ghostly.test did not answer in time";
+    await expect(ask(once(() => Object.assign(new DOMException("The operation was aborted", "AbortError"), { cause: new DOMException("timed out", "TimeoutError") })))).rejects.toThrow(late);
+    await expect(ask(once(() => new DOMException("timed out", "TimeoutError")))).rejects.toThrow(late);
+    // A network error, or an abort that is not the timeout's, is still the node not reached.
+    await expect(ask(once(() => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) })))).rejects.toThrow("Could not reach call.ghostly.test");
+    await expect(ask(once(() => new DOMException("The operation was aborted", "AbortError")))).rejects.toThrow("Could not reach call.ghostly.test");
+    // The fetch says only AbortError, but the request's own signal ran out of time.
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(AbortSignal.abort(new DOMException("timed out", "TimeoutError")));
+    try {
+      await expect(ask(once(() => new DOMException("The operation was aborted", "AbortError")))).rejects.toThrow(late);
+    } finally { timeout.mockRestore(); }
+  });
+
   it("follows no redirect and sends no cookie or referrer: a 307 would send my key and name to a host the group never named", async () => {
     const sfu = fakeSfu(g, () => roster);
     await ask(sfu.fetch as typeof fetch);
