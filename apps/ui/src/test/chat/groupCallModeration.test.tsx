@@ -126,6 +126,46 @@ describe("the admin's menu on a member's tile", () => {
     expect(menuButton(BO)).toHaveFocus();
   });
 
+  // The question used to live in the tile's menu and went with it: nothing was sent, and Bo joined again with no ban.
+  it("keeps the remove question when that member drops out: Cancel sends nothing, Confirm still removes their key", async () => {
+    answerModerate(({ act, target }) => ({ ok: true, state: act === "remove" ? { muted: {}, banned: [target!] } : EMPTY }));
+    const { user, rerenderWith } = adminView();
+    const anaOnly: GroupCallState = { ...call, participants: [person(ANA, "Ana")] };
+    await user.click(menuButton(BO));
+    await user.click(screen.getByTestId("group-call-remove-from-call"));
+    rerenderWith(anaOnly);
+    await act(async () => {});
+    expect(screen.getByTestId("group-call-remove-call-dialog")).toHaveAccessibleName("Remove Bo from the call?");
+    await user.click(within(screen.getByTestId("group-call-remove-call-dialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("group-call-remove-call-dialog")).toBeNull();
+    expect(acts()).toEqual([]);
+    // His ⋮ went with his tile: the focus is in the call's window.
+    expect(screen.getByTestId("group-call")).toHaveFocus();
+    rerenderWith(call);
+    await user.click(menuButton(BO));
+    await user.click(screen.getByTestId("group-call-remove-from-call"));
+    rerenderWith(anaOnly);
+    await act(async () => {});
+    await user.click(screen.getByTestId("group-call-remove-call-confirm"));
+    await waitFor(() => expect(acts()).toEqual([{ groupId: "group-1", act: "remove", target: BO }]));
+    expect(await screen.findByTestId("group-call-removed")).toHaveTextContent("Removed (1)");
+    expect(screen.getByTestId("group-call")).toHaveFocus();
+  });
+
+  it("keeps the remove-from-group question when that member drops out, and Confirm uses the group's remove for their key", async () => {
+    answerModerate(() => ({ ok: true, state: EMPTY }));
+    fakeEngine.on("removeGroupMember", () => undefined);
+    const { user, rerenderWith } = adminView();
+    await user.click(menuButton(ANA));
+    await user.click(screen.getByTestId("group-call-remove-from-group"));
+    rerenderWith({ ...call, participants: [person(BO, "Bo")] });
+    await act(async () => {});
+    expect(screen.getByTestId("group-call-remove-group-dialog")).toHaveAccessibleName("Remove Ana from the group?");
+    await user.click(screen.getByTestId("group-call-remove-group-confirm"));
+    await waitFor(() => expect(fakeEngine.callsTo("removeGroupMember")).toEqual([{ groupId: "group-1", key: ANA }]));
+    expect(acts()).toEqual([]);
+  });
+
   it("lets a removed member back in from the call's top, which sends unban", async () => {
     answerModerate(({ act }) => ({ ok: true, state: act === "state" ? { muted: {}, banned: [BO] } : EMPTY }));
     const { user } = adminView();

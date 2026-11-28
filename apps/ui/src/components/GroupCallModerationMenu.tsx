@@ -18,25 +18,25 @@ const SOURCES: { src: GroupCallSource; take: TranslationKey; give: TranslationKe
   { src: "screen_share", take: "groupCallModeration.stopScreen", give: "groupCallModeration.allowScreen" },
 ];
 
+/** A remove the admin picked on a tile and is asked about: whose key, by the name the tile showed, and from what. */
+export interface RemoveAsk {
+  identity: string;
+  name: string;
+  from: "call" | "group";
+}
+
 /**
  * The ⋮ on another member's tile, for the group's admin: take a source away or give it back, remove them from the call,
- * or from the group. Both removes are asked first. `host`: the call's window, which a screen reader reads alone.
+ * or from the group. Both removes are asked first, by `onAsk`'s question in the call's window (`RemoveQuestion`), not
+ * in the tile: it stays when they drop out. `host`: the call's window, which a screen reader reads alone.
  */
-export function TileModerationMenu({ identity, name, moderation, host }: { identity: string; name: string; moderation: CallModeration; host: RefObject<HTMLElement | null> }) {
+export function TileModerationMenu({ identity, name, moderation, host, onAsk }: { identity: string; name: string; moderation: CallModeration; host: RefObject<HTMLElement | null>; onAsk(ask: RemoveAsk): void }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const [asking, setAsking] = useState<"call" | "group" | null>(null);
   const anchor = useRef<HTMLDivElement>(null);
   const label = t("groupCallModeration.menu", { name: isolate(name) });
   const muted = moderation.state.muted[identity] ?? [];
   const pick = (run: () => void) => () => { setOpen(false); run(); };
-  const removeFromGroup = async () => {
-    try {
-      await engine.call("removeGroupMember", { groupId: moderation.moderator.groupId, key: identity });
-    } catch (cause) {
-      moderation.say(errorText(cause, t));
-    }
-  };
   return (
     <div ref={anchor} className="absolute top-1.5 end-1.5 z-10">
       <button type="button" onClick={() => setOpen(!open)} data-testid="group-call-moderate" aria-label={label} title={label} aria-expanded={open} aria-haspopup="true"
@@ -53,16 +53,32 @@ export function TileModerationMenu({ identity, name, moderation, host }: { ident
           );
         })}
         <MenuSeparator />
-        <MenuItem testId="group-call-remove-from-call" danger onClick={pick(() => setAsking("call"))}>{t("groupCallModeration.removeFromCall")}</MenuItem>
+        <MenuItem testId="group-call-remove-from-call" danger onClick={pick(() => onAsk({ identity, name, from: "call" }))}>{t("groupCallModeration.removeFromCall")}</MenuItem>
         {moderation.moderator.inGroup(identity) && (
-          <MenuItem testId="group-call-remove-from-group" danger onClick={pick(() => setAsking("group"))}>{t("groupCallModeration.removeFromGroup")}</MenuItem>
+          <MenuItem testId="group-call-remove-from-group" danger onClick={pick(() => onAsk({ identity, name, from: "group" }))}>{t("groupCallModeration.removeFromGroup")}</MenuItem>
         )}
       </Menu>
-      {asking && (
-        <ConfirmRemove name={name} from={asking} returnFocus={host} onClose={() => setAsking(null)}
-          onConfirm={() => { const from = asking; setAsking(null); void (from === "call" ? moderation.act("remove", identity) : removeFromGroup()); }} />
-      )}
     </div>
+  );
+}
+
+/**
+ * A tile's remove question, drawn by the call's window so it outlives the tile: a member who drops out (or leaves to
+ * join again) while it is open is still removed by Confirm, by the key and name it was asked with. The node holds a
+ * remove of a roster key not in the room for when it joins (WISP 602 § Moderation); a refusal is said as any act's.
+ */
+export function RemoveQuestion({ ask, moderation, host, onClose }: { ask: RemoveAsk; moderation: CallModeration; host: RefObject<HTMLElement | null>; onClose(): void }) {
+  const { t } = useI18n();
+  const removeFromGroup = async () => {
+    try {
+      await engine.call("removeGroupMember", { groupId: moderation.moderator.groupId, key: ask.identity });
+    } catch (cause) {
+      moderation.say(errorText(cause, t));
+    }
+  };
+  return (
+    <ConfirmRemove name={ask.name} from={ask.from} returnFocus={host} onClose={onClose}
+      onConfirm={() => { onClose(); void (ask.from === "call" ? moderation.act("remove", ask.identity) : removeFromGroup()); }} />
   );
 }
 
