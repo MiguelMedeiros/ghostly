@@ -369,7 +369,7 @@ export const servicesPlatform: ServicesPlatform | null = {
 
   getPeer(peerPubKeyZ32) {
     const link = engine.linkByPeer(peerPubKeyZ32);
-    return link ? { id: link.id, deliveryMode: link.deliveryMode, textDelivery: link.textDelivery, canSendText: link.canSendText, dhtDelivery: link.dhtDelivery, hold: link.hold, capabilities: link.capabilities, sessionOffers: link.sessionOffers, callsUnavailable: link.callsUnavailable, paymentMethods: link.paymentMethods, paymentNetworks: link.paymentNetworks, pairing: link.pairing, transportWait: link.transportWait, dataLink: link.dataLink, online: link.peerOnline, services: link.peerServices } : null;
+    return link ? { id: link.id, deliveryMode: link.deliveryMode, textDelivery: link.textDelivery, canSendText: link.canSendText, dhtDelivery: link.dhtDelivery, hold: link.hold, capabilities: link.capabilities, sessionOffers: link.sessionOffers, callsUnavailable: link.callsUnavailable, ...(link.blocked && { blocked: true as const }), paymentMethods: link.paymentMethods, paymentNetworks: link.paymentNetworks, pairing: link.pairing, transportWait: link.transportWait, dataLink: link.dataLink, online: link.peerOnline, services: link.peerServices } : null;
   },
   async setChatPaymentMethods(peerPubKeyZ32, methods, networks) {
     const link = engine.linkByPeer(peerPubKeyZ32);

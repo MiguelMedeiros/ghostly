@@ -28,10 +28,12 @@ const sameTitle = sameNameForm;
  * "Ana opened Chess" and can install the same app; then the app opens in this chat. Nothing is advertised before.
  * An app that comes with Ghostly and was never opened here is listed too: choosing it shows what it asks first.
  */
-export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, onClose, onCovered }: {
+export function ChatAppsDialog({ linkId, name, waiting, blocked = false, error: failed = null, onClose, onCovered }: {
   linkId: string;
   name: string;
   waiting?: string | null;
+  /** The contact is blocked here: `waiting` says so, and no app opens with them (their app frames are dropped). */
+  blocked?: boolean;
   /** Why an app opened here from the Apps page did not open. */
   error?: string | null;
   onClose: () => void;
@@ -133,7 +135,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
                       <p dir="auto" className="text-match-parent text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t(app.run.status === "needs-files" ? "apps.app.needsFiles" : "apps.app.stopped")}</p>
                     </div>
                   </div>
-                  <Button variant="primary" data-testid="chat-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: shared(app) ? `${isolate(app.title)} ${app.fingerprint}` : isolate(app.title) })} disabled={!opens(app) || busy !== null} loading={busy === app.ref} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
+                  <Button variant="primary" data-testid="chat-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: shared(app) ? `${isolate(app.title)} ${app.fingerprint}` : isolate(app.title) })} disabled={blocked || !opens(app) || busy !== null} loading={busy === app.ref} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
                 </div>
               ))}
           {installed !== null && builtIns.map((app) => (
@@ -145,7 +147,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
                   <p dir="auto" className="text-match-parent text-xs text-text-muted truncate">{app.tagline}</p>
                 </div>
               </div>
-              <Button variant="primary" data-testid="chat-built-in-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: isolate(app.title) })} disabled={busy !== null} loading={busy === app.ref} onClick={() => setFirst(app)}>{t("apps.page.open")}</Button>
+              <Button variant="primary" data-testid="chat-built-in-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: isolate(app.title) })} disabled={blocked || busy !== null} loading={busy === app.ref} onClick={() => setFirst(app)}>{t("apps.page.open")}</Button>
             </div>
           ))}
           <button type="button" data-testid="chat-apps-browse" onClick={() => { onClose(); nav.open("/apps"); }}

@@ -45,6 +45,7 @@
   },
   "card": {
     "ask": "向 {{name}} 要一个链接",
+    "blocked": "你已屏蔽 {{name}}。取消屏蔽后才能一起使用应用",
     "contactCannot": "{{name}} 的应用还不能运行小应用",
     "installed": "已安装",
     "join": "加入",
