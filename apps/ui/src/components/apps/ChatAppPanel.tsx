@@ -208,16 +208,18 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
       role={modal ? "dialog" : undefined} aria-modal={modal || undefined}
       aria-label={app ? t(app.serving ? "apps.view.withSharing" : "apps.view.with", { title: isolate(title), name: isolate(name) }) : undefined} className="chat-app-panel outline-none" data-wide={wide || undefined}>
       {modal && <TabTrap root={root} />}
-      {/* The header only while the app shows: the chat's own header is the only one otherwise. */}
+      {/* The header only while the app shows: the chat's own header is the only one otherwise. Back, the contact's
+          picture and Close are sized in px, as the title is and as the chat header's are: in rem they grew with the
+          browser's text size and left the title one letter at 200%. */}
       {shown && <div className="chat-app-head h-14 header-safe flex items-center gap-2 max-md:gap-1 px-3 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         {withBack && (
           <button ref={back} type="button" data-testid="mini-app-back" onClick={goBack}
             aria-label={t("apps.view.back")} title={t("apps.view.back")} aria-describedby={app?.stopped ? stoppedId : undefined}
-            className={`${phoneHeader ? "w-11 max-[340px]:w-9 tap-target" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}>
+            className={`${phoneHeader ? "w-[44px] max-[340px]:w-[36px] h-[44px] tap-target" : "w-9 h-11"} flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
           </button>
         )}
-        <span data-testid="mini-app-avatar" className="relative w-9 h-9 rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
+        <span data-testid="mini-app-avatar" className="relative w-[36px] h-[36px] rounded-full bg-surface-hover flex items-center justify-center shrink-0 [--ring:var(--theme-panel-header)]">
           <PeerAvatar peerPubKey={peerKey} label={name} named={named} photo={photo} />
           {/* The app on the contact's corner: this is the app, with them. */}
           <span aria-hidden="true" className="absolute -bottom-1 -end-1 grid place-items-center w-[18px] h-[18px] rounded-md bg-accent text-on-accent ring-2 ring-panel-header">
@@ -246,7 +248,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
             </button>
           )}
           <button type="button" data-testid="mini-app-close" onClick={close} aria-label={t("common.close")} title={t("common.close")}
-            className={`${phoneHeader ? "w-11 h-11 flex items-center justify-center" : "p-2 max-md:px-1.5 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}>
+            className={`${phoneHeader ? "w-[44px] h-[44px] flex items-center justify-center" : "p-2 max-md:px-1.5 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}>
             <svg {...iconProps} width={phoneHeader ? 20 : 18} height={phoneHeader ? 20 : 18}><path d="M18 6 6 18M6 6l12 12" /></svg>
           </button>
         </div>
