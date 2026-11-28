@@ -67,7 +67,8 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
     <h2 id={`${id}-title`} className="break-words text-base font-semibold">{forget
       ? group.name ? withName(t("group.leave.forgetTitle", { name: NAME }), group.name) : t("group.leave.forgetTitleUnnamed")
       : group.name ? withName(t("group.leave.title", { name: NAME }), group.name) : t("group.leave.titleUnnamed")}</h2>
-    <div id={`${id}-body`} className="mt-2 space-y-2 text-sm text-text-muted">
+    {/* A name of 64 characters with no space ("maria.fernanda.…") breaks inside it, not past the dialog's edge. */}
+    <div id={`${id}-body`} className="mt-2 space-y-2 break-words text-sm text-text-muted">
       {forget && <p>{t("group.leave.forgetBody")}</p>}
       {/* The last one in has no way back: nobody is left to answer the link or let anyone in. */}
       <p>{t(others.length === 0 ? "group.leave.bodyLast" : community ? "group.leave.bodyCommunity" : "group.leave.body")}</p>
