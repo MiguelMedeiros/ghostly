@@ -25,7 +25,7 @@ export function TileVolume({ name, volume: set, max, onChange, host }: { name: s
   return (
     <div ref={anchor} className="absolute top-1.5 start-1.5 z-10">
       <button type="button" onClick={() => setOpen(!open)} data-testid="group-call-volume" data-volume={volume}
-        aria-label={off ? t("calls.group.mutedForYou", { name: isolate(name) }) : label} title={off ? t("calls.group.mutedForYou", { name: isolate(name) }) : `${label}: ${percent}`}
+        aria-label={off ? t("calls.group.mutedForYou", { name: isolate(name) }) : label} title={off ? t("calls.group.mutedForYou", { name: isolate(name) }) : t("common.labelValue", { label, value: percent })}
         aria-expanded={open} aria-haspopup="true"
         className={`grid h-8 w-8 max-md:h-[44px] max-md:w-[44px] cursor-pointer place-items-center rounded-full text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${off ? "bg-danger-fill" : "bg-black/60 hover:bg-black/80"}`}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
