@@ -126,14 +126,15 @@ export async function fetchGroupCallToken(ask: GroupCallAsk): Promise<GroupCallP
   for (let attempt = 0; ; attempt++) {
     const request = signGroupCallRequest(ask.sfu, { g: ask.g, k: ask.k, ts: Math.floor(now() / 1000), n: toBase64Url(randomBytes(16)), name }, ask.seed);
     let response: Response;
+    const signal = AbortSignal.timeout(GROUP_CALL_TIMEOUT_MS);
     try {
       // No redirect: one would send my key, name and signed request to a host the group never named.
       response = await doFetch(`${ask.sfu}/sfu/group-token`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request), signal: AbortSignal.timeout(GROUP_CALL_TIMEOUT_MS),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request), signal,
         redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store",
       });
     } catch (error) {
-      throw (error as { name?: string } | null)?.name === "TimeoutError" ? engineError("hostTimedOut", { host }) : engineError("hostUnreachable", { host });
+      throw timedOut(error, signal) ? engineError("hostTimedOut", { host }) : engineError("hostUnreachable", { host });
     }
     if (response.status === 403 && attempt < GROUP_CALL_RETRY_MS.length) {
       await sleep(GROUP_CALL_RETRY_MS[attempt]);
@@ -147,6 +148,17 @@ export async function fetchGroupCallToken(ask: GroupCallAsk): Promise<GroupCallP
     if (!pass) throw engineError("groupCallFailed", { host });
     return pass;
   }
+}
+
+/**
+ * Whether a request failed because its time ran out. A browser's `fetch` rejects with the signal's reason, a
+ * `TimeoutError`; Node's `https.request` (the CLI's fetch, packages/cli groupCallFetch.ts) with an `AbortError` whose
+ * `cause` is that `TimeoutError`; and a fetch may say only `AbortError` once the signal timed out. Moderation and
+ * occupancy say both ways with one code, so only the token request asks.
+ */
+function isTimeout(error: unknown): boolean { return (error as { name?: unknown } | null)?.name === "TimeoutError"; }
+function timedOut(error: unknown, signal: AbortSignal): boolean {
+  return isTimeout(error) || isTimeout((error as { cause?: unknown } | null)?.cause) || (signal.aborted && isTimeout(signal.reason));
 }
 
 /** The room's state after an act (WISP 602 § Moderation, the reply): the sources taken from each key, and who is banned. */
