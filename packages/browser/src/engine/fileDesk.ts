@@ -259,6 +259,15 @@ export class FileDesk {
   }
 
   /**
+   * Whether a frame this side sends is a receiver's (an answer about a file the contact sends, or the room here): what a
+   * blocked contact's chat does not say (`GhostlyNode`'s `send`). Said, a file arriving from it when it was blocked was
+   * asked for again every quiet spell (`pf-accept`), and the contact sent its bytes again each time, all dropped here.
+   */
+  receiverFrame(frame: Record<string, unknown>): boolean {
+    return frame.t === "pf-room" || ANSWERS_TO_MINE.has(frame.t);
+  }
+
+  /**
    * A file the contact said on the DHT floor (WISP 403 § Files), whose message is stored under `peer_<wireId>` with
    * this local id: its bubble waits for the offer, which takes it over when it comes live (no second message). False:
    * this chat knows that wire id already (its offer came first, or another file has it), and nothing is to be stored.
