@@ -254,9 +254,12 @@ import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayP
 const RELAY_RETRY_MS = 30_000;
 /**
  * The group frames a blocked contact's chat drops (`setContactBlocked`): its invitation, and its accept of one made
- * before the block, which would let it into the group. A group both are in already goes on (its signaling, a leave).
+ * before the block, which would let it into the group; and the chain and welcome of its group, which would let me into
+ * its own by an invitation I accepted before the block. A group both are in already goes on (its signaling, a leave).
  */
-const BLOCKED_GROUP_FRAMES = new Set(["group-invite", "group-accept"]);
+const BLOCKED_GROUP_FRAMES = new Set(["group-invite", "group-accept", "group-chain", "group-welcome"]);
+/** What a blocked contact's chat is not sent: my accept of its invitation (pressed, or said again), which asks into its group. */
+const BLOCKED_GROUP_SENDS = new Set(["group-accept"]);
 /**
  * A chat's relayed HyperDHT listener went with the relay connection (`relayHolds`): for this long the chat keeps first
  * claim on a listener, and another chat does not take the slot it held. A socket closed with no close reaching the relay
@@ -1933,6 +1936,7 @@ export class GhostlyNode implements EngineImplementation {
       // An edge to someone out of the roster carries the commits up to the one that took them out, and nothing else.
       const { group, groupPeer, groupEntry } = live.stored;
       if (group && groupPeer && !groupEntry && !this.groups.edgeAllows(group, groupPeer, frame)) return;
+      if (BLOCKED_GROUP_SENDS.has((frame as { t?: unknown }).t as string) && this.blockedChat(live.stored)) return;
       live.link.sendGroupFrame(frame);
     },
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
