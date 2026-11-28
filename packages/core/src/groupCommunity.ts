@@ -2,7 +2,7 @@ import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { pacer } from "./appBundle";
 import { concatBytes, fromBase64Url, isZ32Key, randomBytes, toBase64Url, utf8Decode, utf8Encode } from "./bytes";
-import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
+import { identityFromSeedB64, publicKeyFromZ32, sign, verify, verifyAsync } from "./identity";
 import { sanitizeNick, unwrapPasted } from "./text";
 import {
   confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, groupCallKey, newEpochSecret, openPair, openSecret, sealPair, sealSecret, sha256Hex,
@@ -142,6 +142,11 @@ export const COMMUNITY_LIMITS = {
  * frame of the answer keeps it open, since it goes a slice at a time. As a private group's.
  */
 const ANSWER_WINDOW_MS = 5_000;
+/**
+ * My answer to a member's sync asks back with my own at least this often, though its sync says it holds nothing I
+ * lack: the pending leaves it holds are in no sync, and its answer hands them on.
+ */
+const ASK_BACK_MS = 5 * 60_000;
 
 /**
  * After the admin role moved to me: how long I still take the statement of the admin I took it from (WISP 903
@@ -790,6 +795,8 @@ export class CommunitySession {
   private readonly cameLive = new WeakSet<object>();
   /** Syncs answered per member, a few a minute (`COMMUNITY_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
+  /** Per member: when my answer to its sync last asked back with my own (`ASK_BACK_MS`). In memory only. */
+  private readonly askedBack = new Map<string, number>();
   /** Messages taken per author, a few a second (`MessagePace`). In memory only. */
   private messagePace = new Map<string, MessagePace>();
   /** The entry seed sealed to each member, for the seed it seals (`entryFrame`): every sync answer carries it. In memory only. */
@@ -2607,8 +2614,9 @@ export class CommunitySession {
     // would be dropped below whether the signature holds or not.
     if (this.isDuplicate(raw)) { this.handedInAnswer(from, raw, now); return false; }
     // Signed by its author before anything else, so a frame no member wrote takes no member's place among those waiting
-    // (`park`).
-    if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
+    // (`park`). By the host's async check where it gives one (a page's WebCrypto): inside `serialize`, nothing else of
+    // this session runs meanwhile.
+    if (!(await verifyAsync(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s)))) return false;
     // Someone removed is heard no more, even for an epoch it was in (whose secret it still holds); one who left, for
     // what it wrote before its leave only (and for the epochs it was in: the roster check below).
     if (!this.heardAfterOut(raw)) return false;
@@ -2904,9 +2912,59 @@ export class CommunitySession {
     for (const request of this.state.pendingLeaves) if (rosterHas(this.roster, request.s)) answer.push({ t: "group-leave", v: 2, g: this.id, ...request });
     // Or here, those after every message.
     answer.push(...metas.map(m => m.frame));
-    // And where I am, so they can hand me what I lack (asked once in a while, not in a loop).
-    ask();
+    // And where I am, so they can hand me what I lack (asked once in a while, not in a loop), when their sync says
+    // they hold something I lack; when they are behind (handed frames here), as they may hold more above a gap their
+    // sync stops below; and every `ASK_BACK_MS` anyway, as no sync names the pending leaves they hold. A hub answered
+    // each member's 30 s sync with its own, ~5 KB at 48 members, and the member's answer to it was the seed again.
+    const now = this.hooks.clock?.() ?? Date.now();
+    if (!this.holdsNothingNew(frame) || answer.some(f => f.t === "group-msg") || now - (this.askedBack.get(from) ?? -Infinity) >= ASK_BACK_MS) {
+      // Bounded: an entry older than `ASK_BACK_MS` says what no entry does.
+      if (this.askedBack.size >= this.roster.length) for (const [key, at] of this.askedBack) if (now - at >= ASK_BACK_MS) this.askedBack.delete(key);
+      this.askedBack.set(from, now);
+      ask();
+    }
     this.answers.handOut(from, answer);
+  }
+
+  /**
+   * Whether a member's sync says it holds nothing I lack: my tip, my group's picture and name, no secret I lack, no
+   * frame past what I have of each sender; and nothing missing here (a gap in a sender's frames, a secret, an entry seed).
+   */
+  private holdsNothingNew(frame: CommunitySyncFrame): boolean {
+    if (frame.h !== this.topHash || frame.mt !== groupMetaTag(this.state.meta) || this.needsCatchUp) return false;
+    if (this.state.entry.key && !this.state.entry.seedB64) return false;
+    // What I can never hold is not lacked: a commit I know and do not read (from before I was let in).
+    const out = this.outEpoch(this.myKey);
+    const unread = (hash: string) => !this.readsAt(hash, this.myKey, out);
+    const mine = new Set(Object.keys(this.state.secrets).map(shortHash));
+    const window = new Map(this.state.chain.slice(-COMMUNITY_LIMITS.window - 1).map(c => { const h = this.hashOf(c); return [shortHash(h), h]; }));
+    if (Array.isArray(frame.secrets) && frame.secrets.some(x => typeof x !== "string" || (!mine.has(x) && !(window.has(x) && unread(window.get(x)!))))) return false;
+    const lasting = new Map(Object.values(this.state.lasting ?? {}).map(f => [`${f.s} ${seenKey(f.e, f.h)}`, f.n]));
+    const have = frame.have && typeof frame.have === "object" ? frame.have as Record<string, Record<string, unknown>> : {};
+    const unreadKeys = new Map<string, boolean>();
+    const unreadKey = (key: string): boolean => {
+      let is = unreadKeys.get(key);
+      if (is === undefined) {
+        const [e, h16] = key.split(":"), found = h16 ? this.commitByShort(Number(e), h16) : undefined;
+        unreadKeys.set(key, is = !!found && unread(found.hash));
+      }
+      return is;
+    };
+    for (const [sender, byKey] of Object.entries(have)) {
+      if (!byKey || typeof byKey !== "object") return false;
+      for (const [key, high] of Object.entries(byKey)) {
+        const held = Math.max(this.state.seen[sender]?.[key]?.high ?? -1, lasting.get(`${sender} ${key}`) ?? -1);
+        if (typeof high !== "number" || (high > held && !unreadKey(key))) return false;
+      }
+    }
+    // A gap in what I have of a sender under a commit my store still holds frames of (`haveOf` would ask for it).
+    const recent = new Set(this.state.store.map(f => seenKey(f.e, f.h)));
+    for (const byKey of Object.values(this.state.seen)) for (const [key, entry] of Object.entries(byKey)) {
+      if (!recent.has(key)) continue;
+      const got = new Set(entry.window);
+      for (let n = Math.max(0, entry.high - COMMUNITY_LIMITS.replay + 1, (entry.floor ?? -1) + 1); n < entry.high; n++) if (!got.has(n)) return false;
+    }
+    return true;
   }
 
   /** The commits of a branch I do not follow, from where it leaves mine, and the secrets I hold of those `to` was in, onto `answer`. */
