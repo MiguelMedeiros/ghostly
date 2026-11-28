@@ -216,6 +216,20 @@ describe("a chat as the contact drives it", () => {
     expect(node.getState().links.find((link) => link.id === b.id)!.liveAttempt).toEqual(attempt);
   });
 
+  it("a wait for the chosen transport that changed names its chat, and builds no other chat's view", async () => {
+    const a = row(), b = row();
+    const { node, linkOf } = await started(a, b);
+    const unnamed = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const named = vi.spyOn(node as never as { chatChanged(linkId: string): void }, "chatChanged");
+    // Iroh chosen with no fallback, the contact not reached on it: each attempt that fails says so, at every dial.
+    const wait = { transport: "iroh/1" as const, reason: "unreachable" as const, failures: 3, retryAt: Date.now() + 20_000 };
+    (linkOf(b.id) as never as { transportWait: unknown }).transportWait = wait;
+    linkOf(b.id).options.events.onTransportWait!(wait);
+    expect(unnamed).not.toHaveBeenCalled();
+    expect(new Set(named.mock.calls.map(([id]) => id))).toEqual(new Set([b.id]));
+    expect(node.getState().links.find((link) => link.id === b.id)!.transportWait).toEqual(wait);
+  });
+
   it("a waiting invite's pairing progress and a failed read of the contact name their chat, and build no other chat's view", async () => {
     const a = row(), b = row({ inviteCode: "invite" });
     const { node, linkOf } = await started(a, b);

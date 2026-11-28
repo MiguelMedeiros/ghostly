@@ -9905,7 +9905,8 @@ export class GhostlyNode implements EngineImplementation {
           if (log?.switchFailed(target, reason ?? "It did not connect", Date.now())) this.saveTransportLog(live, log);
         },
         // Waiting for a chosen transport (WISP 100): the header, the panel and the menu say so; the history keeps attempts.
-        onTransportWait: () => { this.observeTransport(linkId); this.emitState(); },
+        // Each failed attempt says it again (its count, its next retry): its chat's view alone is built again.
+        onTransportWait: () => { this.observeTransport(linkId); this.chatChanged(linkId); },
         // Why the chat is not live: what the last attempt tried (WISP 100), never a silent retry loop. A contact that looks
         // online but is not reached ends one every 20 s to 3 min: its chat's view alone is built again (an edge: its group's).
         onLiveAttempt: () => this.chatChanged(linkId),
