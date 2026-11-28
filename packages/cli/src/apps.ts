@@ -76,6 +76,8 @@ const openToOthers = (mode: number): boolean => process.platform !== "win32" && 
  */
 const PUBLIC_KEY = /^(?:(?:ssh|ecdsa-sha2|sk-ssh|sk-ecdsa-sha2)-[\w@.-]+ AAAA|-----BEGIN (?:RSA )?PUBLIC KEY-----|---- BEGIN SSH2 PUBLIC KEY ----)/m;
 const OPENSSH_KEY = /^-----BEGIN OPENSSH PRIVATE KEY-----/m;
+/** Any private key block, read or not (an encrypted PKCS #8, a PKCS #1 RSA or an EC key too): a file with one is no public key. */
+const ANY_PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/;
 
 /** Reads a key file: the PEM block, an Ed25519 key, and the kind its first line names (when it names one). */
 function readKey(path: string, kind: KeyKind): LoadedKey {
@@ -83,10 +85,11 @@ function readKey(path: string, kind: KeyKind): LoadedKey {
   const text = readFileSync(path, "utf8");
   const block = PEM.exec(text);
   const openSsh = OPENSSH_KEY.test(text);
-  // Before, an id_ed25519.pub was refused as a key others may read, and after the chmod as holding no private key.
-  // While others may read it, still the `refused` the mode check answered.
-  if (!block && !openSsh && PUBLIC_KEY.test(text)) {
-    throw new CliError(openToOthers(mode) ? "refused" : "bad_request", `${path} is a public key, not a private one: --key names a ${kind} key file (an Ed25519 key in a PEM "PRIVATE KEY" block). Name a new path and ghostly makes one`);
+  // Before, an id_ed25519.pub was refused as a key others may read, and after the chmod as holding no private key:
+  // `bad_request` whatever its mode, the wrong file given, as any other file that holds no private key. A file with a
+  // private key block of any kind next to the public one is no public key: readable by others, it is still refused.
+  if (!ANY_PRIVATE_KEY.test(text) && PUBLIC_KEY.test(text)) {
+    throw new CliError("bad_request", `${path} is a public key, not a private one: --key names a ${kind} key file (an Ed25519 key in a PEM "PRIVATE KEY" block). Name a new path and ghostly makes one`);
   }
   if (openToOthers(mode)) {
     throw new CliError("refused", `${path} may be read by others (mode ${(mode & 0o777).toString(8)}): run chmod 600 ${path}, and think whether the key was seen`);
