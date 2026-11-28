@@ -73,7 +73,7 @@ function ports(store: ReturnType<typeof memory>, network: TurnNetwork | null, cr
   const out = {
     refreshed: 0,
     read: () => store.read(),
-    amend: (patch: DevicePatch) => store.amend("ghostly", patch),
+    amend: (patch: DevicePatch | ((current: DeviceRecord) => DevicePatch | null)) => store.amend("ghostly", typeof patch === "function" ? (patch(store.record) ?? {}) : patch),
     signer: signers[0], network,
     refresh: async () => { out.refreshed++; },
     crash: (point: SetMoveStep) => { if (point === crashAt) throw new Error(`crash at ${point}`); },
@@ -578,6 +578,43 @@ describe("New device secret", () => {
     expect(pendingFrames(desktop.record).some((p) => p.key === slot(1).key)).toBe(false);
   });
 
+  it("an ack stored while the next move signs its plan is kept", async () => {
+    const { record } = await setOf(network);
+    const desktop = memory(record(0, "active"));
+    await moveSet(ports(desktop, network), { remove: slot(2).key });
+    const first = record(0, "active").d!;
+    // The phone's set-ack for the first move lands after the second move read the record, before its write.
+    const base = ports(desktop, network);
+    let acked = false;
+    await moveSet({
+      ...base,
+      amend: async (patch) => {
+        if (!acked) { acked = true; await desktop.amend("ghostly", acknowledged(desktop.record, slot(1).key, first)!); }
+        return base.amend(patch);
+      },
+    });
+    expect(desktop.record.earlierSets.find((set) => set.d === first)!.pending).toEqual([]);
+    expect(pendingFrames(desktop.record).filter((p) => p.key === slot(1).key).map((p) => p.d)).not.toContain(first);
+  });
+
+  it("a move whose plan was signed while another move was stored, or the turn was taken, writes nothing and is refused", async () => {
+    const { record } = await setOf(network);
+    const desktop = memory(record(0, "active"));
+    const base = ports(desktop, network);
+    // Another move lands between this move's read and its write: it stays, with its own earlier set.
+    let raced = false;
+    const stale = moveSet({ ...base, amend: async (patch) => { if (!raced) { raced = true; await moveSet(base); } return base.amend(patch); } }, { remove: slot(2).key });
+    await expect(stale).rejects.toThrow(/remove-state/);
+    const newer = desktop.record.d;
+    expect(newer).not.toBe(record(0, "active").d);
+    expect(desktop.record.deviceSet.some((s) => s?.key === slot(2).key)).toBe(true);
+    expect(desktop.record.earlierSets.map((set) => set.d)).toEqual([record(0, "active").d]);
+    // The turn is taken elsewhere (superseded) between the read and the write: the secret does not move.
+    let taken = false;
+    await expect(moveSet({ ...base, amend: async (patch) => { if (!taken) { taken = true; await desktop.move("ghostly", "superseded", {}); } return base.amend(patch); } })).rejects.toThrow(/remove-state/);
+    expect(desktop.record).toMatchObject({ state: "superseded", d: newer });
+  });
+
   it("a device off across two moves by two devices, the profile handed over between them, takes the first and is added again", async () => {
     const { record } = await setOf(network, 4);
     const desktop = memory(record(0, "active")), phone = memory(record(1, "standby")), laptop = memory(record(3, "standby"));
@@ -641,6 +678,48 @@ describe("the tombstones' hourly put", () => {
     expect(network.held(oldKeys)).toEqual(other);
     // Marked, it is skipped from then on.
     expect(await putTombstones(network, report.record, signers[0].publicKey)).toEqual([]);
+  });
+
+  it("a run that read the record before a newer move marks the foreign set without dropping that move's set", async () => {
+    const { record } = await setOf(network);
+    const desktop = memory(record(0, "active"));
+    await moveSet(ports(desktop, network), { remove: slot(2).key });
+    const other = await signTombstone(oldKeys, 1, [null, { key: signers[1].publicKey, name: "Phone" }, null, null], sign(1));
+    network.of(oldKeys.identity.pubKeyZ32).seed(other);
+    // The hourly run reads the record, then its read at the old address is held while a new device secret is stored.
+    let release!: () => void, reached!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; }), atGate = new Promise<void>((resolve) => { reached = resolve; });
+    let held = false;
+    const slow: TurnNetwork = {
+      turnRead: async (z32) => {
+        if (z32 === oldKeys.identity.pubKeyZ32 && !held) { held = true; reached(); await gate; }
+        return network.turnRead(z32);
+      },
+      turnPut: (z32, payload, conditions) => network.turnPut(z32, payload, conditions),
+    };
+    const hourly = resumeSetMove(ports(desktop, slow), desktop.record);
+    await atGate;
+    await moveSet(ports(desktop, network));
+    const newer = desktop.record.earlierSets.at(-1)!;
+    release();
+    await hourly;
+    expect(desktop.record.earlierSets).toHaveLength(2);
+    expect(desktop.record.earlierSets[0].foreign).toBe(true);
+    expect(newer.foreign).toBeUndefined();
+    expect(desktop.record.earlierSets[1]).toEqual(newer);
+    expect(pendingFrames(desktop.record).map((p) => p.key)).toContain(slot(1).key);
+  });
+
+  it("a foreign tombstone at one old address marks only that set, through the moves after it", async () => {
+    const { record } = await setOf(network);
+    const desktop = memory(record(0, "active"));
+    await moveSet(ports(desktop, network), { remove: slot(2).key });
+    network.of(oldKeys.identity.pubKeyZ32).seed(await signTombstone(oldKeys, 1, [null, { key: signers[1].publicKey, name: "Phone" }, null, null], sign(1)));
+    await moveSet(ports(desktop, network));
+    await moveSet(ports(desktop, network));
+    await resumeSetMove(ports(desktop, network));
+    expect(desktop.record.earlierSets.map((set) => !!set.foreign)).toEqual([true, false, false]);
+    for (const set of desktop.record.earlierSets.slice(1)) expect(toBase64Url(network.held(turnKeys(fromBase64Url(set.d)))!)).toBe(set.tombstone);
   });
 
   it("puts nothing when no source answers, and the move stays stored for the next start", async () => {
