@@ -10,6 +10,7 @@ import type { GroupCallModeration, GroupCallModerationResult, GroupCallRoomState
 import { axeViolations } from "../axe";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { FakeTrack } from "../../../../../packages/react/test/fakes";
 
 // covers: calls.group
 
@@ -38,9 +39,11 @@ function person(identity: string, name: string): GroupCallParticipant {
 const call: GroupCallState = { local: person("me".padEnd(52, "m"), "Me"), participants: [person(ANA, "Ana"), person(BO, "Bo")], activeSpeaker: null };
 const names: Record<string, string> = { [ANA]: "Ana", [BO]: "Bo" };
 
-function adminView({ inGroup = () => true }: { inGroup?: (identity: string) => boolean } = {}) {
+function adminView({ inGroup = () => true, shown = call }: { inGroup?: (identity: string) => boolean; shown?: GroupCallState } = {}) {
   const handlers = { onToggleMic: vi.fn(), onToggleCamera: vi.fn(), onToggleScreen: vi.fn(), onLeave: vi.fn() };
-  return renderApp(<GroupCallView call={call} groupName="Club" {...handlers} nameOf={(id) => names[id] ?? id} moderator={{ groupId: "group-1", inGroup }} />);
+  const draw = (next: GroupCallState) => <GroupCallView call={next} groupName="Club" {...handlers} nameOf={(id) => names[id] ?? id} moderator={{ groupId: "group-1", inGroup }} />;
+  const result = renderApp(draw(shown));
+  return { ...result, rerenderWith: (next: GroupCallState) => result.rerender(draw(next)) };
 }
 const tileOf = (identity: string) => screen.getAllByTestId("group-call-tile").find((tile) => tile.dataset.identity === identity)!;
 const menuButton = (identity: string) => within(tileOf(identity)).getByTestId("group-call-moderate");
@@ -141,6 +144,20 @@ describe("the admin's menu on a member's tile", () => {
     // happy-dom lays nothing out: e2e/web/group-call-targets-phone.spec.ts measures the ⓘ.
     expect(row.contains(chip)).toBe(true);
     expect(row).toHaveClass("max-md:gap-3");
+  });
+
+  // Over a shared screen in the theme's grey it was 2.3:1 on black in the light theme, as the ⓘ beside it was.
+  it("draws the \"Removed\" chip over a shared screen in white, and in the theme's colours over the faces alone", async () => {
+    answerModerate(({ act }) => ({ ok: true, state: act === "state" ? { muted: {}, banned: [BO] } : EMPTY }));
+    const sharing: GroupCallState = { ...call, participants: [{ ...person(ANA, "Ana"), screen: true, tracks: { screen: new FakeTrack("video") as unknown as MediaStreamTrack } }] };
+    const { rerenderWith } = adminView({ shown: sharing });
+    const chip = await screen.findByTestId("group-call-removed");
+    // On its own black chip: white with no backing was 1.0:1 over a white shared screen.
+    expect(chip).toHaveClass("bg-black/70", "text-white", "hover:bg-black/80");
+    expect(chip).not.toHaveClass("text-text-secondary");
+    rerenderWith(call);
+    expect(screen.getByTestId("group-call-removed")).toHaveClass("text-text-secondary", "hover:bg-surface-hover");
+    expect(screen.getByTestId("group-call-removed")).not.toHaveClass("bg-black/70");
   });
 
   it("asks before removing from the group, saying behind the ⓘ that the group gets a new key, and uses the group's remove", async () => {

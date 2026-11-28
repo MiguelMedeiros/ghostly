@@ -119,7 +119,8 @@ export function CallOverlay({
   notices,
 }: CallOverlayProps) {
   const { t } = useI18n();
-  // A shared screen has to be seen whole; a face can be cropped to fill the window.
+  // A shared screen has to be seen whole; a face can be cropped to fill the window. A screen is one whatever its size:
+  // a window or a busy link's 960 × 540 was cropped to its middle, 26% of it on a phone held upright.
   const [remoteIsWide, setRemoteIsWide] = useState(false);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -315,7 +316,7 @@ export function CallOverlay({
         muted
         data-testid="remote-video"
         onResize={(e) => setRemoteIsWide(e.currentTarget.videoWidth >= 1000)}
-        className={`absolute inset-0 w-full h-full bg-black ${remoteIsWide ? "object-contain" : "object-cover"} ${showRemoteVideo ? "" : "hidden"}`}
+        className={`absolute inset-0 w-full h-full bg-black ${remoteIsWide || remoteIsScreenSharing ? "object-contain" : "object-cover"} ${showRemoteVideo ? "" : "hidden"}`}
       />
       
       {/* Placeholder when no remote video */}
