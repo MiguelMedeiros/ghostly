@@ -25,6 +25,8 @@
   "endsCurrent": "Répondre met fin à votre appel en cours",
   "group": {
     "byAdminInfo": "L'admin du groupe a coupé ceci pour vous dans cet appel. Vous pourrez le réactiver quand il le permettra.",
+    "elsewhere": "Vous êtes dans cet appel sur un autre appareil",
+    "elsewhereInfo": "Ce profil a rejoint l'appel depuis un autre appareil ou une autre fenêtre, donc celui-ci l'a quitté. Réessayez pour reprendre l'appel ici.",
     "endAndJoin": "Raccrocher et rejoindre",
     "endOtherBody": "Rejoindre l'appel du groupe met fin à votre appel en cours.",
     "endOtherTitle": "Mettre fin à votre appel ?",

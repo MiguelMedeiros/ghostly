@@ -66,6 +66,11 @@ export interface GroupCall extends GroupCallState {
   error: GroupCallError | null;
   /** The status is "left" because the group's admin took you out of the room (WISP 602 § Moderation), not by your own Leave. */
   removedByAdmin: boolean;
+  /**
+   * The status is "left" because a participant with your key came into the room from elsewhere: the same profile on
+   * another device (one that took over while this one had not read it yet) or another window. LiveKit keeps one per key.
+   */
+  joinedElsewhere: boolean;
   /** Your microphone's capture, muted or not; null before it was first turned on. Never played: the device checks read it. */
   micTrack: MediaStreamTrack | null;
   toggleMic: () => Promise<void>;
@@ -146,6 +151,8 @@ const PROTO_SOURCE = { mic: 2, camera: 1, screen: 3 } as const;
 
 /** LiveKit's `DisconnectReason.PARTICIPANT_REMOVED`: the node took this device out of the room (`RemoveParticipant`). */
 const PARTICIPANT_REMOVED = 4;
+/** LiveKit's `DisconnectReason.DUPLICATE_IDENTITY`: another participant joined the room under this device's identity. */
+const DUPLICATE_IDENTITY = 2;
 
 /**
  * What the group's admin took away from someone in this call (WISP 602 § Moderation): a source left out of their
@@ -349,6 +356,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
   const [status, setStatus] = useState<GroupCallStatus>("idle");
   const [error, setError] = useState<GroupCallError | null>(null);
   const [removedByAdmin, setRemovedByAdmin] = useState(false);
+  const [joinedElsewhere, setJoinedElsewhere] = useState(false);
   const session = useRef<Session | null>(null);
   // Read at the join: a new array for the same pass is not a new call.
   const ice = useRef(iceServers);
@@ -392,6 +400,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     setStatus("connecting");
     setError(null);
     setRemovedByAdmin(false);
+    setJoinedElsewhere(false);
 
     void (async () => {
       try {
@@ -475,6 +484,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
           void endSession(s);
           if (!live) return;
           setRemovedByAdmin(reason === PARTICIPANT_REMOVED);
+          setJoinedElsewhere(reason === DUPLICATE_IDENTITY);
           setStatus("left");
         });
         const connectOptions = { ...(rtcConfig && { rtcConfig }), ...(encryption && { autoSubscribe: false }) };
@@ -659,5 +669,5 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     setStatus("left");
   }, []);
 
-  return { ...state, status, error, removedByAdmin, toggleMic, toggleCamera, toggleScreen, switchMicrophone, switchCamera, leave };
+  return { ...state, status, error, removedByAdmin, joinedElsewhere, toggleMic, toggleCamera, toggleScreen, switchMicrophone, switchCamera, leave };
 }
