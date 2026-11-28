@@ -7,7 +7,7 @@ import { taggedM4a, taggedMp3 } from "../../core/test/support/audioFixtures";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { copyForForward, forwardError, forwardKind } from "../src/engine/forwards";
-import { fileBytes } from "../src/shared/fileBytes";
+import { fileBytes, registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { fileStore } from "../src/shared/idb";
 import { FileAppender, removeStored } from "../src/shared/storedFiles";
 import type { StoredMessage } from "../src/shared/types";
@@ -196,6 +196,64 @@ describe("a sent file", () => {
     const target = { linkId: "link-b", wireId: "w2", timestamp: 2, file: { id: `link-b-out-${crypto.randomUUID()}`, name: "a.bin", size, mime: "application/octet-stream" } };
     await expect(copyForForward(id, target, async () => false)).rejects.toThrow("The file is not on this device any more");
     expect(await fileStore.get(target.file.id)).toBeUndefined();
+  });
+
+  // A 0-byte file in file storage (CLI, Desktop, OPFS) enters the streaming copy loop zero times: without an empty
+  // append, no file is created in storage (its digest read fails, or its record points to missing bytes).
+  it("forwarding a 0-byte file stored in file bytes creates its empty copy in storage", async () => {
+    const files = new Map<string, Uint8Array>();
+    const disk: FileBytes = {
+      kind: "native",
+      stage: async () => { throw new Error("unused"); },
+      append: async (id, offset, chunk) => {
+        const have = files.get(id) ?? new Uint8Array(0);
+        if (offset !== have.length) throw new Error("File write out of order");
+        const next = new Uint8Array(have.length + chunk.length);
+        next.set(have); next.set(chunk, have.length);
+        files.set(id, next);
+      },
+      flush: async () => {},
+      close: async () => {},
+      size: async (id) => files.get(id)?.length ?? null,
+      truncate: async (id, n) => { files.set(id, (files.get(id) ?? new Uint8Array(0)).slice(0, n)); },
+      read: async (id, offset, length) => {
+        const found = files.get(id);
+        if (!found) throw new Error("No such file");
+        return found.slice(offset, offset + length);
+      },
+      digest: async (id) => {
+        const found = files.get(id);
+        if (!found) throw new Error("No such file");
+        return createHash("sha256").update(found).digest("base64url");
+      },
+      blob: async (id, type) => {
+        const found = files.get(id);
+        return found ? new Blob([found as BlobPart], { type }) : null;
+      },
+      remove: async (id) => { files.delete(id); },
+      removeWhere: async () => {},
+      room: async () => null,
+    };
+    registerFileBytes("native", async () => disk, true);
+    cleanup.push(async () => { resetFileBytes(); });
+
+    const withDigest = `link-a-out-${crypto.randomUUID()}`;
+    await disk.append(withDigest, 0, new Uint8Array(0));
+    await fileStore.put({ id: withDigest, linkId: "link-a", direction: "out", wireId: "w0a", createdAt: 1,
+      metadata: { name: "empty.txt", size: 0, mime: "text/plain", timestamp: 1 }, bytes: "native", digest: digestOf(0) });
+    const targetA = { linkId: "link-b", wireId: "w0b", timestamp: 2, file: { id: `link-b-out-${crypto.randomUUID()}`, name: "empty.txt", size: 0, mime: "text/plain" } };
+    await copyForForward(withDigest, targetA);
+    expect(await disk.size(targetA.file.id)).toBe(0);
+    expect((await disk.blob(targetA.file.id, "text/plain"))?.size).toBe(0);
+
+    const noDigest = `link-a-in-${crypto.randomUUID()}`;
+    await disk.append(noDigest, 0, new Uint8Array(0));
+    await fileStore.put({ id: noDigest, linkId: "link-a", direction: "in", wireId: "w0c", createdAt: 1,
+      metadata: { name: "empty2.txt", size: 0, mime: "text/plain", timestamp: 1 }, bytes: "native" });
+    const targetB = { linkId: "link-b", wireId: "w0d", timestamp: 3, file: { id: `link-b-out-${crypto.randomUUID()}`, name: "empty2.txt", size: 0, mime: "text/plain" } };
+    await copyForForward(noDigest, targetB);
+    expect(await disk.size(targetB.file.id)).toBe(0);
+    expect(await fileStore.get(targetB.file.id)).toMatchObject({ bytes: "native", digest: digestOf(0) });
   });
 });
 
