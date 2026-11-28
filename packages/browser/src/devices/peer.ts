@@ -11,6 +11,9 @@ import { DeviceLinks } from "./links";
 import { standbyNetwork } from "./network";
 import { readDeviceRecord } from "./store";
 import { activeAgainIfReleasing, standbyHandoff, undoStagingOf } from "./handoffStandby";
+import { installWebEd25519 } from "../platform/webEd25519";
+
+let webEd25519: Promise<boolean> | undefined;
 
 /**
  * What device-link-only mode runs for a device that is not the active one (WISP 06 § The gate): its device links,
@@ -75,6 +78,9 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
  * (`standbyEngine`). `gate` and `standby` are for tests.
  */
 export async function createPeerServer(options: NodeOptions | undefined, overrides: { gate?: DeviceGate; standby?: DeviceLinkEngine; turn?: TurnNetwork | null } = {}): Promise<PeerServer> {
+  // Every signature a community frame brings is checked by the page's WebCrypto where it can (~7x noble's speed in
+  // Chromium), once per page; the CLI gives node:crypto's instead.
+  webEd25519 ??= installWebEd25519();
   const gate = overrides.gate ?? await openDeviceGate();
   // The active device of a device set reads the turn as a condition of starting (WISP 06 § When a device checks). The read
   // is for publishing, dialling and the single-writer wallets, not for reading the profile's own chats: the engine

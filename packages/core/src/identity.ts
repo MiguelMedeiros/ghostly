@@ -109,9 +109,9 @@ export function sign(message: Uint8Array, seed: Uint8Array): Uint8Array {
 /**
  * A faster Ed25519 check a host may give (the CLI gives node:crypto's): RFC 8032's verification without the cofactor,
  * which compares the signature's R with the encoding of the [S]B - [k]A it computes, as OpenSSL's does. It is asked only
- * when the key is the canonical encoding of a point not of small order and S is below the group order
- * (`ed25519FastPathTakes`), and only its yes counts: R is then the canonical encoding of that point, so the strict check
- * says yes too. Its no, or a throw, leaves the answer to the strict check, so what verifies is exactly what verifies
+ * when the key is the canonical encoding of a point not of small order, R is written canonically and S is below the group
+ * order (`ed25519FastPathTakes`), and only its yes counts: R is then the canonical encoding of that point, so the strict
+ * check says yes too. Its no, or a throw, leaves the answer to the strict check, so what verifies is exactly what verifies
  * without it.
  */
 export type VerifyFastPath = (signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array) => boolean;
@@ -126,11 +126,50 @@ export function setVerifyFastPath(check: VerifyFastPath | null): void {
   verifyFastPath = check;
 }
 
+/**
+ * A faster check a host may give that answers later: WebCrypto's Ed25519 (`crypto.subtle.verify`), which a page has
+ * native but async. Asked by `verifyAsync` only, under the same gate as `VerifyFastPath` (`ed25519FastPathTakes`), and
+ * only its yes counts. A browser's check may be cofactored or not, and may compare R as a point rather than as bytes:
+ * either way, for a canonical R, a canonical key not of small order and S below L, its yes is a yes of the strict check.
+ */
+export type AsyncVerifyFastPath = (signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array) => Promise<boolean>;
+
+let asyncVerifyFastPath: AsyncVerifyFastPath | null = null;
+
+/**
+ * Gives (or, with `null`, takes back) the async check `verifyAsync` asks first: a page's engine runs on its thread, and
+ * noble's check there is ~0.7 ms in Chromium (a community catch-up of 256 frames, ~180 ms), WebCrypto's ~0.1 ms.
+ */
+export function setAsyncVerifyFastPath(check: AsyncVerifyFastPath | null): void {
+  asyncVerifyFastPath = check;
+}
+
 /** The group order L, little-endian: an S at or above it is refused by the strict check. */
 const GROUP_ORDER = Uint8Array.from([
   0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
 ]);
+/** The field's prime p = 2^255 - 19, little-endian. */
+const FIELD_PRIME = Uint8Array.from([0xed, ...new Array<number>(30).fill(0xff), 0x7f]);
+
+/**
+ * Whether the signature's R is written as the strict check takes it: y below p, and no sign bit on a point whose x is 0
+ * (y = 1 or y = p - 1). A check that compares R as a point, not as bytes, would take the other writings too.
+ */
+function canonicalR(signature: Uint8Array): boolean {
+  for (let i = 31; i >= 0; i--) {
+    const byte = i === 31 ? signature[31] & 0x7f : signature[i];
+    if (byte === FIELD_PRIME[i]) continue;
+    if (byte > FIELD_PRIME[i]) return false;
+    if (!(signature[31] & 0x80)) return true;
+    // Below p with the sign bit set: refused only where x is 0, y = 1 or y = p - 1.
+    const first = signature[0], top = signature[31] & 0x7f;
+    let middle0 = true, middleFf = true;
+    for (let j = 1; j < 31; j++) { middle0 &&= signature[j] === 0; middleFf &&= signature[j] === 0xff; }
+    return !((first === 1 && middle0 && top === 0) || (first === 0xec && middleFf && top === 0x7f));
+  }
+  return false;
+}
 /** The most keys `keysFit` holds: a community's 256 members, with room for the chats' and records' keys. */
 const KEYS_FIT_MAX = 1024;
 /** Whether each key seen lately is a canonical encoding of a point not of small order: the same signers come back. */
@@ -146,7 +185,7 @@ export function ed25519FastPathTakes(signature: Uint8Array, publicKey: Uint8Arra
   for (let i = 31; i >= 0; i--) {
     if (signature[32 + i] !== GROUP_ORDER[i]) { below = signature[32 + i] < GROUP_ORDER[i]; break; }
   }
-  if (!below) return false;
+  if (!below || !canonicalR(signature)) return false;
   const id = toBase64Url(publicKey);
   let fit = keysFit.get(id);
   if (fit === undefined) {
@@ -170,4 +209,15 @@ export function verify(signature: Uint8Array, message: Uint8Array, publicKey: Ui
   } catch {
     return false;
   }
+}
+
+/**
+ * `verify`, asking the host's async check first (`setAsyncVerifyFastPath`): for a path that awaits anyway, such as a
+ * community frame inside its session's queue. Its no, or a throw, leaves the answer to `verify`.
+ */
+export async function verifyAsync(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): Promise<boolean> {
+  const check = asyncVerifyFastPath;  if (check && ed25519FastPathTakes(signature, publicKey)) {
+    try { if (await check(signature, message, publicKey)) return true; } catch { /* the strict check answers */ }
+  }
+  return verify(signature, message, publicKey);
 }
