@@ -5,6 +5,7 @@
   "letBackIn": "Laisser revenir {{name}}",
   "menu": "Modérer {{name}}",
   "muteMic": "Couper le micro",
+  "notMember": "Seuls les membres du groupe peuvent être modérés",
   "rateLimited": "Trop de changements à la fois. Réessayez dans une minute.",
   "refused": "Le serveur de l'appel n'a pas accepté",
   "remove": "Retirer",

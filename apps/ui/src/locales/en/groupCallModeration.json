@@ -5,6 +5,7 @@
   "letBackIn": "Let {{name}} back in",
   "menu": "Moderate {{name}}",
   "muteMic": "Mute mic",
+  "notMember": "Only members of the group can be moderated",
   "rateLimited": "Too many changes at once. Try again in a minute.",
   "refused": "The call's node didn't accept this",
   "remove": "Remove",
