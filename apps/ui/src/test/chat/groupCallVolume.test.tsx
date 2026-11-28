@@ -93,6 +93,15 @@ describe("each person's volume in a group call", () => {
     expect(within(tileOf("me".padEnd(52, "m"))).queryByTestId("group-call-volume")).toBeNull();
   });
 
+  it("says the level on hover with the language's own colon", () => {
+    for (const [language, title] of [["fr", "Volume de ⁨Ana⁩ : 100 %"], ["ja", "⁨Ana⁩の音量：100%"]] as const) {
+      const { unmount } = renderApp(<GroupCallView call={call()} groupName="Club" onToggleMic={vi.fn()} onToggleCamera={vi.fn()} onToggleScreen={vi.fn()} onLeave={vi.fn()} />, { language });
+      expect(volumeButton(ANA).title.replace(/\s/g, " ")).toBe(title);
+      unmount();
+    }
+    localStorage.removeItem("ghostly_app_settings");
+  });
+
   it("turns one person down for you alone, and at 0 mutes them for you", async () => {
     const { user } = view();
     await user.click(volumeButton(ANA));
