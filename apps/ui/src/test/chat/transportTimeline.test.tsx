@@ -260,6 +260,19 @@ describe("a chat's timeline as its list changes", () => {
     after.slice(0, 990).forEach((row, k) => { if (row !== before[k]) expect.fail(`row ${k} is a new object`); });
   });
 
+  it("gives a new row for an old message changed in its place (a reaction on it) alone, the history after it not read", () => {
+    const merge = timelineMerger<Row>();
+    const { reads, rows } = counted(Array.from({ length: 1_000 }, (_, i) => ({ id: `m${i}`, timestamp: i * 10 })));
+    const before = merge(rows, lines, shares);
+    const list = rows.map((m, i) => (i === 100 ? { ...m } : m));
+    reads.n = 0;
+    const after = merge(list, lines, shares);
+    expect(reads.n).toBeLessThan(10);
+    expect(after).toEqual(mergeTimeline(list, lines, shares));
+    const changed = after.filter((row, k) => row !== before[k]);
+    expect(changed).toEqual([{ kind: "message", message: list[100] }]);
+  });
+
   it("gives what mergeTimeline gives, whatever happens to the list, its lines and its shares", () => {
     // A small generator with a fixed seed: the same lists on every run.
     let seed = 7;
@@ -269,10 +282,13 @@ describe("a chat's timeline as its list changes", () => {
     const steps: (() => void)[] = [
       // A message comes, now or a while back (a clock off).
       () => { list = [...list, { id: `m${next}`, timestamp: next++ * 10 - pick(30) }]; },
+      () => { list = [...list, { id: `m${next}`, timestamp: next++ * 10 }]; },
       // The newest rows handed out anew.
       () => { list = [...list.slice(0, -3), ...list.slice(-3).map(m => ({ ...m }))]; },
       // A row deleted.
       () => { list = list.filter((_, i) => i !== pick(list.length || 1)); },
+      // An old row changed in its place, with its time or with another (its place kept).
+      () => { const k = pick(list.length || 1), later = pick(3) ? 0 : pick(5); list = list.map((m, i) => (i === k ? { ...m, timestamp: m.timestamp + later } : m)); },
       // A transport line, a flapping one with its start, or an identity share.
       () => { log = [...log, line({ id: `l${next}`, at: next++ * 10 - pick(50) })]; },
       () => { log = [...log, line({ id: `f${next}`, kind: "flapping", since: next * 10 - 40, at: next++ * 10 })]; },

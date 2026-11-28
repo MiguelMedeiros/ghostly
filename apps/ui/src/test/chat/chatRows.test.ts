@@ -38,6 +38,11 @@ function changes() {
     l => { const last = [...l].reverse().find(m => m.nick); return last ? l.filter(m => m !== last) : l; },
     // An old row changed in place in the list: a new object.
     l => (l.length ? l.map((m, i) => (i === pick(l.length) ? { ...m, text: "edited" } : m)) : l),
+    // One that names the contact now, or no longer does, in its place.
+    l => (l.length ? l.map((m, i) => (i === pick(l.length) ? { ...m, nick: `late${next++}` } : m)) : l),
+    l => { const last = [...l].reverse().find(m => m.nick); return last ? l.map(m => (m === last ? { ...m, nick: undefined } : m)) : l; },
+    // Two rows far apart changed in their places.
+    l => (l.length > 2 ? l.map((m, i) => (i === 0 || i === l.length - 2 ? { ...m } : m)) : l),
     // Older history coming in above.
     l => [row(next++), ...l],
     // Another chat.
@@ -57,6 +62,21 @@ describe("rowPicker", () => {
     reads.n = 0;
     const picked = pick([...rows, row(1_000)]);
     expect(picked[picked.length - 1]).toBe("peer_1000");
+    expect(reads.n).toBe(0);
+  });
+
+  it("reads only an old row that changed in its place or went, not the history after it", () => {
+    const pick = picker();
+    const { reads, rows } = counted(Array.from({ length: 1_000 }, (_, i) => row(i)));
+    const first = pick(rows);
+    // A reaction on a message near the top: its id is picked again, the same.
+    const reacted = rows.map((m, i) => (i === 100 ? { ...m, text: "reacted" } : m));
+    reads.n = 0;
+    expect(pick(reacted)).toBe(first);
+    expect(reads.n).toBeLessThan(10);
+    reads.n = 0;
+    const deleted = reacted.filter((_, i) => i !== 100);
+    expect(pick(deleted)).toEqual(first.filter(id => id !== "peer_100"));
     expect(reads.n).toBe(0);
   });
 
@@ -99,6 +119,15 @@ describe("the contact's name in a chat's rows", () => {
     const first = readContactNick(rows);
     reads.n = 0;
     expect(readContactNick([...rows, row(2_000)], first).nick).toBe("Ann");
+    expect(reads.n).toBeLessThan(10);
+  });
+
+  it("reads only an old row that changed in its place, not the history after it", () => {
+    const { reads, rows } = counted([row(0, { nick: "Ann" }), ...Array.from({ length: 1_000 }, (_, i) => row(i + 1))]);
+    const first = readContactNick(rows);
+    const reacted = rows.map((m, i) => (i === 100 ? { ...m, text: "reacted" } : m));
+    reads.n = 0;
+    expect(readContactNick(reacted, first).nick).toBe("Ann");
     expect(reads.n).toBeLessThan(10);
   });
 

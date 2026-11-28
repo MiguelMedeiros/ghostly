@@ -645,6 +645,16 @@ describe("routines in a row in the chat", () => {
     expect(read(list)).toBe(stacks);
   });
 
+  it("are not read again for an old text changed in its place (a reaction on it)", () => {
+    const reads = { n: 0 };
+    const read = routineStacksReader<ReturnType<typeof msg>, ReturnType<typeof msg>>(m => { reads.n++; return m; });
+    const rows = Array.from({ length: 1_000 }, (_, i) => i % 10 < 4 ? msg(`m${i}`, r(`${i}`)) : msg(`m${i}`, undefined));
+    const first = read(rows);
+    reads.n = 0;
+    expect(read(rows.map((m, i) => (i === 105 ? { ...m } : m)))).toBe(first);
+    expect(reads.n).toBeLessThan(5);
+  });
+
   it("read as a chat's list changes, are what routineStacks finds, whatever happens to the list", () => {
     // A small generator with a fixed seed: the same lists on every run.
     let seed = 5;
@@ -660,6 +670,9 @@ describe("routines in a row in the chat", () => {
       // The newest rows handed out anew, or one deleted.
       () => { list = [...list.slice(0, -3), ...list.slice(-3).map(m => ({ ...m }))]; },
       () => { list = list.filter((_, i) => i !== pick(list.length || 1)); },
+      // An old row changed in its place, or turned into a routine or a text there.
+      () => { const k = pick(list.length || 1); list = list.map((m, i) => (i === k ? { ...m } : m)); },
+      () => { const k = pick(list.length || 1); list = list.map((m, i) => (i === k ? msg(m.id, pick(2) ? r(`${next++}`) : undefined, pick(2) ? "z" : "o") : m)); },
     ];
     for (let k = 0; k < 800; k++) {
       steps[pick(steps.length)]();
