@@ -173,6 +173,21 @@ describe("markdown links written end to end, with no space", () => {
   });
 });
 
+describe("markdown links with two kinds of narrow space and a run of marks in their text", () => {
+  // Each label is read at each width of space it holds: a mark run must not cost more than a run of letters.
+  const unit = `[a${"\u2003\u200a".repeat(49)}${"\u0332".repeat(100)}](http://a)`;
+  // The message limit is in UTF-8 bytes, and each of these characters takes two or three.
+  const count = Math.floor(SIZE / new TextEncoder().encode(unit).length);
+  const text = unit.repeat(count);
+
+  it("are read in linear time", () => {
+    parseMessage(unit); // warm the regexes up, so the bound measures the reading, not their first compile
+    const [block] = quickly(() => parseMessage(text));
+    const atoms = block.type === "paragraph" ? block.segments.filter((segment) => segment.type === "atom") : [];
+    expect(atoms).toHaveLength(count);
+  });
+});
+
 describe("a sending time no date holds", () => {
   it.each([Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER, Number.NaN, Infinity])("leaves a clock time as text when sent at %s", sentAt => {
     const segments = tokenizeInline("see you at 14:00 UTC", DETECTORS, { sentAt });
