@@ -17,6 +17,12 @@ import { androidApp } from "./touchOnly";
 export interface CallNotice {
   name: string;
   video: boolean;
+  /**
+   * Whether the microphone has been on in this call. A start before that may be refused (Android 14 and up start a
+   * microphone service only with its permission granted, asked as the call first opens the microphone): it is told
+   * again once it has been on.
+   */
+  heard?: boolean;
 }
 
 /**
@@ -40,13 +46,24 @@ export function useCallService(call: CallNotice | null, hangUp: () => void, lock
   const on = call !== null && androidApp();
   const name = locked ? "" : call?.name ?? "";
   const video = call?.video ?? false;
+  const heard = call?.heard ?? false;
   const hangUpRef = useRef(hangUp);
   hangUpRef.current = hangUp;
+  /** Whether the last start went through: one refused is tried again once the microphone has been on. */
+  const held = useRef(false);
+  const tell = useRef<() => void>(() => {});
+  tell.current = () => {
+    void invoke<boolean>("call_service", { call: { name, video } }).catch(() => false).then((ok) => { held.current = ok === true; });
+  };
 
   useEffect(() => {
     if (!on) return;
-    void invoke<boolean>("call_service", { call: { name, video } }).catch(() => false);
+    tell.current();
   }, [on, name, video]);
+
+  useEffect(() => {
+    if (on && heard && !held.current) tell.current();
+  }, [on, heard]);
 
   useEffect(() => {
     if (!on) return;
@@ -55,6 +72,7 @@ export function useCallService(call: CallNotice | null, hangUp: () => void, lock
     const stop = listen("call-hang-up", () => hangUpRef.current());
     return () => {
       live = false;
+      held.current = false;
       void stop.then((unlisten) => unlisten()).catch(() => {});
       void invoke<boolean>("call_service", { call: null }).catch(() => false);
     };

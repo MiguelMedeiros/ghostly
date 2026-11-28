@@ -1,9 +1,12 @@
-import { createServer, type AddressInfo, type Socket } from "node:net";
-import { expect, it } from "vitest";
-import { createIdentity } from "@ghostly/core";
-import { fetchGroupCallToken, sendGroupCallModeration } from "@ghostly/browser/engine/groupCall";
+import { createPrivateKey } from "node:crypto";
+import { createServer as createHttpsServer } from "node:https";
+import { createServer, type AddressInfo, type LookupFunction, type Socket } from "node:net";
+import { expect, it, vi } from "vitest";
+import { createIdentity, toBase64Url } from "@ghostly/core";
+import { fetchGroupCallOccupancy, fetchGroupCallToken, sendGroupCallModeration } from "@ghostly/browser/engine/groupCall";
 import { nodeGroupCallFetch } from "../src/runtime/groupCallFetch";
 import { publicOnly } from "../src/runtime/pushSend";
+import { pem, testCertificate } from "../../core/test/support/x509";
 
 // covers: groups.protocol.call-token
 
@@ -41,6 +44,42 @@ it("asks a group's call node only at a public address, or at a name whose every 
     expect(local.seen.connections).toBe(0);
   } finally { await local.close(); }
 });
+
+it("a node's answer a Response cannot carry (205 with a body, a status of 600, a 101) is said at once, not thrown out of the request", async () => {
+  const leaf = testCertificate({ subject: "call.example", dns: ["call.example"] });
+  const key = createPrivateKey({ key: { kty: "EC", crv: "P-256", d: toBase64Url(leaf.secret), x: toBase64Url(leaf.publicKey.slice(1, 33)), y: toBase64Url(leaf.publicKey.slice(33)) }, format: "jwk" });
+  let status = 205;
+  const node = createHttpsServer({ cert: pem(leaf), key: key.export({ type: "pkcs8", format: "pem" }) }, (request, response) => {
+    request.resume();
+    // A 101 is written by hand: Node's own response would not send one to a request that asked for no upgrade.
+    if (status === 101) request.socket.write("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: x\r\n\r\n");
+    else response.writeHead(status).end('{"count":1}');
+  });
+  await new Promise<void>(resolve => node.listen(0, "127.0.0.1", resolve));
+  // The test's own certificate, at a name this lookup alone knows.
+  vi.stubEnv("NODE_TLS_REJECT_UNAUTHORIZED", "0");
+  const thrown: unknown[] = [];
+  const caught = (error: unknown) => { thrown.push(error); };
+  process.on("uncaughtException", caught);
+  try {
+    const fetch = nodeGroupCallFetch(((_host: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) =>
+      options.all ? callback(null, [{ address: "127.0.0.1", family: 4 }]) : callback(null, "127.0.0.1", 4)) as unknown as LookupFunction);
+    const me = createIdentity(), sfu = `https://call.example:${(node.address() as AddressInfo).port}`, g = "oKGio6SlpqeoqaqrrK2urw";
+    const started = Date.now();
+    await expect(fetchGroupCallOccupancy({ sfu, g, seed: me.seed, fetch })).resolves.toEqual({ ok: false, code: "bad_reply" });
+    status = 600;
+    await expect(fetchGroupCallOccupancy({ sfu, g, seed: me.seed, fetch })).resolves.toEqual({ ok: false, code: "no_answer" });
+    status = 101;
+    await expect(fetchGroupCallOccupancy({ sfu, g, seed: me.seed, fetch })).resolves.toEqual({ ok: false, code: "no_answer" });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(thrown).toEqual([]);
+  } finally {
+    process.off("uncaughtException", caught);
+    vi.unstubAllEnvs();
+    node.closeAllConnections();
+    await new Promise(resolve => node.close(resolve));
+  }
+}, 30_000);
 
 it("sends only a POST over HTTPS", async () => {
   const post = nodeGroupCallFetch(answers({}));

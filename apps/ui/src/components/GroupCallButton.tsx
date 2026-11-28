@@ -205,13 +205,15 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
     return () => setCallOn(key, null);
   }, [on, key, leave]);
 
-  // The Android app keeps the call going out of sight, as a 1:1 call (lib/callService.ts): from the microphone first
-  // on (Android 14 and up start a microphone service only with its permission granted) to the call's end, muted or
-  // not, since from the background Android would refuse to start it again. No group's name while the app lock is on.
+  // The Android app keeps the call going out of sight, as a 1:1 call (lib/callService.ts): from the join to the call's
+  // end, muted or not, since from the background Android would refuse to start it again. Joined muted (past
+  // GROUP_CALL_MUTED_ABOVE people) it held none until the first unmute, and nothing kept the call going out of sight. A start refused
+  // before the microphone was allowed (Android 14 and up) is told again once it has been on. No group's name while the
+  // app lock is on.
   const { settings } = useSettings();
   const [heard, setHeard] = useState(false);
   useEffect(() => { if (!on) setHeard(false); else if (call.local.mic) setHeard(true); }, [on, call.local.mic]);
-  useCallService(on && heard ? { name: group.name || t("group.chat.unnamed"), video: call.local.camera } : null, leave,
+  useCallService(on ? { name: group.name || t("group.chat.unnamed"), video: call.local.camera, heard } : null, leave,
     settings.lockScreen.enabled && !!settings.lockScreen.passwordHash);
 
   // While locked, the lock screen shows this call as the group's header names it, its time, and Mute and Leave call
@@ -229,7 +231,8 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
   } : null);
 
   // The room closed (the node dropped you) or would not take you: the window goes, and a failed join says why. Taken
-  // out by the admin, the pass held is dropped (the node bans the key) and Join call says why.
+  // out by the admin, the pass held is dropped (the node bans the key) and Join call says why; pushed out by this
+  // profile joining from elsewhere, it says that.
   useEffect(() => {
     if (call.status === "failed") setProblem(groupCallSealProblem(call.error?.message, t, call.error?.cause) ?? groupCallProblem(call.error?.cause ?? call.error?.message, t));
     if (call.status === "left" && call.removedByAdmin) {
@@ -237,6 +240,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
       setRemoved(true);
       setProblem(removedProblem);
     }
+    if (call.status === "left" && call.joinedElsewhere) setProblem({ tone: "error", title: t("calls.group.elsewhere"), info: t("calls.group.elsewhereInfo") });
     if (call.status === "failed" || call.status === "left") setJoined(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only the status moving there ends it
   }, [call.status]);

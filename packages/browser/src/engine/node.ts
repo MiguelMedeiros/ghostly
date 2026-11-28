@@ -51,13 +51,13 @@ import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, parseEngineError, sanitizeDisplayText, traceLink, cutToUtf8Bytes } from "@ghostly/core";
+import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, parseEngineError, sanitizeDisplayText, traceLink, cutToUtf8Bytes, sanitizeNick } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch, firstDeviceSetSecret } from "@ghostly/core";
 import { GROUP_CALL_MODERATION_ACTS, GROUP_CALL_SOURCES, isZ32Key, type GroupCallModerationAct, type GroupCallSource } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WAKE_ONLINE_BATCH, WAKE_ONLINE_BATCH_MS, WAKE_ONLINE_DELAY_MS, WAKE_ONLINE_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
-import { CapsExchange, DHT_FILE_CAPABILITY, DHT_FILE_TOO_LARGE, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, dhtFileId, type DhtFileAnnouncement, type DhtPacketFacts, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
+import { CAPS_LIMITS, CapsExchange, DHT_FILE_CAPABILITY, DHT_FILE_TOO_LARGE, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, dhtFileId, type DhtFileAnnouncement, type DhtPacketFacts, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
 import { fileMessageText, parseLinkPreview, pairedMessageFrame, pairedMessageFits, pairedEditFits, PAIRED_FRAME_TOO_LARGE, MESSAGE_PACED, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   presenceSeenAt,
@@ -1205,7 +1205,9 @@ export class GhostlyNode implements EngineImplementation {
   private readonly briefViews = new Map<string, FileTransferView>();
   /** files/3 in every chat: offers, resumable transfers, checked by digest (WISP 501 rev 0.3). */
   private readonly fileDesk = new FileDesk({
-    send: (linkId, frame) => this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
+    // A blocked contact's chat answers nothing of its files, as if this app were closed (`onFilesFrame`): taken as said.
+    send: (linkId, frame): boolean => this.blockedChat(this.links.get(linkId)?.stored) && this.fileDesk.receiverFrame(frame) ? true
+      : this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
     sendData: (linkId, id, offset, data) => this.links.get(linkId)?.link?.sendFileData(id, offset, data) ?? false,
     writable: (linkId) => this.links.get(linkId)?.link?.filesWritable(),
     receivedBytes: (linkId) => this.links.get(linkId)?.files.receivedBytes ?? 0,
@@ -9903,7 +9905,8 @@ export class GhostlyNode implements EngineImplementation {
           if (log?.switchFailed(target, reason ?? "It did not connect", Date.now())) this.saveTransportLog(live, log);
         },
         // Waiting for a chosen transport (WISP 100): the header, the panel and the menu say so; the history keeps attempts.
-        onTransportWait: () => { this.observeTransport(linkId); this.emitState(); },
+        // Each failed attempt says it again (its count, its next retry): its chat's view alone is built again.
+        onTransportWait: () => { this.observeTransport(linkId); this.chatChanged(linkId); },
         // Why the chat is not live: what the last attempt tried (WISP 100), never a silent retry loop. A contact that looks
         // online but is not reached ends one every 20 s to 3 min: its chat's view alone is built again (an edge: its group's).
         onLiveAttempt: () => this.chatChanged(linkId),
@@ -10203,7 +10206,7 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     const methods = live?.stored.paymentMethods ?? {};
     const cashu = methods.cashu !== false, lightning = methods.lightning !== false;
-    const name = cutToUtf8Bytes(this.sharedNick ?? "", 64);
+    const name = cutToUtf8Bytes(this.sharedNick ?? "", CAPS_LIMITS.nameBytes);
     return {
       versions: [1],
       transports: this.runnableTransports(live),
@@ -10269,7 +10272,12 @@ export class GhostlyNode implements EngineImplementation {
     live.link?.learnPeerTransports(record.transports.filter((t): t is PairedTransport => (TRANSPORTS as readonly string[]).includes(t)), dialDescriptors(record.descriptors), true);
     live.link?.learnPeerChoice(record.choice, true);
     if (live.link?.isDataLinkOpen) return;
-    if (record.name !== (live.stored.peerNick ?? "")) {
+    // The record carries 64 bytes of a name (`capsContent`; by code points before 1.14) and a session the whole of it:
+    // the record's cut of the name a session gave is that name, not a new one. The reader cleans (trims) the cut it read.
+    const known = live.stored.peerNick ?? "", bytes = (s: string) => new TextEncoder().encode(s).length, asRead = (s: string) => sanitizeNick(s) ?? "";
+    const byCodePoints = () => { const cps = [...known]; while (bytes(cps.join("")) > CAPS_LIMITS.nameBytes) cps.pop(); return cps.join(""); };
+    const cutOfKnown = bytes(known) > CAPS_LIMITS.nameBytes && (record.name === asRead(cutToUtf8Bytes(known, CAPS_LIMITS.nameBytes)) || record.name === asRead(byCodePoints()));
+    if (record.name !== known && !cutOfKnown) {
       live.stored = { ...live.stored, peerNick: record.name };
       void db.patchLink(linkId, { peerNick: record.name });
     }

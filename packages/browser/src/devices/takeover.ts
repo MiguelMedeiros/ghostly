@@ -85,7 +85,7 @@ const staged = (record: DeviceRecord): boolean => record.handoff?.role === "taki
 
 /** A name as it is seen and typed: nobody types a joiner, a variation selector or a filler, which draw nothing. */
 const typedName = (name: string) => name.normalize("NFC").replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim().toLocaleLowerCase();
-const sameName = (a: string, b: string) => typedName(a) === typedName(b);
+export const sameName = (a: string, b: string) => typedName(a) === typedName(b);
 
 /** One try at a time on this device, whoever asks: tries sent at once would all be checked against the same count. */
 let tries: Promise<unknown> = Promise.resolve();

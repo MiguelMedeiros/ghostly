@@ -25,6 +25,8 @@
   "endsCurrent": "Contestar finaliza tu llamada actual",
   "group": {
     "byAdminInfo": "El admin del grupo te lo desactivó en esta llamada. Puedes activarlo de nuevo cuando lo permita.",
+    "elsewhere": "Estás en esta llamada en otro dispositivo",
+    "elsewhereInfo": "Este perfil entró en la llamada desde otro dispositivo o ventana, así que este salió. Reintenta para traer la llamada aquí.",
     "endAndJoin": "Terminar y unirse",
     "endOtherBody": "Unirte a la llamada del grupo termina la llamada en la que estás.",
     "endOtherTitle": "¿Terminar tu llamada?",
