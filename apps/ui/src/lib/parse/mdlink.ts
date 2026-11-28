@@ -77,6 +77,17 @@ function readDots(text: string): string {
  */
 const SPACE_BY_DOT = /[\u2000-\u200a\u202f\u205f]+(?=\.)|(?<=\.)[\u2000-\u200a\u202f\u205f]+/gu;
 
+/** A run of letters and their marks: a word, read on its own. */
+const WORD = /[\p{L}\p{M}]+/gu;
+/**
+ * A Vietnamese syllable in the low tone, decomposed (NFD) and in lower case: its dot below is a tone mark on its vowel
+ * ("Bệnh", "Mạng", "Lịch"), not a dot. Initial consonant, up to two vowels, the toned vowel (horn, dot below, then
+ * circumflex or breve: NFD's order), then one ending: "ch" and "nh" only after a, ê, i or y, "ng" never after i or y,
+ * as the language writes them. A syllable carries one tone, so no other tone mark (grave, acute, hook, tilde) fits.
+ */
+const VIETNAMESE_LOW_TONE =
+  /^(?:ngh|ng|nh|ch|gh|gi|kh|ph|qu|th|tr|[bcdđghklmnprstvx])?(?:(?:a[\u0302\u0306]?|e\u0302?|o[\u0302\u031b]?|u\u031b?|i|y)){0,2}(?:(?:a\u0323|e\u0323\u0302|i\u0323|y\u0323)(?:ch|nh)|(?:a\u0323[\u0302\u0306]?|e\u0323\u0302?|o\u031b?\u0323\u0302?|u\u031b?\u0323)ng|(?:a\u0323[\u0302\u0306]?|e\u0323\u0302?|o\u031b?\u0323\u0302?|u\u031b?\u0323|i\u0323|y\u0323)[cmnptaeiouy]?)$/;
+
 /**
  * A whole emoji: a keycap ("1️⃣"), a flag drawn from tags (🏴 and its tag letters), or pictographs joined by zero-width
  * joiners, each with its variation selector or skin tone ("❤️", "👩🏽‍💻"). Their invisible parts are drawn as part of
@@ -95,7 +106,8 @@ const EMOJI =
  */
 export function labelMisleads(label: string, url: string): boolean {
   // A letter with a dot below ("ḷ") is drawn as the letter and U+0323, which reads as a dot: split it into both.
-  label = label.normalize("NFD");
+  // A Vietnamese word keeps its letters whole ("Lịch" is a word, not "li.ch").
+  label = label.normalize("NFD").replace(WORD, (word) => (VIETNAMESE_LOW_TONE.test(word.toLowerCase()) ? word.normalize("NFC") : word));
   const target = hostOf(url);
   if (!target) return true;
   if (new RegExp(INVISIBLE.source, "u").test(label.replace(EMOJI, ""))) return true;
