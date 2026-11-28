@@ -576,8 +576,9 @@ const NOTICE_TEXT = { lost: "calls.devices.lost", gone: "calls.devices.gone", fa
  * The call's device menu: which microphone, camera and speaker, switched without leaving the call. Over a video filling
  * the window (`overVideo`) the call is drawn over it, and so is its menu: at the menus' usual height it opened under both.
  * It hangs in the whole window (`host`), which a screen reader reads alone; on the page's body it was out of its reach.
+ * `overPicture`: its button sits on a shared screen, so on a black backing (white at 10% vanished over a bright one).
  */
-export function DeviceMenu({ devices, overVideo, host }: { devices: CallDevices; overVideo: boolean; host: RefObject<HTMLElement | null> | null }) {
+export function DeviceMenu({ devices, overVideo, overPicture = false, host }: { devices: CallDevices; overVideo: boolean; overPicture?: boolean; host: RefObject<HTMLElement | null> | null }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
@@ -592,7 +593,7 @@ export function DeviceMenu({ devices, overVideo, host }: { devices: CallDevices;
         aria-expanded={open}
         aria-haspopup="true"
         title={label}
-        className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${open ? "bg-white/25 text-white" : "bg-white/10 text-white hover:bg-white/20"}`}
+        className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${overPicture ? (open ? "bg-black/80 text-white" : "bg-black/70 text-white hover:bg-black/80") : open ? "bg-white/25 text-white" : "bg-white/10 text-white hover:bg-white/20"}`}
       >
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" />
