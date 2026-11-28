@@ -89,14 +89,17 @@ export function verifyRequest(sfuOrigin, body) {
 
 const ACTS = ["mute", "allow", "remove", "unban", "state"];
 const SOURCES = ["camera", "microphone", "screen_share"];
+/** The fields WISP 602 § Moderation lists, sorted: there is no `name`, and any other field is refused. */
+const MODERATION_FIELDS = ["act", "g", "k", "n", "room", "sig", "src", "target", "ts", "v"].join();
 
 /** The bytes an admin's key signs for a moderation request: another tag than a token request's, so one is never the other. */
 export const moderateBytes = (sfuOrigin, { g, room, k, act, target, src, ts, n }) =>
   Buffer.from(JSON.stringify(["ghostly-sfu/1 moderate", sfuOrigin, g, room, k, act, target, src, ts, n]));
 
-/** Whether `body` is a moderation request of the right shape whose `sig` verifies under `k` for `sfuOrigin`. */
+/** Whether `body` is a moderation request of the right shape (exactly the WISP's fields) whose `sig` verifies under `k` for `sfuOrigin`. */
 export function verifyModeration(sfuOrigin, body) {
-  const { v, g, k, room, act, target, src, ts, n, sig } = body ?? {};
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).sort().join() !== MODERATION_FIELDS) return false;
+  const { v, g, k, room, act, target, src, ts, n, sig } = body;
   const sources = (act === "mute" || act === "allow")
     ? Array.isArray(src) && src.length > 0 && src.every((s, i) => SOURCES.includes(s) && (i === 0 || src[i - 1] < s))
     : Array.isArray(src) && src.length === 0;
