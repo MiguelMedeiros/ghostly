@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
+import { tabbables, useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { safeAreaInsets } from "../hooks/useFloatingBox";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { MenuPoint } from "../lib/contextMenu";
@@ -216,10 +216,13 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
     const rows = usable(ref.current);
     // Hung on the page's body, a portal's popover comes last in the Tab order: Tab past its last row went to the top of
     // the page, behind whatever layer it opened from (a whole-window call), the menu still open. It takes the place a
-    // menu beside its button has: Tab goes on from the button, Shift+Tab goes back to it, and the menu closes.
-    if (portal && !phone && (e.key === "Tab" || e.code === "Tab") && rows.length) {
+    // menu beside its button has: Tab goes on from the button, Shift+Tab goes back to it, and the menu closes. Its own
+    // stops, not only its rows: a group call's volume menu is a slider alone, and Shift+Tab from it went to Leave call.
+    const tab = portal && !phone && (e.key === "Tab" || e.code === "Tab");
+    const stops = tab && ref.current ? tabbables(ref.current) : [];
+    if (tab && stops.length) {
       const opener = openedFrom.current;
-      const leaving = e.shiftKey ? document.activeElement === rows[0] : document.activeElement === rows[rows.length - 1];
+      const leaving = e.shiftKey ? document.activeElement === stops[0] : document.activeElement === stops[stops.length - 1];
       if (!leaving || !(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected) return;
       opener.focus({ preventScroll: true });
       if (e.shiftKey) e.preventDefault();
