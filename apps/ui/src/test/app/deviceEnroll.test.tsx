@@ -72,6 +72,13 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     await waitFor(() => expect(JSON.parse(localStorage.getItem("ghostly_app_settings")!).lockScreen).toMatchObject({ enabled: true }));
   });
 
+  it("the dialog's body breaks a word longer than its line, so a one-word device name wraps inside it", () => {
+    // At 200 % text on a 320 px phone "WWWWWWWWWWWWWWWW added. It is on standby." and Lost or stolen's "Remove
+    // WWWWWWWWWWWWWWWW" ran past the dialog's edge, cut, and the dialog scrolled sideways (e2e: devices-dialog-long-name-phone).
+    renderApp(<AddDeviceDialog onClose={() => {}} />);
+    expect(screen.getByTestId("device-add-password-ask").parentElement).toHaveClass("[overflow-wrap:anywhere]");
+  });
+
   it("a restored profile's code names it without the word for restored, so the new device's profile is not marked restored", async () => {
     localStorage.setItem("ghostly_profiles", JSON.stringify({ version: 1, active: "abcdefghij", profiles: [{ id: "", name: "Personal", createdAt: 0 }, { id: "abcdefghij", name: "Work", createdAt: 1, restored: true }] }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
