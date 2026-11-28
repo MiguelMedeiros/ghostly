@@ -633,7 +633,9 @@ export class GroupFileDesk {
     if (kept.held) return;
     const out = this.deps.out?.(kept.groupId);
     if (out) throw new Error(out);
-    if (!await this.hasRoom(kept.meta.size, kept.id)) throw new Error(NO_ROOM);
+    // What it still needs (what came of it before is stored already, unless it starts fresh), as `decide` checks it.
+    const need = kept.fresh ? kept.meta.size : Math.max(0, kept.meta.size - (kept.stored ?? 0));
+    if (!await this.hasRoom(need, kept.id)) throw new Error(NO_ROOM);
     if (!kept.asked || kept.paused) {
       kept.asked = true; kept.paused = false;
       await this.deps.store.patch(kept.id, { group: this.groupField(kept) }).catch(() => {});
