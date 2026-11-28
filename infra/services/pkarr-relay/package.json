@@ -1,0 +1,17 @@
+{
+  "name": "ghostly-pkarr-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A self-hostable Pkarr relay proxy with Batch GET/PUT and WebSocket/SSE push subscriptions.",
+  "main": "relay.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "ws": "8.23.0"
+  }
+}

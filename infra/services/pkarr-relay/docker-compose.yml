@@ -1,0 +1,26 @@
+# Self-hostable Pkarr relay proxy with Batch GET/PUT and WebSocket/SSE push subscriptions.
+# See README.md for all environment variables, wire formats, and limits.
+#   docker compose up -d --build
+# Behind a reverse proxy (nginx, Caddy), set GHOSTLY_RELAY_PROXIES=1.
+# Behind Cloudflare, set GHOSTLY_RELAY_CLOUDFLARE=1 (never with GHOSTLY_RELAY_PROXIES).
+# Point GHOSTLY_PKARR_UPSTREAMS at one or more upstream Pkarr relay URLs (comma-separated),
+# or leave empty to run in standalone local relay mode.
+name: ghostly-pkarr-relay
+services:
+  relay:
+    build: .
+    container_name: ghostly-pkarr-relay
+    restart: unless-stopped
+    environment:
+      GHOSTLY_PKARR_UPSTREAMS: ${GHOSTLY_PKARR_UPSTREAMS:-}
+      GHOSTLY_RELAY_CLOUDFLARE: ${GHOSTLY_RELAY_CLOUDFLARE:-0}
+      GHOSTLY_RELAY_PROXIES: ${GHOSTLY_RELAY_PROXIES:-0}
+      GHOSTLY_RELAY_ORIGINS: ${GHOSTLY_RELAY_ORIGINS:-}
+    ports: ["${PKARR_RELAY_BIND:-127.0.0.1:49490}:49490"]
+    cpus: 0.5
+    mem_limit: 512m
+    pids_limit: 128
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    logging: { driver: json-file, options: { max-size: "5m", max-file: "3" } }
