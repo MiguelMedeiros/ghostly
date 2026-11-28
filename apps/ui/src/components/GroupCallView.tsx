@@ -412,6 +412,14 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   const columns = gridColumns(faces.length + screenTiles.length);
 
   const roundButton = "w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer";
+  // A shared screen lies under the buttons (it fills the window, or the small one): there a button at rest is white on
+  // a black chip, as the name row's, and one turned off is white on the danger fill. White on a 10% white tint was
+  // 1.0:1 over a white screen, and the danger red on its own tint 2.0:1. A red icon on the black chip reads under 2:1
+  // there, so an off one takes Leave's solid fill, with a white ring inside to stay apart from it: in the small window
+  // the two are the same size.
+  const overPicture = !!presenter;
+  const atRest = overPicture ? "bg-black/70 text-white hover:bg-black/80" : "bg-white/10 text-white hover:bg-white/20";
+  const turnedOff = overPicture ? "bg-danger-fill text-white ring-2 ring-inset ring-white" : "bg-danger/30 text-danger";
   // What the admin took from you stays off, its button says so, and the ⓘ beside the controls says until when.
   const held = local.byAdmin;
   const anyHeld = !!held && (held.mic || held.camera || held.screen);
@@ -435,7 +443,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       {compact && <p dir="auto" className="call-compact-name min-w-0 truncate text-text-primary text-sm font-medium">{groupName}</p>}
       <button
         onClick={() => (pinned ? onReturnToChat?.() : setMini(!mini))}
-        className="call-resize absolute top-4 left-4 z-20 w-11 h-11 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center cursor-pointer transition-colors"
+        className={`call-resize absolute top-4 left-4 z-20 w-11 h-11 rounded-full ${atRest} flex items-center justify-center cursor-pointer transition-colors`}
         title={pinned ? t("calls.window.chat") : mini ? t("calls.window.full") : t("calls.window.small")}
         data-testid="group-call-minimize"
       >
@@ -522,7 +530,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       <div className="call-controls absolute bottom-12 max-md:bottom-[calc(2rem+env(safe-area-inset-bottom))] left-0 right-0 flex items-center justify-center gap-6 max-md:gap-8 z-10">
         <button onClick={held?.mic ? undefined : onToggleMic} {...(held?.mic && { "aria-disabled": true })} data-testid="group-call-mic"
           title={held?.mic ? t("calls.group.mutedByAdmin") : local.mic ? t("calls.mute") : t("calls.unmute")}
-          className={`call-compact-keep ${roundButton} ${heldLook} ${local.mic ? "bg-white/10 text-white hover:bg-white/20" : "bg-danger/30 text-danger"}`}>
+          className={`call-compact-keep ${roundButton} ${heldLook} ${local.mic ? atRest : turnedOff}`}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             {local.mic
               ? <><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" /></>
@@ -531,25 +539,26 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         </button>
         <button onClick={held?.camera ? undefined : onToggleCamera} {...(held?.camera && { "aria-disabled": true })} data-testid="group-call-camera"
           title={held?.camera ? t("calls.group.offByAdmin") : local.camera ? t("calls.turnCameraOff") : t("calls.turnCameraOn")}
-          className={`${roundButton} ${heldLook} ${local.camera ? "bg-white/10 text-white hover:bg-white/20" : "bg-danger/30 text-danger"}`}>
+          className={`${roundButton} ${heldLook} ${local.camera ? atRest : turnedOff}`}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             {local.camera
               ? <><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></>
               : <><line x1="1" y1="1" x2="23" y2="23" /><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34m-7.72-2.06a4 4 0 1 1-5.56-5.56" /></>}
           </svg>
         </button>
-        {devices && <DeviceMenu devices={devices} overVideo={false} host={mini ? null : box} />}
+        {devices && <DeviceMenu devices={devices} overVideo={false} overPicture={overPicture} host={mini ? null : box} />}
         {canShareScreen && (
           <button onClick={held?.screen ? undefined : onToggleScreen} {...(held?.screen && { "aria-disabled": true })} data-testid="group-call-screen"
             aria-label={screenLabel} title={screenLabel}
-            className={`${roundButton} ${heldLook} ${local.screen ? "bg-accent text-on-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]" : "bg-white/10 text-white hover:bg-white/20"}`}>
+            className={`${roundButton} ${heldLook} ${local.screen ? "bg-accent text-on-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]" : atRest}`}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="2" y="4" width="20" height="13" rx="2" />
               <path d="M8 21h8M12 17v4M12 13V8m0 0l-2.5 2.5M12 8l2.5 2.5" />
             </svg>
           </button>
         )}
-        {anyHeld && !mini && <InfoButton open={heldInfo} onToggle={() => setHeldInfo(!heldInfo)} controls={heldInfoId} testId="group-call-by-admin-info" className="text-white/80" />}
+        {anyHeld && !mini && <InfoButton open={heldInfo} onToggle={() => setHeldInfo(!heldInfo)} controls={heldInfoId} testId="group-call-by-admin-info"
+          className={overPicture ? "bg-black/70 text-white hover:bg-black/80 hover:text-white aria-expanded:text-white" : "text-white/80"} />}
         <button onClick={onLeave} data-testid="group-call-leave" title={t("calls.group.leave")}
           className="call-compact-keep w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
