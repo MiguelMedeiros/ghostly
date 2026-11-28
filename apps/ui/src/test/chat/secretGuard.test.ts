@@ -422,6 +422,19 @@ describe("what the guard asks about", () => {
     expect(findSecret(`${CASHU_B_21} ${cashuA([4], "usd")}`)).toEqual({ kind: "cashu", amount: null, unit: "sat" });
   });
 
+  // The question prints the unit after the amount: only letters, as the mints name theirs, are read as one.
+  it.each([["000 sats"], ["sat\u202e"], ["sat\nAlice"], ["satsatsatsats"], [""], [5]])("a token whose unit is %j is still found, its amount unread", (unit) => {
+    const token = "cashuA" + btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify({ token: [{ mint: "http://mint.test", proofs: [{ id: "009a1f293253e41e", amount: 21, secret: "s", C: "02" + "11".repeat(32) }] }], unit }))));
+    expect(findSecret(`for you ${token} thanks`)).toEqual({ kind: "cashu", amount: null, unit: "sat" });
+    expect(findSecret(`${CASHU_B_21} ${token}`)).toEqual({ kind: "cashu", amount: null, unit: "sat" });
+  });
+
+  it("a unit of letters is read as it is written", () => {
+    expect(findSecret(cashuA([21], "msat"))).toEqual({ kind: "cashu", amount: 21, unit: "msat" });
+    expect(findSecret(cashuA([21], "eur"))).toEqual({ kind: "cashu", amount: 21, unit: "eur" });
+    expect(findSecret(cashuA([21], "satsatsatsat"))).toEqual({ kind: "cashu", amount: 21, unit: "satsatsatsat" });
+  });
+
   it("a seed next to a token is asked about as the seed", () => {
     expect(findSecret(`${CASHU_B_21}\n${ABANDON}`)).toEqual({ kind: "mnemonic" });
   });
