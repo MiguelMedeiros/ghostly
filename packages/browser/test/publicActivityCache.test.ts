@@ -36,6 +36,12 @@ describe("posts", () => {
     const t = setup();
     expect(await t.cache.loadPosts({ provider: "pubky", subject: "bob" })).toBeNull();
     expect(await t.cache.loadPosts({ provider: "domain", subject: "alice" })).toBeNull();
+    // A provider named as something every object has is no reader either, eligible or not.
+    for (const provider of ["constructor", "__proto__", "toString"]) {
+      t.world.eligible.push({ provider, subject: "alice" });
+      expect(await t.cache.loadPosts({ provider, subject: "alice" }), provider).toBeNull();
+    }
+    t.world.eligible.length = 1;
     t.world.enabled = false;
     expect(await t.cache.loadPosts(ALICE)).toBeNull();
     expect(t.posts).not.toHaveBeenCalled();
