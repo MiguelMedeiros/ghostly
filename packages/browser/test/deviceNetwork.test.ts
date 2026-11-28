@@ -112,6 +112,13 @@ describe("a standby's network", () => {
     expect(defaults.irohRelays).toBeUndefined();
   });
 
+  it("drops an Iroh relay Settings would refuse (plain http, a login in it), as an enrollment's grant may name one", () => {
+    const network = { irohRelays: ["http://iroh.person.test", "https://user:secret@iroh.person.test", "https://iroh.person.test"] };
+    expect(standbyNetwork(network).irohRelays).toEqual(["https://iroh.person.test"]);
+    // None left: the app's defaults, as with none at all.
+    expect(standbyNetwork({ irohRelays: ["http://iroh.person.test"] }).irohRelays).toBeUndefined();
+  });
+
   it("homes the links' Iroh endpoints on the person's Iroh relays", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
     try {
