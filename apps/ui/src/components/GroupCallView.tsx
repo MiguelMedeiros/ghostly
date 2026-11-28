@@ -20,7 +20,7 @@ import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { DeviceMenu, DeviceNoticeBar } from "./CallOverlay";
 import { InfoButton } from "./layout/Section";
 import { useCallModeration, type GroupCallModerator } from "../hooks/useCallModeration";
-import { ModerationProblem, RemovedFromCall, TileModerationMenu } from "./GroupCallModerationMenu";
+import { ModerationProblem, RemovedFromCall, RemoveQuestion, TileModerationMenu, type RemoveAsk } from "./GroupCallModerationMenu";
 import { TileVolume } from "./GroupCallVolume";
 import { elementTakesVolume, gainPlays, setVolumeOf, volumeMaxOn, volumeOf } from "../lib/groupCallVolume";
 
@@ -361,6 +361,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   }, [mini, box]);
   // As in the 1:1 call: the device notice goes with the focus maybe on it, which goes to the Devices button it is about.
   useFocusKept(box, () => box.current?.querySelector<HTMLElement>("[data-testid=call-devices]") ?? null);
+  // The remove a tile's menu asks about, kept here: the question stays when that member's tile goes.
+  const [removing, setRemoving] = useState<RemoveAsk | null>(null);
 
   const { local, participants, activeSpeaker } = call;
   // Who comes and goes is said by the group's own name for them too, not the node's.
@@ -393,7 +395,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   const menuOf = (p: GroupCallParticipant) => mini || p === local ? undefined : (
     <>
       <TileVolume name={shown(p)} volume={volumeOf(p.identity)} max={volumeMaxOn(devices?.speaker)} onChange={(volume) => setVolume(p.identity, volume)} host={box} />
-      {moderation && <TileModerationMenu identity={p.identity} name={shown(p)} moderation={moderation} host={box} />}
+      {moderation && <TileModerationMenu identity={p.identity} name={shown(p)} moderation={moderation} host={box} onAsk={setRemoving} />}
     </>
   );
   const faces = everyone.map((p) => (
@@ -515,6 +517,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       )}
 
       {!mini && <ModerationProblem moderation={moderation} />}
+      {moderation && removing && <RemoveQuestion key={`${removing.from}-${removing.identity}`} ask={removing} moderation={moderation} host={box} onClose={() => setRemoving(null)} />}
 
       {/* A headset unplugged, the chosen microphone back: said over the controls, in the whole window (the small one has no room). */}
       {!mini && devices?.notice && <DeviceNoticeBar devices={devices} />}
