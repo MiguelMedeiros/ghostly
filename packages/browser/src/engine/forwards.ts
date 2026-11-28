@@ -178,6 +178,8 @@ async function copyFile(sourceId: string, target: ForwardTarget, digests?: Map<s
       await appender.append(part);
       offset += part.length;
     }
+    // A 0-byte file gets no append above: make its empty entry here so its digest and later saves find it.
+    if (size === 0) await bytes.append(file.id, 0, new Uint8Array());
     await appender.close();
     // The same bytes, so the same digest: read back only when the original never had one written down (or was stripped,
     // once per forward).
