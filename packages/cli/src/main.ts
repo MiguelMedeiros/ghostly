@@ -8,16 +8,17 @@ import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftG
 import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaemon, notTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
-import { here, inRange, INPUT_BYTES, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
+import { callRef } from "./commands/calls";
+import { fileHere, here, inRange,INPUT_BYTES, listAtMost, localStat, noteTerminalRead, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
-import { asCliError, CliError, type ErrorCode, EXIT, localFileError, secretFileError } from "./errors";
+import { asCliError, CliError, type ErrorCode, EXIT, localFileError, secretFileError, SINGLE_DEVICE } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { identityWaitLines } from "./identityWait";
 import { jsonOut } from "./jsonOut";
 import { ownProfile } from "./privateFolder";
 import { shellWord } from "./shellWord";
-import { dhtOnlyNotice, longTextChat, waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
+import { dhtOnlyChat, dhtOnlyNotice, waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, startAt } from "./listen";
 import { format } from "node:util";
@@ -272,6 +273,14 @@ const NO_HISTORY_WRITES: ReadonlySet<string> = new Set([
   "app.serve", "app.unserve", "call.answer", "call.flush", "wallet.address", "lightning.rename", "lightning.default", "wallet.remove",
 ]);
 
+/**
+ * Calls that name their thing by an id of no chat (a proof, a service, a payment, a call) and need the chats once it is
+ * found (a proof is withdrawn from each; a call may ring in any): a one-shot for one leaves every saved chat and group
+ * unstarted, looks the id up, and starts them only when it names something (api.ts `startOnceFound`). Each started every
+ * saved chat first, then said not_found for a typo: with 20 chats, 20 relay requests and 0.4-0.7 s more.
+ */
+const LOOKED_UP_FIRST: ReadonlySet<string> = new Set(["identity.remove", "service.enable", "service.remove", "payment.reclaim", "call.hangup"]);
+
 /** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`, `NO_HISTORY_WRITES`). */
 export function readsNoHistory(method: string, params: Record<string, unknown> = {}): boolean {
   if (method === "call.auto" || method === "group.auto") return params.on === undefined;
@@ -385,12 +394,15 @@ async function session(g: Globals, options: RuntimeOptions, again = true, first?
   const anew = again ? () => session(g, options, false) : undefined;
   const client = await connectDaemon(g.paths);
   if (client) return throughDaemon(client, anew);
-  const [, { callApi, refuseBeforeStart, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
+  const [, { callApi, refuseBeforeStart, startNamedChats, startOnceFound }] = await Promise.all([engineHost(), engineApi()]);
   if (first) await refuseBeforeStart(first.method, first.params);
-  const host = await openOneShot(g, options);
+  const lookup = first && LOOKED_UP_FIRST.has(first.method) ? first.method : undefined;
+  const host = await openOneShot(g, lookup ? { ...options, deferChats: true } : options);
   if (host instanceof DaemonClient) return throughDaemon(host, anew);
+  let looked = false;
   const call = async (m: string, p?: unknown) => {
-    if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, m, p as Record<string, unknown>, READS.has(m));
+    if (m === lookup && !looked && p && typeof p === "object") { await startOnceFound(host.ctx, m, p as Record<string, unknown>); looked = true; }
+    else if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, m, p as Record<string, unknown>, READS.has(m));
     return callApi(host.ctx, m, p ?? {});
   };
   return { mode: "one-shot", call, close: () => host.close(), abort: () => host.close() };
@@ -578,9 +590,9 @@ function interruptible(s: Session): { run<T>(work: (s: Session) => Promise<T>): 
     const given = (params ?? {}) as Record<string, unknown>;
     const entry = { method, notice: waitNotice(method, given, s.mode) };
     pending.add(entry);
-    // A long text's chat, read beside the send: on the DHT only, the notice and Ctrl-C say why it waits, not that it goes.
-    const chat = entry.notice && longTextChat(method, given);
-    if (chat) void s.call("chat.get", { chat }).then((view) => { if (entry.notice) entry.notice = dhtOnlyNotice(entry.notice, given, view as Record<string, unknown>, s.mode); }, () => {});
+    // A long text's chat, a pin's or a file's, read beside the call: on the DHT only, the notice and Ctrl-C say why it waits, not that it goes.
+    const chat = entry.notice && dhtOnlyChat(method, given);
+    if (chat) void s.call("chat.get", { chat }).then((view) => { if (entry.notice) entry.notice = dhtOnlyNotice(entry.notice, method, given, view as Record<string, unknown>, s.mode); }, () => {});
     const timer = entry.notice && process.stderr.isTTY ? setTimeout(() => process.stderr.write(`ghostly: ${entry.notice!.waiting}\n`), WAIT_NOTICE_MS) : undefined;
     return held(s.call(method, params).finally(() => { clearTimeout(timer); pending.delete(entry); }));
   };
@@ -616,6 +628,8 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
  * answered "The daemon went away".
  */
 async function readStdin(onData?: () => void): Promise<string> {
+  // A reader that refuses a terminal says so before it gets here; the others say how to end what is typed.
+  noteTerminalRead();
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of process.stdin) {
@@ -639,7 +653,9 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
   ["profile show", "The name contacts see, and whether it is shared"],
   ["profile set [--name <name>] [--share-profile | --no-share-profile] [--force]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
   ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out; any other space or line break at an end is refused"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
-  ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out"), use: o("boolean", "Make it the current profile") }],
+  ["profile restore <file> <new profile> [--passphrase-file f] [--use] [--copy]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out"), use: o("boolean", "Make it the current profile"), copy: o("boolean", "Restore it even when a profile here is the same person (both would act as one to contacts)") }],
+  // No device commands: `ghostly device …` says why (usage, exit 2), and the engine's device calls are refused alike.
+  ["device", SINGLE_DEVICE],
   ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds it waits for a command that holds the profile, and --detach for it to start (default 60)") }],
   ["daemon status [--timeout s]", "Whether a daemon runs the profile, its version, and its socket (for the socket API)", { timeout: o("number", "Seconds to wait for its answer (default 15)") }],
   ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
@@ -869,7 +885,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
   const specs: Record<string, Record<string, OptionSpec>> = {
     create: { use: { type: "boolean", description: "" }, name: { type: "string", description: "" }, force: { type: "boolean", description: "" } },
     backup: { out: { type: "string", description: "" }, "passphrase-file": { type: "string", description: "" }, passphrase: { type: "boolean", description: "" }, light: { type: "boolean", description: "" } },
-    restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" } },
+    restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" }, copy: { type: "boolean", description: "" } },
     set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "", eitherWay: true }, force: { type: "boolean", description: "" } },
   };
   let parsed: Parsed;
@@ -970,8 +986,8 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     }
     case "restore": {
       const [given, name] = parsed.positionals;
-      if (!given || !name) throw new CliError("usage", `Missing <${given ? "new profile" : "file"}>: ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]`);
-      noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use]");
+      if (!given || !name) throw new CliError("usage", `Missing <${given ? "new profile" : "file"}>: ghostly profile restore <file> <new profile> [--passphrase-file f] [--use] [--copy]`);
+      noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use] [--copy]");
       // A backup made without a passphrase says so in its header: none is asked for, and the answer says it was not protected.
       const file = here(given) as string;
       const { backupFileProtection, restoreProfile } = await import("./backup");
@@ -990,7 +1006,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
       for (const signal of signals) process.on(signal, onSignal);
       let paths: Awaited<ReturnType<typeof restoreProfile>>;
-      try { paths = await restoreProfile(g.home, checkProfileName(name), file, passphrase, stop.signal); } catch (error) {
+      try { paths = await restoreProfile(g.home, checkProfileName(name), file, passphrase, stop.signal, parsed.options.copy === true); } catch (error) {
         // Said only when the stop is what ended it: one that came after the profile took its name restored it all the same.
         if (error === stop.signal.reason) process.stderr.write(`ghostly: ${words}\n`);
         throw error;
@@ -1242,11 +1258,16 @@ async function startedDaemon(g: Globals, seconds: number): Promise<DaemonClient 
   }
 }
 
-/** `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all). */
+/**
+ * `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all), at most a day, as the
+ * socket calls' waits (`answerWithin`): past about 24.8 days a Node timer fires after 1 ms, and `daemon stop` sent a
+ * healthy daemon SIGTERM at once.
+ */
 function seconds(parsed: Parsed, fallback: number): number {
   const value = parsed.options.timeout;
   if (value === undefined) return fallback;
   if (typeof value !== "number" || !(value > 0)) throw new CliError("usage", "--timeout takes a number of seconds above 0");
+  if (value > 86_400) throw new CliError("usage", `--timeout takes at most 86400 seconds (a day), not ${value}`);
   return value;
 }
 
@@ -1459,7 +1480,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
   checkTypes(types, (line) => process.stderr.write(line + "\n"));
   const from = (parsed.options.from as string[] | undefined) ?? [], groups = (parsed.options.group as string[] | undefined) ?? [];
-  const cursor = here(parsed.options.cursor);
+  const cursor = fileHere(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
   const starting = startAt(sinceOf(parsed.options), cursor, (line) => process.stderr.write(line + "\n")), since = starting.from;
@@ -1643,6 +1664,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   if (!target || (spec.message && !message)) throw new CliError("usage", `Missing <${target ? "message" : spec.target}>: ghostly ${spec.usage}`);
   // Before stdin is read and the profile opens: the API's own check answered once a one-shot was online (exit 1).
   timeout(parsed.options);
+  if (spec.target === "group") listAtMost(parsed.options, "mention");
   // Empty (an unset variable in a script), it sent a plain message: an id the chat lacks is exit 3.
   if (parsed.options.reply === "") throw new CliError("usage", "--reply needs a message id");
   // Stdin only when no text word was given at all: `send bob "$line"` with an empty line is no text, not the rest of stdin.
@@ -1797,7 +1819,7 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   failures = process.stderr;
   const parsed = parseArgs(argv, {}, idSlot({ args: ["call...?"] }), { command: "call pipe" });
   const g = globals(parsed);
-  const ref = parsed.positionals.join(" ") || undefined;
+  const ref = callRef(parsed.positionals.length ? parsed.positionals.join(" ") : undefined, "call pipe [<chat|call>]");
   const client = await connectDaemon(g.paths);
   if (!client) throw new CliError("unavailable", `No daemon runs profile ${g.profile}: calls need one (ghostly daemon --detach)`);
   let call: { call: string; audio: { socket: string; token: string; rate: number } | null };
@@ -1819,7 +1841,13 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   }
   const audio = call.audio;
   const socket = connect(audio.socket);
-  await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+  // The call ended between `call.get` and here: its socket is gone, or a file stays where nothing listens. It said
+  // "No such file or folder: the path", or Node's raw "connect ECONNREFUSED …".
+  await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); }).catch((error: unknown) => {
+    client.close();
+    const code = (error as { code?: unknown }).code;
+    throw code === "ENOENT" || code === "ECONNREFUSED" ? new CliError("not_found", `No call ${call.call}: it ended (ghostly call list)`) : error;
+  });
   // The call's token first: until it comes, the socket is nobody's (WISP 1100 § Calls).
   socket.write(`${audio.token}\n`);
   process.stderr.write(`ghostly: call ${call.call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);
@@ -1834,8 +1862,21 @@ async function callPipeCommand(argv: string[]): Promise<void> {
     process.stderr.write(`ghostly: call ${call.call}: nothing reads its audio any more; the call goes on\n`);
     socket.destroy();
   });
+  // Ctrl-C stops the pipe, not the call: it says so, with how to end the call, and leaves with 130 as a command stopped
+  // with Ctrl-C does. It died by the signal with no word, and the contact went on hearing silence.
+  let stopped = false;
+  process.once("SIGINT", () => {
+    stopped = true;
+    const words = `stopped (Ctrl-C); the call goes on (ghostly call hangup ${call.call} ends it)`;
+    process.stderr.write(`ghostly: call ${call.call}: ${words}\n`);
+    failures.write(jsonOut({ error: new CliError("interrupted", words[0].toUpperCase() + words.slice(1)).toJSON() }, pretty ? 2 : undefined) + "\n");
+    socket.destroy();
+    client.close();
+    exit(EXIT.interrupted);
+  });
   socket.pipe(process.stdout);
   socket.on("close", () => void (async () => {
+    if (stopped) return;
     if (!readerGone) process.stderr.write(`ghostly: call ${call.call}: ${await whyClosed()}\n`);
     client.close();
     exit(0);
@@ -1921,6 +1962,8 @@ export async function main(input: string[]): Promise<number> {
   if (first === "daemon") { await daemonCommand(argv.slice(1)); return -1; }
   if (first === "listen") { await listenCommand(argv.slice(1)); return -1; }
   if (first === "engine") { await engineCommand(argv.slice(1)); return 0; }
+  // A CLI profile is on this one device only: whatever follows `device`, the answer is why, and what to do instead.
+  if (first === "device") throw new CliError("usage", `${SINGLE_DEVICE} (ghostly help device)`);
   if (first === "settings") { await settingsCommand(second, argv.slice(2)); return 0; }
   if (two === "identity add") { await identityAddCommand(argv.slice(2)); return 0; }
   if (two === "call pipe") { await callPipeCommand(argv.slice(2)); return -1; }
@@ -1949,6 +1992,10 @@ export const APP_WORDS: Readonly<Record<string, string>> = {
   "message react": "react <chat> <message> <emoji>",
   "message pin": "pin <chat> <message>",
   "message forward": "forward <chat> <message> --to <chat>",
+  // A group's pins are `pin <group>`, as a chat's are, and its members are in `group show`.
+  "group pin": "pin <group> <message>",
+  "group unpin": "pin <group> --remove",
+  "group members": "group show <group>",
 };
 
 /** The app's search (in a chat and in the chat list), which the CLI does not have: `chat history` and jq do it. */
@@ -1959,6 +2006,7 @@ const SEARCH = ["search", "chat search"];
  * credential`) are answered with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown
  * command: chat". The longest group the words name answers: `x401 credential frob` lists add, list and remove.
  * A word near one of them is a typo: `chat lst` and `sned hi` say the command meant (`chat list`, `send`) and its help.
+ * A word another command does the work of (`group pin`, `DONE_ELSEWHERE`) names that command.
  */
 export function unknownCommand(first: string | undefined, second?: string, third?: string): CliError {
   const asked = [first, second, third].filter((word): word is string => !!word);

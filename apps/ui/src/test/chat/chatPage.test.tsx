@@ -273,8 +273,8 @@ describe("a text or an edit the DHT packet cannot carry, in a chat on DHT only",
   afterEach(() => { localStorage.clear(); setProfile(""); });
 
   it.each([
-    ["this side chose it", MINE, "Too long for the DHT. Shorten it, or leave DHT only from the connection icon and try again."],
-    ["the contact chose it", THEIRS, "Too long for the DHT. Shorten it, or try again once your contact leaves DHT only."],
+    ["this side chose it", MINE, "Too long for the DHT, which carries about 248 bytes. This chat is on DHT only: shorten it, or change it from the connection icon."],
+    ["the contact chose it", THEIRS, "Too long for the DHT, which carries about 248 bytes. Your contact's chat is on DHT only: shorten it, or wait until they allow live again."],
   ])("a send refused when %s says what ends DHT only", async (_, link, said) => {
     const { user } = openChat(link);
     await user.click(await screen.findByPlaceholderText("Message…"));
@@ -284,8 +284,8 @@ describe("a text or an edit the DHT packet cannot carry, in a chat on DHT only",
   });
 
   it.each([
-    ["this side chose it", MINE, "Too long for the DHT. Shorten it, or leave DHT only from the connection icon and try again."],
-    ["the contact chose it", THEIRS, "Too long for the DHT. Shorten it, or try again once your contact leaves DHT only."],
+    ["this side chose it", MINE, "Too long for the DHT, which carries about 214 bytes. This chat is on DHT only: shorten it, or change it from the connection icon."],
+    ["the contact chose it", THEIRS, "Too long for the DHT, which carries about 214 bytes. Your contact's chat is on DHT only: shorten it, or wait until they allow live again."],
   ])("an edit refused when %s says it too, with no \"send it\"", async (_, link, said) => {
     const { user } = openChat(link);
     const field = await screen.findByPlaceholderText("Message…");

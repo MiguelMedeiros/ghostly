@@ -1,9 +1,9 @@
 import { render, waitFor, act, screen } from "@testing-library/react";
-import { createChatInvite, createDeviceInvite } from "@ghostly/core";
+import { createChatInvite, createDeviceInvite, createIdentity, createLink, encodeInviteCode } from "@ghostly/core";
 import { afterEach, expect, it, vi, describe } from "vitest";
 import { Root } from "../../Root";
 import { takeDeviceLink } from "../../lib/devices";
-import { ensureSession, listSessions } from "../../lib/storage";
+import { ensureSession, LINK_CHATS_WAITING, listSessions } from "../../lib/storage";
 import { readInvite } from "../../lib/url";
 import { axeViolations } from "../axe";
 import { fakeEngine } from "../fakeEngine";
@@ -68,6 +68,36 @@ it("invite links opened while locked each make their chat after the unlock, up t
   expect(screen.getByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(listSessions()).toHaveLength(3);
+}, 60_000);
+
+// covers: invite.link, profiles.lock
+/*
+ * Links with a joined chat's seed but another contact's keys, opened while locked: none makes a chat after the unlock
+ * (the engine keys a chat by its own seed, so such a chat had the joined chat's link), and the app says so. The joined
+ * chat's own link opens it.
+ */
+it("links with a joined chat's seed but other keys, opened while locked, make no chat after the unlock", async () => {
+  const { invite, inviteCode } = createChatInvite();
+  const reading = readInvite(inviteCode);
+  if (!reading.ok) throw new Error("a fresh invite reads");
+  const joined = ensureSession(reading.keys);
+  const others = Array.from({ length: LINK_CHATS_WAITING + 3 }, () =>
+    encodeInviteCode({ ...invite, peerPubKeyZ32: createIdentity().pubKeyZ32, encKeyB64: createLink().mine.encKeyB64 }));
+  window.location.hash = "#/";
+  const { rerender } = render(<Root />);
+  for (const code of [...others, inviteCode]) {
+    window.location.hash = `#${code}`;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+  expect(listSessions()).toHaveLength(1);
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe(`#/chat/${joined}`));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(listSessions().map((session) => session.id)).toEqual([joined]);
+  expect(screen.getByTestId("invite-link-invalid")).toBeInTheDocument();
 }, 60_000);
 
 // covers: invite.link, profiles.lock

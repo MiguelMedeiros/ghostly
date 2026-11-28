@@ -102,12 +102,12 @@ test("on a phone a chat's header keeps the contact's whole name beside the conne
     await expect(page.getByRole("dialog", { name: "Connection options" })).toBeHidden();
     await expect(page.getByTestId("connection-options")).toBeFocused();
 
-    // The sheet in groups: what is done now, the conversation (the identities, the bot's Tasks), More…, and Delete chat
-    // apart. No Move up or Move down: a pinned chat's place is the list's. A separator is "—".
+    // The sheet in groups: what is done now, the conversation (the identities, the bot's Tasks), More…, and Block
+    // contact and Delete chat apart. No Move up or Move down: a pinned chat's place is the list's. A separator is "—".
     await page.getByTestId("chat-options").click();
     const layout = (sheet: typeof menu) => sheet.locator("[data-menu-item], [role=separator]")
       .evaluateAll(els => els.map(el => el.getAttribute("role") === "separator" ? "—" : (el as HTMLElement).dataset.testid ?? el.textContent));
-    await expect.poll(() => layout(menu)).toEqual(["call-video", "chat-search-open", "chat-mute-open", "chat-pin-toggle", "—", "chat-identity-badges", "chat-tasks", "—", "chat-more-open", "—", "Delete chat"]);
+    await expect.poll(() => layout(menu)).toEqual(["call-video", "chat-search-open", "chat-mute-open", "chat-pin-toggle", "—", "chat-identity-badges", "chat-tasks", "—", "chat-more-open", "—", "chat-block", "Delete chat"]);
     await expect(menu.getByTestId("chat-more-open")).toHaveText("More…");
     await page.screenshot({ path: test.info().outputPath("phone-menu.png") });
     // More…: a second sheet with the rarer rows, the first one focused; Escape gives the focus back to ⋮.

@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, parseLinkPreview, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type LinkPreview, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, COMMUNITY_LIMITS, DHT_EDIT_FITS, DHT_PACKET_BUDGET, DHT_TEXT_FITS, decodeCommunityLink, decodeGroupEntryLink, GROUP_EDIT_TEXT_BYTES, GROUP_LIMITS, inviteLink, LIMITS, MENTION_EVERYONE, MENTION_LIMITS, normalizeRelayUrl, ownInviteRefusal, parseLinkPreview, relayUrlProblem, replySnippet, STATUS_CARD_LIMITS, statusCardBytes, TYPING_KINDS, type GroupMention, type LinkPreview, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { shownAddress } from "@ghostly/browser/shared/shownAddress";
@@ -6,34 +6,34 @@ import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
 import { groupPayLineId, groupPayNoteId } from "@ghostly/browser/shared/groupPayNotes";
 import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
 import { FORWARD_MESSAGES, FORWARD_TARGETS } from "@ghostly/browser/engine/forwards";
-import { findSecret, guardText, secretWords } from "./secretGuard";
+import { checkGuardedSize, findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError, shownRelay, shownValue } from "./errors";
 import { shellWord } from "./shellWord";
 import {
   bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inCall, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
-  type ApiContext, type CallScope, type Method, type Params, type RefPlace,
+  type ApiContext, type CallScope, type Lookup, type Method, type Params, type RefPlace,
 } from "./apiKit";
-import { FILE_METHODS } from "./files";
+import { FILE_METHODS, fileKept, waitForFile } from "./files";
 import { checkShownName } from "./profiles";
 import { ended, foldsAnyway, goesOn, nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
-import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
+import { STATUS_CARD_METHODS, secretIn, textsIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdEnds, holdOf, releaseHold } from "./holds";
-import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
-import { GROUP_ADMIN_METHODS, noMember, withUrl } from "./groupAdmin";
+import { endTyping, keepOneShot, keepTyping, ONE_SHOT_LIVE_GRACE_MS, sayTyping, typingStatus } from "./typing";
+import { GROUP_ADMIN_METHODS, moreThanOneMember, noMember, withUrl } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
-import { IDENTITY_METHODS } from "./identities";
+import { IDENTITY_LOOKUPS, IDENTITY_METHODS } from "./identities";
 import { X401_METHODS } from "./x401";
-import { closeServicesOf, SERVICE_METHODS, serviceShape } from "./services";
+import { closeServicesOf, SERVICE_LOOKUPS, SERVICE_METHODS, serviceShape } from "./services";
 import { BACKUP_METHODS } from "./backup";
-import { CALL_METHODS } from "./calls/api";
+import { CALL_LOOKUPS, CALL_METHODS } from "./calls/api";
 import { APP_SERVE_METHODS } from "./appServe";
 import { APP_CHAT_METHODS } from "./appChat";
-import { mintUrlShape, payShape, tokenShape, WALLET_METHODS } from "./wallets";
+import { mintUrlShape, PAYMENT_LOOKUPS, payShape, tokenShape, WALLET_METHODS } from "./wallets";
 import { checkOwnStatus, statusJson } from "./ownStatus";
 import { TRANSPORT_NAMES } from "./words";
-import { chatState, dhtOnlyNote, heldWords } from "./waitNotice";
+import { chatState, dhtOnlyNote, heldWords, pinWaitsNote, removalWaitsNote, type DhtOnly } from "./waitNotice";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, isLive, messageJson, type MessageJson } from "./views";
 
 /**
@@ -120,10 +120,10 @@ export function settingsInEffect(settings: Settings): Settings {
 /**
  * A relay address the engine refuses (node.ts `updateSettings`, irohWeb.ts, hyperdhtRelay.ts): the person's value, so
  * `bad_request` named by its key, in a terminal's words ("give", not the app's "Enter"). Before, `engine` (exit 1). A
- * wrong scheme ("Use an https:// relay address") too.
+ * wrong scheme ("Use an https:// relay address") too, and more Iroh relays than it keeps ("Use at most five Iroh relays").
  */
 function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
-  if (!(error instanceof Error) || !/^(?:Enter (?:at least one|a) relay address|Not a relay address|Use an? \S+ relay address)\b/.test(error.message)) return error;
+  if (!(error instanceof Error) || !/^(?:Enter (?:at least one|a) relay address|Not a relay address|Use an? \S+ relay address|Use at most \S+ Iroh relays)\b/.test(error.message)) return error;
   const keys = ["relays", "irohRelays", "hyperdhtRelay"].filter((key) => Object.hasOwn(patch, key));
   // The address the engine names, as given, without its credentials (`shownRelay`).
   const said = error.message.replace(/^(.*? relay address: )([\s\S]+)$/, (_, words: string, address: string) => words + shownRelay(address));
@@ -156,10 +156,35 @@ function chatName(params: Params, name: string): string | undefined {
 const codePoints = (text: string, index: number) => [...text.slice(0, index)].length;
 
 /**
- * Mentions for a group message: each ref (a member key, a unique prefix of one, a member's name, or `everyone`) must
- * be written in the text as `@<name>` (or `@<key prefix>`, `@everyone`); the first such place is the mention.
+ * What can't follow a whole `@name`: a letter, a mark, a digit or "_". The app's composer ends a token the same way
+ * (`composeMentions`, letters, digits and "_"); a mark is part of the letter before it ("@Al" + U+0301 is "@Ál").
  */
-export function mentionsFor(text: string, refs: readonly string[], group: GroupView): GroupMention[] {
+const NAME_CHAR = String.raw`[\p{L}\p{M}\p{N}_]`;
+
+/**
+ * Where `@name` first stands in `text`, without regard to case, or null. `whole`: only where no name character
+ * follows it, so `@Al` is not the start of `@Alice`. The regex's case folding keeps each character's length, so the
+ * match is a place in the text as written: one found in `text.toLowerCase()` came a character late after a letter
+ * that lowercases longer ("İ").
+ */
+function mentionIn(text: string, name: string, whole: boolean): RegExpExecArray | null {
+  const literal = name.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&");
+  return new RegExp(`@${literal}${whole ? `(?!${NAME_CHAR})` : ""}`, "iu").exec(text);
+}
+
+/**
+ * Mentions for a group message: each ref (a member key, a unique prefix of one, a member's name, or `everyone`) must
+ * be written in the text as `@<name>` (or `@<key>`, `@<key prefix>`, `@everyone`); the first such place that stands
+ * whole is the mention (with none whole, the first place one starts a longer word, as before). A ref
+ * more than one member answers to, none does, or this profile itself (`myName`: reads its own name, only for a ref no
+ * member answers to) is refused as `group remove` refuses it: before, its own name was "No member", and two members
+ * of one name gave no key. `groupRef`: the group as the command named it, for the refusal's hint. A ref given twice is
+ * one mention; more refs than a message carries (`MENTION_LIMITS.count`) are refused before any is looked up: the
+ * engine dropped the whole list, and the message went out mentioning no one.
+ */
+export function mentionsFor(text: string, given: readonly string[], group: GroupView, myName?: () => string | undefined, groupRef?: string): GroupMention[] {
+  const refs = [...new Set(given)];
+  if (refs.length > MENTION_LIMITS.count) throw new CliError("bad_request", `A message mentions at most ${MENTION_LIMITS.count} members (${refs.length} given): send it to fewer, or mention everyone`, { mentions: refs.length, max: MENTION_LIMITS.count });
   const out: GroupMention[] = [];
   for (const ref of refs) {
     let key: string, spelled: string[];
@@ -169,14 +194,15 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
       // A member's key is that member, whatever another member calls itself.
       const byKey = group.members.filter((m) => !m.me && m.key === ref);
       const matches = byKey.length ? byKey : group.members.filter((m) => !m.me && (m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower));
-      if (matches.length > 1) throw new CliError("bad_request", `${shownValue(ref)} names more than one member`);
-      if (!matches.length) throw noMember(group, ref);
+      if (matches.length > 1) throw moreThanOneMember(group, ref, matches, groupRef);
+      if (!matches.length) throw noMember(group, ref, myName?.(), groupRef);
       key = matches[0].key;
-      spelled = [matches[0].nick?.trim(), ref, key.slice(0, 8)].filter((s): s is string => !!s);
+      spelled = [matches[0].nick?.trim(), ref, key, key.slice(0, 8)].filter((s): s is string => !!s);
     }
-    const found = spelled.map((name) => ({ name, index: text.toLowerCase().indexOf("@" + name.toLowerCase()) })).find((f) => f.index >= 0);
+    const first = (whole: boolean) => spelled.map((name) => mentionIn(text, name, whole)).find((m) => m !== null);
+    const found = first(true) ?? first(false);
     if (!found) throw new CliError("bad_request", `Write @${spelled[0]} in the text to mention ${ref}`);
-    out.push({ k: key, o: codePoints(text, found.index), l: [..."@" + found.name].length });
+    out.push({ k: key, o: codePoints(text, found.index), l: [...found[0]].length });
   }
   return out;
 }
@@ -262,6 +288,15 @@ const BAD_VALUE = /^Cannot (destructure|read properties of (undefined|null))|is 
 const ONE_SHOT_TYPING = "Typing is said on a live session only, and a one-shot has none: it reached nobody. Keep the profile online (`ghostly daemon --detach`), or give --for to wait until it is live";
 // A stop takes no --for, so only the daemon half holds.
 const ONE_SHOT_TYPING_STOP = "A stop is said on a live session only, and a one-shot has none: it reached nobody. Keep the profile online (`ghostly daemon --detach`)";
+// A one-shot's --for that ended with nobody to see it (`keepOneShot`): it answered `typing: true`, an `until` to come, no note.
+const ONE_SHOT_TYPING_UNSEEN = `Typing is said on a live session only, and none came up in time (a one-shot waits up to ${ONE_SHOT_LIVE_GRACE_MS / 1000} s for one): it reached nobody, and it is off. Keep the profile online (\`ghostly daemon --detach\`) so the chat is live when you say it`;
+
+/** A one-shot typing's `note`: without `--for` it reached nobody; with it, only when nobody was live to see it. */
+function oneShotTypingNote(ctx: ApiContext, typing: boolean, kept: boolean, seen: boolean): { note: string } | undefined {
+  if (ctx.mode !== "one-shot") return undefined;
+  if (!kept) return { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP };
+  return seen ? undefined : { note: ONE_SHOT_TYPING_UNSEEN };
+}
 
 // ---------- methods ----------
 
@@ -352,8 +387,29 @@ async function letIn(ctx: ApiContext, groupId: string, link: string, held: Group
  * a hold (`chat disconnect --hold`) is read from `ctx`'s profile; without it, as a DHT only chosen.
  */
 function dhtOnlyWait(link: LinkView, text: string, ref: string, ctx?: ApiContext): string | undefined {
+  return dhtOnlyNote(dhtOnlyOf(link, ctx), text, ref);
+}
+
+/** Where `link` stands on the DHT only (waitNotice.ts `DhtOnly`): this side's choice or hold, read from `ctx`'s profile. */
+export function dhtOnlyOf(link: LinkView, ctx?: ApiContext): DhtOnly {
   const mine = link.deliveryMode === "dht";
-  return dhtOnlyNote({ mine, theirs: link.dhtDelivery?.peerMode === "dht", heldUntil: mine && ctx ? holdEnds(ctx, link.id) : null, oneShot: ctx?.mode === "one-shot" }, text, ref);
+  return { mine, theirs: link.dhtDelivery?.peerMode === "dht", heldUntil: mine && ctx ? holdEnds(ctx, link.id) : null, oneShot: ctx?.mode === "one-shot" };
+}
+
+/**
+ * Why my pin (or unpin) in a 1:1 chat does not go by itself, or undefined (waitNotice.ts `pinWaitsNote`): the chat is
+ * on the DHT only, and a pin goes on a live session only. Read as the chat is now: the contact's choice may have come
+ * since, or the chat left the DHT only. A chat nobody joined says that instead (`keptForJoin`, `goesOn`).
+ */
+function pinWaitsLive(ctx: ApiContext, linkId: string, ref: string, remove: boolean): string | undefined {
+  const link = state(ctx).links.find((l) => l.id === linkId);
+  return link && !nobodyJoined(link) ? pinWaitsNote(dhtOnlyOf(link, ctx), ref, remove) : undefined;
+}
+
+/** Why my removal of a message in a 1:1 chat does not go by itself, or undefined (waitNotice.ts `removalWaitsNote`), as `pinWaitsLive`. */
+function removalWaitsLive(ctx: ApiContext, linkId: string, ref: string): string | undefined {
+  const link = state(ctx).links.find((l) => l.id === linkId);
+  return link && !nobodyJoined(link) ? removalWaitsNote(dhtOnlyOf(link, ctx), ref) : undefined;
 }
 
 /**
@@ -372,12 +428,14 @@ function dhtOnlyTimeout(ctx: ApiContext, chat: string, text: string, ref: string
 /**
  * What keeps `link` off a live session, or undefined: a chat on DHT only opens none (WISP 100: no app dials it). A hold
  * of this side's (`chat disconnect --hold`) ends by itself (`held`: when), unless the contact's choice keeps it there
- * too; this side's choice or the contact's is `chat connect`'s refusal (apiKit `dhtOnly`), in its words.
+ * too; this side's choice or the contact's is `chat connect`'s refusal (apiKit `dhtOnly`), in its words. A held chat
+ * the contact keeps there is the contact's refusal, as `chat connect` says it once the hold is gone: it read "on DHT
+ * only on this side" with `chat transport auto`, which only lifted the hold.
  */
 function offLive(ctx: ApiContext, link: LinkView): { held: number } | { refusal: CliError } | undefined {
-  const held = link.deliveryMode === "dht" && link.dhtDelivery?.peerMode !== "dht" ? holdEnds(ctx, link.id) : null;
-  if (held !== null) return { held };
-  try { dhtOnly(link); } catch (error) { if (error instanceof CliError) return { refusal: error }; throw error; }
+  const held = link.deliveryMode === "dht" ? holdEnds(ctx, link.id) : null;
+  if (held !== null && link.dhtDelivery?.peerMode !== "dht") return { held };
+  try { dhtOnly(held === null ? link : { ...link, deliveryMode: "stream" }); } catch (error) { if (error instanceof CliError) return { refusal: error }; throw error; }
   return undefined;
 }
 
@@ -476,11 +534,11 @@ const METHODS: Record<string, Method> = {
       if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
       if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
-      // The engine says "Enter at least one relay address" for any list it can't use (node.ts `updateSettings`): the
-      // address given is named here, in the app's Settings words; an empty list stays the engine's to refuse.
-      if (key === "relays" && (value as string[]).length && !(value as string[]).some(normalizeRelayUrl)) {
-        throw relayRefused(new Error(relayUrlProblem((value as string[])[0]) ?? ""), { relays: value });
-      }
+      // The engine keeps the relays it can read and drops the rest unsaid, and says "Enter at least one relay address"
+      // for a list with none (node.ts `updateSettings`): the first one it can't read is named here, as the app's
+      // Settings does (a blank entry is no relay, as a blank line there); an empty list stays the engine's to refuse.
+      const unread = key === "relays" ? (value as string[]).find((relay) => relay.trim() && !normalizeRelayUrl(relay)) : undefined;
+      if (unread !== undefined) throw relayRefused(new Error(relayUrlProblem(unread) ?? ""), { relays: value });
       // The name contacts see: `profile set --name`'s rule.
       if (key === "nick") { patch.nick = checkShownName(value, key); guardText(patch.nick, bool(params, "force"), "nick", "set it"); continue; }
       if (kind === "ice") {
@@ -510,7 +568,8 @@ const METHODS: Record<string, Method> = {
       if (variable && process.env[variable]?.split(",").some((url) => url.trim())) {
         warning = (warning ? `${warning}. ` : "") + `${variable} is set where this profile runs, and only its relays are used: ${key} is kept for when the profile runs without it`;
       }
-      patch[key] = value;
+      // An Iroh relay given twice is one relay, not two of the five the engine keeps.
+      patch[key] = key === "irohRelays" ? [...new Set(value as string[])] : value;
     }
     await node(ctx).updateSettings({ settings: patch }).catch((error: unknown) => { throw relayRefused(error, patch); });
     return { ...redactSettings(settingsInEffect(settingsOf(ctx))), ...(warning ? { warning } : {}) };
@@ -664,12 +723,14 @@ const METHODS: Record<string, Method> = {
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, { linkId: link.id }, seconds * 1000, word) : null;
     const open = (s: EngineState) => s.links.find((l) => l.id === link.id)?.dataLink === "open";
-    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, { linkId: link.id }, kept, open);
+    const seen = kept && ctx.mode === "one-shot" ? await keepOneShot(ctx, { linkId: link.id }, kept, open) : true;
+    // Ended with nobody to see it: off, as a stop answers.
+    const on = typing && seen;
     const now = state(ctx);
     return {
-      chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      live: open(now), sendTyping: now.settings.sendTyping !== false, ...(until ? { until } : {}),
-      ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
+      chat: link.id, typing: on, ...(on ? { kind } : {}), ...(on && status ? { status } : {}),
+      live: open(now), sendTyping: now.settings.sendTyping !== false, ...(on && until ? { until } : {}),
+      ...oneShotTypingNote(ctx, typing, !!kept, seen),
     };
   },
   /**
@@ -683,7 +744,7 @@ const METHODS: Record<string, Method> = {
     const before = Math.max(...node(ctx).chatUnconfirmed({ linkId: link.id }).reactions);
     const result = await react(ctx, link.id, params, { group: false, ref: str(params, "chat", true) });
     const pending = (left: { reactions: number[] }) => left.reactions.some((n) => n > before);
-    if (wait === "confirmed") await waitForConfirmed(ctx, link.id, "reaction", pending, ms);
+    if (wait === "confirmed") await waitForConfirmed(ctx, link.id, "reaction", pending, ms, { messageId: result.messageId, emoji: result.emoji });
     const confirmed = !pending(node(ctx).chatUnconfirmed({ linkId: link.id }));
     return { chat: link.id, ...result, confirmed, ...(!confirmed && keptForJoin(ctx, link.id, "the reaction")) };
   },
@@ -696,7 +757,10 @@ const METHODS: Record<string, Method> = {
    */
   async "chat.pin"(ctx, params) {
     const target = chatOrGroup(ctx, str(params, "chat", true));
-    const remove = bool(params, "remove"), messageId = remove ? str(params, "message") : str(params, "message", true);
+    const remove = bool(params, "remove"), messageId = remove ? undefined : str(params, "message", true);
+    // --remove names no message (the chat has one pin): one given beside it was not read, so a bot that meant "unpin
+    // X" unpinned whatever was pinned, X or not.
+    if (remove && str(params, "message") !== undefined) throw new CliError("bad_request", "remove names no message: it unpins whatever is pinned (give no message)");
     if (target.group && params.wait === "confirmed") throw new CliError("bad_request", "A group has no receipts: wait confirmed is for a 1:1 chat (wait sent waits until a member's edge took it)");
     if (!target.group && params.wait === "sent") throw new CliError("bad_request", "wait sent is for a group: a 1:1 chat's pin waits with wait confirmed");
     const { wait, ms } = target.group
@@ -720,9 +784,12 @@ const METHODS: Record<string, Method> = {
     // The chat's one pin of mine waiting for the contact is this one (none: the contact confirmed it already).
     const mine = node(ctx).chatUnconfirmed({ linkId: target.linkId }).pin;
     const pending = (left: { pin: number | null }) => mine !== null && left.pin === mine;
-    if (wait === "confirmed") await waitForConfirmed(ctx, target.linkId, "pin", pending, ms);
+    const ref = str(params, "chat", true), pinned = remove ? null : messageId;
+    const waitsLive = () => pinWaitsLive(ctx, target.linkId, ref, remove);
+    if (wait === "confirmed") await waitForConfirmed(ctx, target.linkId, "pin", pending, ms, { messageId: pinned, removed: remove }, waitsLive);
     const confirmed = !pending(node(ctx).chatUnconfirmed({ linkId: target.linkId }));
-    return { chat: target.id, messageId: remove ? null : messageId, removed: remove, confirmed, ...(!confirmed && keptForJoin(ctx, target.linkId, remove ? "the unpin" : "the pin")) };
+    const note = confirmed ? undefined : keptForJoin(ctx, target.linkId, remove ? "the unpin" : "the pin").note ?? waitsLive();
+    return { chat: target.id, messageId: pinned, removed: remove, confirmed, ...(note && { note }) };
   },
   /** Saved messages: a mark on a message of a chat or a group, kept for this profile on this device; nothing is sent. */
   async "saved.add"(ctx, params) {
@@ -833,8 +900,13 @@ const METHODS: Record<string, Method> = {
       if (to[i]!.group) continue;
       watch(async () => {
         const sent = await node(ctx).getMessage(to[i]!.id, messageId);
-        if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
-        else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, to[i]!.id, sent?.text ?? "", to[i]!.ref, ms, error); });
+        // A file's copy waits as `file send --wait sent` does, and a timeout says the copy is kept and goes on: it said
+        // only that the wait timed out, and a bot forwarded the file again.
+        if (sent?.file) {
+          const { file } = sent;
+          await waitForFile(ctx, { chat: to[i]!.id, file: file.id, timeout: ms / 1000 }, undefined, to[i]!.ref)
+            .catch((error: unknown) => { throw fileKept(ctx, error, { linkId: to[i]!.id, ref: to[i]!.ref, messageId, file }); });
+        } else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, to[i]!.id, sent?.text ?? "", to[i]!.ref, ms, error); });
       }, () => undefined, () => {});
     }
     for (const { ended, now, done } of waits) {
@@ -912,7 +984,7 @@ const METHODS: Record<string, Method> = {
           : node(ctx).groupTaken({ groupId: target.id, messageId: message.id, edit: e });
         return { group: target.id, messageId: message.id, deleted: message.id, everyone: true, sent: edges > 0, edges, ...purged };
       }
-      if (wait === "confirmed") await goneHere(() => waitForRemoval(ctx, target.linkId, message.id, ms));
+      if (wait === "confirmed") await goneHere(() => waitForRemoval(ctx, target.linkId, message.id, ms, () => removalWaitsLive(ctx, target.linkId, str(params, "chat", true))));
       return { chat: target.id, messageId: message.id, deleted: message.id, everyone: true, confirmed: !node(ctx).removalPending({ linkId: target.linkId, messageId: message.id }), ...purged };
     }
     // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
@@ -1013,10 +1085,15 @@ const METHODS: Record<string, Method> = {
     return { ...chatJson(findChat(state(ctx).links, link.id)), heldUntil: holdOf(ctx, link.id) };
   },
   async "chat.verify"(ctx, params) {
-    const link = chatOf(ctx, params);
-    const code = str(params, "code", true).replace(/\s+/g, "").toLowerCase();
-    const mine = link.pairing?.code?.replace(/\s+/g, "").toLowerCase();
+    const link = chatOf(ctx, params, undefined, "only a chat has a code to compare");
+    // Whatever is between the groups (spaces, hyphens, colons, dots: as the contact wrote it) is nothing: the right code
+    // with hyphens was refused as a code that does not match, the warning of an attack for a way of writing it.
+    const bare = (text: string) => text.replace(/[\s:.\u2010-\u2015-]+/g, "").toLowerCase();
+    const code = bare(str(params, "code", true));
+    const shown = link.pairing?.code, mine = shown ? bare(shown) : undefined;
     if (!mine) throw new CliError("unavailable", "This chat shows no comparison code yet (it needs a live session)");
+    // A code of another length is one typed short or long, not a contact's that differs: said as that, not as an attack.
+    if (code.length !== mine.length) throw new CliError("bad_request", `The code given has ${code.length} characters, and the one this chat shows has ${mine.length} (${shown!.trim().split(/\s+/).length} groups, as chat show prints comparisonCode): check it was typed whole`);
     if (code !== mine) throw new CliError("refused", "The code does not match the one this side shows: do not trust this chat until you know why");
     await node(ctx).confirmPair({ linkId: link.id, code: link.pairing!.code! });
     return chatJson(findChat(state(ctx).links, link.id));
@@ -1072,8 +1149,12 @@ const METHODS: Record<string, Method> = {
   /** Invitations over the chats named accepted by the daemon itself (`group auto on --from`); no argument: the setting. */
   async "group.auto"(ctx, params) {
     onlyKeys(params, "group.auto", ["on", "from"]);
-    if (params.on === undefined) return { autoJoin: ctx.groupAuto.get() };
-    return { autoJoin: ctx.groupAuto.set({ on: bool(params, "on"), from: list(params, "from") }) };
+    const on = params.on === undefined ? undefined : bool(params, "on");
+    // The chats go with on: true, as `group auto --from` refuses them without on: before, from with on: false dropped
+    // every chat on the list, and from alone only read the setting, each without a word.
+    if (on !== true && list(params, "from").length > 0) throw new CliError("bad_request", "from goes with on: true");
+    if (on === undefined) return { autoJoin: ctx.groupAuto.get() };
+    return { autoJoin: ctx.groupAuto.set({ on, from: list(params, "from") }) };
   },
   async "group.get"(ctx, params) {
     return groupJson(groupOf(ctx, params, "chat show <chat>"), bool(params, "showSecret"));
@@ -1093,7 +1174,7 @@ const METHODS: Record<string, Method> = {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; send it with --force if you mean to`, { kind: secret.kind });
     }
-    const mentions = mentionsFor(text, list(params, "mentions"), group);
+    const mentions = mentionsFor(text, list(params, "mentions"), group, () => settingsOf(ctx).nick, str(params, "group", true));
     const replyTo = str(params, "reply");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
@@ -1128,7 +1209,7 @@ const METHODS: Record<string, Method> = {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
     }
-    const mentions = mentionsFor(text, list(params, "mentions"), group);
+    const mentions = mentionsFor(text, list(params, "mentions"), group, () => settingsOf(ctx).nick, str(params, "group", true));
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const linkId = `group:${group.id}`;
@@ -1183,11 +1264,12 @@ const METHODS: Record<string, Method> = {
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, target, seconds * 1000, word) : null;
     const reached = (now: GroupView | undefined) => (now ?? group).members.filter((m) => !m.me && m.online && !m.viaHub).length;
-    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, target, kept, (s) => reached(s.groups.find((g) => g.id === group.id)) > 0);
+    const seen = kept && ctx.mode === "one-shot" ? await keepOneShot(ctx, target, kept, (s) => reached(s.groups.find((g) => g.id === group.id)) > 0) : true;
+    const on = typing && seen;
     return {
-      group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      reached: reached(groupById(ctx, group.id)), sendTyping: settingsOf(ctx).sendTyping !== false, ...(until ? { until } : {}),
-      ...(!kept && ctx.mode === "one-shot" && { note: typing ? ONE_SHOT_TYPING : ONE_SHOT_TYPING_STOP }),
+      group: group.id, typing: on, ...(on ? { kind } : {}), ...(on && status ? { status } : {}),
+      reached: reached(groupById(ctx, group.id)), sendTyping: settingsOf(ctx).sendTyping !== false, ...(on && until ? { until } : {}),
+      ...oneShotTypingNote(ctx, typing, !!kept, seen),
     };
   },
   async "group.leave"(ctx, params) {
@@ -1283,6 +1365,8 @@ const METHODS: Record<string, Method> = {
         await forgetHold(ctx, str(args ?? {}, "linkId", true));
         if (removedPeer) await closeServicesOf(ctx, removedPeer);
       }
+      // A contact blocked mid-call: its hang-up is not heard any more, so the call ends here (`endBlocked`).
+      if (method === "setContactBlocked" && args?.blocked === true) await ctx.calls.endBlocked();
       // A transport chosen during a hold ends it, as `chat transport` does: its time running out takes nothing back.
       if ((method === "setChatTransport" || method === "setDeliveryMode") && typeof args?.linkId === "string") await releaseHold(ctx, args.linkId, "lifted", true);
       return result;
@@ -1336,10 +1420,39 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   "addService",
 ]);
 
+/**
+ * The most a message's text carries, in a chat or a group, sent or edited: UTF-8 bytes of the trimmed text, as the
+ * engine counts them. The engine refuses a longer one before it keeps or sends anything.
+ */
+const ENGINE_TEXT_BYTES = Math.max(LIMITS.maxChatMessageBytes, GROUP_LIMITS.textBytes, COMMUNITY_LIMITS.textBytes, GROUP_EDIT_TEXT_BYTES);
+
+/**
+ * Per call, the fields the engine refuses the whole call for past their bound, before it keeps or sends anything:
+ * a message's or an edit's text and a group file's caption past `ENGINE_TEXT_BYTES`, a status card past
+ * `STATUS_CARD_LIMITS.bytes`. Only these: other fields (a memo, a name, a status) may go at other sizes.
+ */
+const REFUSED_PAST_BOUND: Readonly<Record<string, readonly ("text" | "caption" | "card")[]>> = {
+  sendMessage: ["text", "card"], editMessage: ["text", "card"], sendGroupMessage: ["text", "card"], sendGroupFile: ["caption"],
+};
+
+/** Whether the engine refuses `value` as this field of the call, by its size alone (`REFUSED_PAST_BOUND`). */
+function pastEngineBound(method: string, field: "text" | "caption" | "card", value: unknown): boolean {
+  if (!REFUSED_PAST_BOUND[method]?.includes(field)) return false;
+  if (field === "card") return value !== undefined && statusCardBytes(value) > STATUS_CARD_LIMITS.bytes;
+  return typeof value === "string" && new TextEncoder().encode(value.trim()).length > ENGINE_TEXT_BYTES;
+}
+
+/**
+ * The secret guard of a raw engine send. A text the engine refuses by its size alone is not read for a secret (a
+ * 15 MB one held the daemon's thread for seconds): the engine answers it with its size, as it did once the guard was
+ * done, and nothing of it is kept or sent. Any other text past that bound (a memo, a name, a note) is refused with its
+ * size before the guard reads it (`checkGuardedSize`): the engine sends none that long.
+ */
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
   const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
-  const text = args.text;
-  let texts: unknown = [text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.file, "mime"), of(args.status, "text"), args.content,
+  const read = (field: "text" | "caption" | "card") => (pastEngineBound(method, field, args[field]) ? undefined : args[field]);
+  const text = read("text");
+  let texts: unknown = [text, read("card"), read("caption"), args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.file, "mime"), of(args.status, "text"), args.content,
     ...(args.fields && typeof args.fields === "object" ? Object.values(args.fields) : []),
     // A link preview's card, as the engine carries it with the text (WISP 401 § Link previews).
     ...previewTexts(typeof text === "string" && args.preview !== undefined ? parseLinkPreview(args.preview, text.trim()) : undefined)];
@@ -1352,7 +1465,7 @@ async function guardEngineSend(ctx: ApiContext, method: string, args: Params): P
       const message = await node(ctx).getMessage(linkId, id);
       return message ? forwardedTexts(message) : null;
     })) : [];
-  }
+  } else for (const value of textsIn(texts)) checkGuardedSize(value, `A text of ${method}`);
   const secret = secretIn(texts);
   if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; call ${method} with --force if you mean to`, { kind: secret.kind });
 }
@@ -1395,18 +1508,15 @@ async function react(ctx: ApiContext, linkId: string, params: Params, place: Ref
 
 /**
  * What `typing` says: a kind, and a status a bot writes. The contact's app would cut a long status and drop one with
- * a link; here that is an error instead, so the bot learns what the contact will (not) see.
+ * a link; here that is an error instead, so the bot learns what the contact will (not) see. A blank status is none.
+ * The command checks both first (commands/shared.ts `typingWords`): these words are the socket's.
  */
 function typingWord(params: Params, typing: boolean): { kind: TypingKind; status?: string } {
   const kind = oneOf(params, "kind", TYPING_KINDS, "typing");
   const raw = str(params, "status");
-  if (!typing && (params.kind !== undefined || raw !== undefined)) throw new CliError("bad_request", "kind and status go with a start, not with stop");
-  if (raw === undefined) return { kind };
-  const oneLine = raw.replace(/\s+/g, " ").trim();
-  if ([...oneLine].length > TYPING_STATUS_MAX) throw new CliError("bad_request", `status: at most ${TYPING_STATUS_MAX} characters`);
-  const status = sanitizeTypingStatus(oneLine);
-  if (!status) throw new CliError("bad_request", "status: plain text, with no link or markup");
-  return { kind, status };
+  if (!typing && (params.kind !== undefined || raw?.trim())) throw new CliError("bad_request", "kind and status go with a start, not with stop");
+  const status = typingStatus(raw, "status", "bad_request");
+  return status ? { kind, status } : { kind };
 }
 
 /**
@@ -1496,7 +1606,7 @@ function chatNotGroupLink(ctx: ApiContext, params: Params) {
  * command that takes it (`react` on a group, where `group react` is meant), or what to do where none does. `group:<id>`,
  * the form `pin` and `saved` take, is that group too (it read "No chat" before). A name no chat and no group has stays
  * the chat's error. A name more than one group has says so too, with no `id` for `hint` (`shown` is `<group>`): the
- * group to name is one of theirs, by its id (`ghostly group list`).
+ * group to name is one of theirs, by its id (`ghostly group list`, and `details.matches`, as `findGroup` gives them).
  */
 function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (shown: string, id?: string) => string): T {
   try { return chat(); } catch (error) {
@@ -1506,7 +1616,8 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (sho
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, named); } catch (inner) {
       // A name two groups share is still a group's (it read `No chat`): the hint, with no one group's id to name.
-      if (sharedGroupIds(inner)) throw new CliError("not_found", `${shownValue(ref)} names more than one group, not a chat: ${hint("<group>")}`);
+      const shared = sharedGroupIds(inner);
+      if (shared) throw new CliError("not_found", `${shownValue(ref)} names more than one group, not a chat: ${hint("<group>")}`, { matches: shared });
       throw error;
     }
     const shown = shellWord(named, group.id);
@@ -1565,14 +1676,6 @@ function deleteNotMine(ctx: ApiContext, target: { linkId: string; group: boolean
 }
 
 /**
- * About the longest ASCII text, and edit, the DHT packet carries once sealed and signed: within the 256 bytes, the
- * envelope's authentication (and an edit's element) takes the rest. The edge moves by a byte or two with the chat (the
- * envelope's sequence, the edit's number), so the words say "about"; `dhtPacketBudget.test.ts` sends both sizes on two
- * paired daemons.
- */
-const DHT_TEXT_FITS = 248, DHT_EDIT_FITS = 214;
-
-/**
  * The engine's refusal of a text or an edit within 256 bytes that the DHT packet cannot carry (`DHT_PACKET_BUDGET`,
  * "Text and authentication exceed the DHT packet budget"), said as the apps and `dhtOnlyWait` say it: too long for the
  * DHT, about how much fits, and what ends it, by whose choice keeps the chat on the DHT only (this side's hold: when
@@ -1600,7 +1703,7 @@ function dhtTooLong(ctx: ApiContext, asked: LinkView, error: string, kind: "text
  * replied to") for the message `id`, said as `noMessage` says it, with that reason kept; undefined for any other error.
  * The engine says "chat" in a group for a reply and a save: `place` says which it is.
  */
-function notHere(error: string, id: string, place: RefPlace): CliError | undefined {
+export function notHere(error: string, id: string, place: RefPlace): CliError | undefined {
   const said = /^That message is not in this (?:chat|group)(?:, or (.+))?$/.exec(error);
   return said ? noMessage(id, place, said[1] ? { tail: `, or it ${said[1]}` } : {}) : undefined;
 }
@@ -1781,6 +1884,18 @@ const SHAPES: Record<string, (params: Params) => unknown> = {
 /** Throws what `method` answers `params` whose shape it refuses, with no profile open; nothing for any other. */
 export async function refuseBeforeStart(method: string, params: Params): Promise<void> {
   if (Object.hasOwn(SHAPES, method)) await SHAPES[method](params);
+}
+
+/** Each method's lookup of the id it names, the one its handler makes first (main.ts `LOOKED_UP_FIRST`). */
+const LOOKUPS: Record<string, Lookup> = { ...IDENTITY_LOOKUPS, ...SERVICE_LOOKUPS, ...PAYMENT_LOOKUPS, ...CALL_LOOKUPS };
+
+/**
+ * Throws what `method` answers an id that names nothing, with no chat started; else starts every chat and group the
+ * run left unstarted (main.ts `LOOKED_UP_FIRST`), as a run that left none would have.
+ */
+export async function startOnceFound(ctx: ApiContext, method: string, params: Params): Promise<void> {
+  if (Object.hasOwn(LOOKUPS, method)) LOOKUPS[method](ctx, params);
+  await node(ctx).startDeferredChats();
 }
 
 export { findChat, findGroup, startNamedChats } from "./apiKit";

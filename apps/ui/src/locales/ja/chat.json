@@ -29,6 +29,12 @@
     "save": "音声を保存",
     "tooLarge": "大きすぎてここでは再生できません。ダウンロードして聴いてください。"
   },
+  "block": {
+    "blocked": "この連絡先をブロックしました",
+    "body": "相手はあなたに電話も送信もできなくなり、そのことは相手に知らされません。チャットは残ります。このメニューか「設定 → プライバシーとセキュリティ」で解除できます。",
+    "confirm": "ブロック",
+    "title": "{{name}} をブロックしますか？"
+  },
   "compat": {
     "burned": "チャットは消去されました",
     "continued": "相手を新しいチャットに招待しました。",
@@ -174,7 +180,7 @@
     "leftHoursMinutes": "残り {{hours}} 時間 {{minutes}} 分",
     "leftMinutes": "残り {{minutes}} 分",
     "leftUnderMinute": "残り 1 分未満",
-    "noRoomDevice": "容量が足りません: この端末の空き {{size}}",
+    "noRoomDevice": "容量が足りません: この端末の残り {{size}}",
     "nobodyHas": "接続中のメンバーはまだこのファイルを持っていません",
     "nobodyHasHint": "持っているメンバーがオンラインになると自動で届きます。",
     "notDownloaded": "{{size}} · 未ダウンロード",
@@ -190,7 +196,7 @@
     "resendHint": "もう一度送ります。相手がすでに受け取った分から続けます。",
     "restoring": "読み込み中… · {{size}}",
     "resume": "再開",
-    "roomDevice": "この端末の空き {{size}}",
+    "roomDevice": "この端末の残り {{size}}",
     "senderOnly": "接続先にはまだありません",
     "senderOnlyHint": "大きなグループでは、アプリは送信者ではなく一部のメンバーを経由してつながります。そのうちの誰かがダウンロードすると自動で届きます。送信者にチャットで直接送ってもらうこともできます。",
     "stalled": "進んでいません · {{progress}}",
@@ -271,13 +277,14 @@
   },
   "media": {
     "downloadSize": "ダウンロード {{size}}",
-    "noRoom": "容量が足りません: 空き {{size}}",
+    "noRoom": "容量が足りません: 残り {{size}}",
     "noRoomToPlay": "ここで再生するための空きディスク容量が足りません。ダウンロードしてください。",
     "notYet": "送信が終わると再生できます。",
     "positionOf": "{{duration}} のうち {{position}}",
-    "wantsToSend": "{{name}} が送ろうとしています · 空き {{size}}"
+    "wantsToSend": "{{name}} が送ろうとしています · 残り {{size}}"
   },
   "menu": {
+    "block": "連絡先をブロック",
     "continueNew": "新しいチャットで続ける",
     "hold": "メッセージを保留…",
     "more": "その他…",
@@ -287,6 +294,7 @@
     "pin": "チャットをピン留め",
     "refresh": "更新",
     "techInfo": "技術情報",
+    "unblock": "連絡先のブロックを解除",
     "unpin": "ピン留めを解除"
   },
   "message": {

@@ -51,6 +51,11 @@ const CHANGE_DELAY_MS = 2_000;
 const RETRY_MS = 5 * 60_000;
 /** setTimeout's longest wait. */
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+/**
+ * `close` waits this long at most for the listing it publishes: what one publish took at most before it also waited for
+ * the one in flight (the CLI's DHT put times out at 20 s, its relays at 10 s). A network gone dead never holds a stop.
+ */
+export const DID_CLOSE_WAIT_MS = 20_000;
 /** Relay payload header: signature and sequence number, before the DNS packet. */
 const HEADER = 72;
 
@@ -62,7 +67,8 @@ export class ProfileDid {
   /** When `timer` fires. */
   private timerAt = 0;
   private running = false;
-  private inFlight: Promise<void> | null = null;
+  /** The publishes on their way: the one in flight and those asked for meanwhile (`again`). */
+  private publishing: Promise<void> | null = null;
   private again = false;
   private unlisten: (() => void) | undefined;
   /** The last `samePacket` answer. */
@@ -114,10 +120,20 @@ export class ProfileDid {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     if (this.due) {
-      await this.saving;
-      await this.publishNow().catch(() => {});
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([this.publishDue(), new Promise<void>(resolve => { timer = setTimeout(resolve, DID_CLOSE_WAIT_MS); })]);
+      clearTimeout(timer);
     }
     this.stop();
+  }
+
+  /** Until the listing this run changed is out, or its publish failed. */
+  private async publishDue(): Promise<void> {
+    // Listing changes being saved (a removed proof dropped, a switch flipped) land before the publish reads them.
+    await this.saving;
+    // A publish on its way signed the document as it was then: the newer listing goes after it, in the same chain.
+    await this.publishing?.catch(() => {});
+    if (this.due) await this.publishNow().catch(() => {});
   }
 
   stop(): void {
@@ -212,13 +228,21 @@ export class ProfileDid {
     this.expiry = { at, timer: setTimeout(() => { this.expiry = null; this.changed(); }, ms) };
   }
 
-  /** Publishes now (or right after the publish in flight): the hourly timer starts over, or a failed one is tried again in `RETRY_MS`. */
-  async publishNow(): Promise<void> {
-    if (this.inFlight) { this.again = true; return this.inFlight; }
-    this.inFlight = this.publish().finally(() => { this.inFlight = null; });
-    await this.inFlight;
-    if (this.again) { this.again = false; await this.publishNow(); return; }
-    this.scheduleNext();
+  /**
+   * Publishes now (or right after the publish in flight): the hourly timer starts over, or a failed one is tried again in
+   * `RETRY_MS`. Settles once what was asked is out: a call while one is on its way waits for the one after it too. It
+   * waited for the one on its way alone, and a one-shot's `close` ended with the document as it was before its listing
+   * changed (the newer one went after the stop).
+   */
+  publishNow(): Promise<void> {
+    if (this.publishing) { this.again = true; return this.publishing; }
+    this.publishing = (async () => {
+      try {
+        do { this.again = false; await this.publish(); } while (this.again);
+      } finally { this.publishing = null; }
+      this.scheduleNext();
+    })();
+    return this.publishing;
   }
 
   /**

@@ -61,7 +61,9 @@ the profile.
 To join someone else's invite: `printf '%s' "$INVITE" | ghostly invite join --label bob` (stdin keeps it out of `ps`
 and the shell's history; `ghostly invite join <ghostly1… or link>` works too, with a warning). With no invite given,
 a join whose stdin stays empty says so on stderr after 2 s and gives up with a usage error after 60 s; `invite join -`
-waits for stdin as long as it takes. Any command that reads stdin takes at most 16 MiB there, the most a daemon's
+waits for stdin as long as it takes. A command that reads what you type at a terminal (`send --stdin`,
+`engine <method> -`, `app send … -`, a card's `--json -`) first says on stderr how to end it (Ctrl-D). Any command
+that reads stdin takes at most 16 MiB there, the most a daemon's
 request line holds: more is refused as it comes (`bad_request`), and so is a file a request carries (a card's `--json`,
 `identity complete --evidence-file`, `x401 credential add`). A request whose JSON passes 16 MiB all the same (a text's
 escapes) is refused before it goes to the daemon. The invite is the app's own, so
@@ -83,6 +85,7 @@ tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tool
 | `profile set --name <name>`, `profile picture <jpeg>` | What contacts see |
 | `status set [text…] [--emoji <emoji>] [--availability available\|busy\|away\|dnd] [--until 2h]`, `status show`, `status clear` | The status paired contacts see: up to 60 characters, one emoji, an availability (`dnd`: Do not disturb), until a time. A daemon says it at once; without one it goes on each chat's next live session |
 | `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice); the `group auto` and `call auto` settings and the chats' holds (`chat disconnect --hold`) travel with it |
+| `ghostly device` | None: a CLI profile is on this one device only. It cannot be added to another device, moved or taken over, and the app's Add a device cannot add it; to run it on another machine, back it up here, restore it there and stop using it here. `ghostly device …` says so as a usage error (exit 2) |
 
 Only one process opens a profile at a time.
 
@@ -101,7 +104,8 @@ While it runs, every command goes through its socket. With no daemon, a command 
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
 The daemon listens on a Unix socket, `daemon.sock` in the profile's folder (or in `ghostly-<hash>/` in `$XDG_RUNTIME_DIR`,
-else `/tmp/ghostly-<uid>-<hash>/`, when that path is too long for a socket), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
+else in the system temp folder (`$TMPDIR`, on macOS `/var/folders/…/T/`), else in `/tmp/ghostly-<uid>-<hash>/`, when that
+path is too long for a socket; the daemon removes that folder when it stops), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
 One JSON object per line each way:
 
 ```json
@@ -151,10 +155,12 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
   events get through. See [Allowlist](#allowlist).
 - `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
-- `--translate <lang>` (also on `events` and `chat history`) adds `translation: {from, text}` to a message a contact
-  or a member sent in another language, made on this machine by the translation runtime the Desktop downloads
-  (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in the data folder). Without the runtime it
-  says so once on stderr and prints messages as they are. See the CLI README's Translation section.
+- `--translate <lang>` (also on `events` and `chat history`): **not in this build yet.** The CLI has no language
+  detector yet, so it translates nothing, with or without the runtime: it says so once on stderr ("--translate cannot
+  translate in this build of the CLI") and prints messages as they are. Once it has one, the flag adds
+  `translation: {from, text}` to a message a contact or a member sent in another language, made on this machine by the
+  translation runtime the Desktop downloads (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in
+  the data folder); without the runtime it will say so once on stderr. See the CLI README's Translation section.
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
   arguments, so a contact's text cannot reach the shell), and `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID` and
   `GHOSTLY_EVENT_SEQ` in its environment. It also gets `GHOSTLY_HOME` and `GHOSTLY_PROFILE` of the folder and profile
@@ -259,7 +265,7 @@ reactions, typing). An `events.gap` still comes through as it is: turns may have
 | Invites and chats | `invite create\|join` (`join` with no invite reads it from stdin), `chat list\|show\|history\|wait\|rename\|remove\|verify`, `send` (argument or `--stdin`; `--reply <message>` quotes one), `edit <chat> <message>` (a status updated in place), `message retry\|delete\|details` (`delete --everyone` takes one of yours off every member's device too), `react <chat> <message> <emoji>` (`--remove` takes yours back), `forward <chat> <message>… --to <chat\|group>…` (up to 5; files from the bytes here), `typing <chat> [--kind typing\|recording\|thinking] [--status <text>] [--for s] [--stop]` |
 | Transports | `chat transport <chat> auto\|dht\|webrtc\|iroh\|hyperdht`, `chat connect\|disconnect`, `chat disconnect <chat> --hold <minutes>` (off the direct link that long, on the DHT; `settings online false` is the whole profile); relays and ICE servers with `settings set` (the CLI reaches TURN over UDP only: a `turns:` or `?transport=tcp` server is kept for the apps, unused here, and the answer says so; so is `hyperdhtRelay`: the CLI runs HyperDHT itself and dials through the relay only with Hide my IP from contacts, not settable yet) |
 | Files and voice | `file send <chat\|group> <path>` (to a group: up to 100 MiB, fetched by each member's app from a member who has it), `file send … --voice [ms]` (length and waveform measured from the file), `file send … --reply <message>` (quotes it), `file accept\|decline\|pause\|resume\|cancel\|resend\|request [<chat>] <file>` (a resent file goes on from what the receiver holds), `file wait <file>`, `file save <file> [--wait]`. Files over 25 MiB wait for `file accept`, and so does a group's file that did not come by itself (over 8 MiB). `message.received` carries the file (`id`, and a voice note's `duration` and `peaks`); `file.*` events name its `messageId` |
-| Groups | `group create <name>` (a community: its `link`, and the `url` that opens it in the app, as `group link` answers them) or `--mesh` (private), `group join` (with no link, from stdin; a one-shot waits up to 60 s to be let in, then answers `"joined":true|false` and the `stage`, with the next step on stderr when it is not in; in a group under the link's id already, another's link is kept beside it, and it answers `"joined":false` at once with how to pick, `others` in `group show`), `group send … --mention <member> --reply <message>` (answers with the message id), `group history` (each message names its author), `group react`, `group edit <group> <message>` (a status updated in place), `group typing <group>` (private groups: typing, recording, thinking or a status line), `--wait sent` on both (until an edge took it); `group accept\|decline <group>`, `group auto on --from <chat>` (the daemon accepts that chat's invitations by itself); admin: `group invite\|remove\|admin\|rotate\|link\|picture\|call\|hub\|rename` (`group rename <group> <name…>` keeps the picture) |
+| Groups | `group create <name>` (a community: its `link`, and the `url` that opens it in the app, as `group link` answers them) or `--mesh` (private), `group join` (with no link, from stdin; a one-shot waits up to 60 s to be let in, then answers `"joined":true|false` and the `stage`, with the next step on stderr when it is not in; in a group under the link's id already, another's link is kept beside it, and it answers `"joined":false` at once with how to pick, `others` in `group show`), `group send … --mention <member> --reply <message>` (answers with the message id; up to 16 members mentioned, more is refused), `group history` (each message names its author), `group react`, `group edit <group> <message>` (a status updated in place), `group typing <group>` (private groups: typing, recording, thinking or a status line), `--wait sent` on both (until an edge took it); `group accept\|decline <group>`, `group auto on --from <chat>` (the daemon accepts that chat's invitations by itself); admin: `group invite\|remove\|admin\|rotate\|link\|picture\|call\|hub\|rename` (`group rename <group> <name…>` keeps the picture) |
 | Wallets | `wallet create cashu\|lightning\|arkade\|spark\|bitcoin\|fedimint\|usdt` (`fedimint --invite <code>`; Spark on Mainnet with your Breez API key; `--stdin` takes secret fields as `name=value` lines, `api-key=…` too, out of `ps` and the shell's history), `wallet add-mint`, `wallet list` (a balance not read yet is `null`, with `status` `locked`, `reading` or `error`, never 0), `wallet faucet` (test coins), `wallet receive\|address\|redeem\|history` (`wallet redeem` with no token or `-` reads it from stdin), `wallet remove` (refused while it holds or awaits money), several `lightning` cards |
 | Payments | `chat pay <chat> <sats>`, `chat request`, `chat pay-request`, `chat accept`, `pay <invoice\|address\|lnurl>`, `payment list\|check\|reclaim` |
 | Identities | `identity providers\|list\|add\|complete\|cancel\|remove` (`add --stdin` takes a signer's fields as `name=value` lines, a NIP-46 `bunker://` link out of `ps` and the shell's history), `identity share\|withdraw\|recheck <chat> <id>`, `identity contact <chat>` |
@@ -294,7 +300,10 @@ key), which every answer and event carries. What the CLI does when names meet:
 - A group you are in wins over an invitation with the same name or id prefix; an invitation is found by its id, and
   by a name or prefix none of your groups has.
 - A member's whole key is that member, whatever another member calls itself. A prefix or a name that fits two members
-  is refused.
+  is refused (exit 1, `bad_request`, `details.matches` with each one's `key` and `name`), naming them by name and key
+  prefix: use its key, which `ghostly group show <group>` lists. A ref no member answers to says so and points there
+  too (exit 3, `not_found`); your own name or key says it is you (exit 1, `bad_request`), in `--mention` as in `group
+  remove`.
 
 Safety rules the CLI enforces:
 
@@ -308,7 +317,8 @@ Safety rules the CLI enforces:
   `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo,
   `lnurlInvoice`'s comment, the name of `createGroup`, `renameGroup` and `addService`, `updateSettings`' nick, `setOwnStatus`'
   text and the note or profile fields of `nostrDraft` through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5) unless
-  `--force`, before anything is sent or asked of a server.
+  `--force`, before anything is sent or asked of a server. A text it would read past 16 KiB of UTF-8 (the most any
+  text Ghostly sends carries; a memo goes as its first 140 characters) is refused with its size instead (`bad_request`).
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group create` and `group link`, for a group's link, and `invite create`, for the invite it makes).
 
 Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out),
@@ -430,11 +440,16 @@ The audio contract, one Unix socket per call:
 - **From the call.** The contact's voice in 20 ms frames, as they are decoded.
 - **To the call.** Write any amount, at any pace: the CLI plays it at real time, and silence when there is nothing.
 - **Barge-in.** `ghostly call flush` drops what is queued, at once.
+- **Falling behind.** A program that stops reading finds at most 1 s of the contact's voice waiting when it reads
+  again, the system's socket buffer included; what comes meanwhile is dropped. `call pipe` keeps more on top for a
+  player that stops reading: its stdout pipe and its own buffers, about 260-350 KiB (some 3 s at 48 kHz, 16-20 s at
+  8 kHz).
 - **End.** The program reads EOF when the call ends; `call.ended` says why (`hangup`, `remote-hangup`, `missed`,
   `rejected`, `unanswered`, `crossed`, `failed`, `stopped`).
 - **Silence.** `call.stalled` says the contact's packets stopped for 5 s (its side may have died), `call.resumed` that
   they came back; after 15 s with none the call ends as `failed`.
-- **Shell pipelines.** `ghostly call pipe` puts a call's audio on stdin and stdout, for sox or ffmpeg.
+- **Shell pipelines.** `ghostly call pipe` puts a call's audio on stdin and stdout, for sox or ffmpeg. Ctrl-C stops
+  the pipe, not the call (exit 130, and stderr says how to end it: `ghostly call hangup <call>`).
 
 **When a call does not connect** (it stays `connecting`, then ends `failed`): the daemon's log lists the candidates
 each side offered and every ICE state, and `call list` shows `stats.ice` (the state and the pair). A VPN that is the

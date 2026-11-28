@@ -361,14 +361,16 @@ test("a second call while on one: End and answer ends the first on both sides an
   for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
   expect(await microphones()).toBe(1);
 
-  // Carol calls: it rings over the call with two choices only (and Delete chat), and says what answering does.
+  // Carol calls: it rings over the call with two choices only (and Block contact and Delete chat), and says what
+  // answering does.
   await expect(carol.page.getByTestId("call-audio")).toBeEnabled();
   await carol.page.getByTestId("call-audio").click();
   const ring = alice.page.getByRole("alertdialog");
   await expect(ring).toBeVisible({ timeout: 30_000 });
   await expect(ring).toHaveAccessibleDescription("Incoming audio call... Answering ends your current call");
-  await expect(ring.getByRole("button")).toHaveCount(3);
+  await expect(ring.getByRole("button")).toHaveCount(4);
   await expect(ring.getByRole("button", { name: "Decline" })).toBeVisible();
+  await expect(ring.getByRole("button", { name: "Block contact" })).toBeVisible();
   await expect(ring.getByRole("button", { name: "Delete chat" })).toBeVisible();
   await expect(ring.getByRole("button", { name: /^Accept/ })).toHaveCount(0);
 

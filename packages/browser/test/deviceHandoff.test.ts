@@ -7,7 +7,7 @@ import {
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import {
-  HandoffGiver, HandoffTaker, MAX_HELD_FILES, STOPPED_STEP, WOKEN_CONNECT_MS, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
+  HANDOFF_LIST_MAX_ENTRIES, HandoffGiver, HandoffTaker, MAX_HELD_FILES, STOPPED_STEP, WOKEN_CONNECT_MS, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
   type BusyReport, type HandoffStaging, type HandoffStagingHost, type HandoffStay, type HandoffView, type LocalBusy, type QuiesceCancel, type TakerPorts,
 } from "../src/devices/handoff";
 import { makeHandoffVerifier, type HandoffVerifier } from "../src/devices/handoffPake";
@@ -764,6 +764,49 @@ describe("a giver that went back to active", () => {
     await until(() => w.quiesced.length === 1);
     const manifests = w.link.sent.slice(before).filter((s) => s.frame.t === "handoff-manifest").map((s) => readHandoffManifest(s.frame)!);
     expect(manifests.flatMap((m) => m.parts.map((p) => p[0]))).toContain(`file/${file.sha256}`);
+  });
+});
+
+describe("lists read across frames", () => {
+  // More frames of 300 than a list of `HANDOFF_LIST_MAX_ENTRIES` takes.
+  const FRAMES = Math.ceil(HANDOFF_LIST_MAX_ENTRIES / 300) + 2;
+  const digests = Array.from({ length: 300 }, (_, i) => toBase64Url(sha256(new TextEncoder().encode(`listed ${i}`))));
+
+  it("a list of what the taker holds that never ends: the giver stops it as damaged, still the active device", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(1_000));
+    w.link.meddle = (from, frame) => (from === B && frame.t === "handoff-have" ? null : frame);
+    await w.taker.pull(PASSWORD);
+    await until(() => w.giver.view()?.pass === 1);
+    for (let i = 0; i < FRAMES && w.giver.view()?.failure === undefined; i++) await w.giver.receive(B, { t: "handoff-have", d: digests, more: true });
+    expect(w.giver.view()?.failure).toBe("damaged");
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.giverRecords.record.state).toBe("active");
+  });
+
+  it("a manifest that never ends: the taker stops it as damaged", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(1_000));
+    w.link.meddle = (from, frame) => (from === A && frame.t === "handoff-manifest" ? null : frame);
+    await w.taker.pull(PASSWORD);
+    await until(() => w.link.sent.some((s) => s.from === A && s.frame.t === "handoff-manifest"));
+    const later = digests.map((digest): HandoffPart => [`file/${digest}`, 1, digest]);
+    for (let i = 0; i < FRAMES && w.taker.view()?.step !== "failed"; i++) await w.taker.receive(A, { t: "handoff-manifest", pass: 1, parts: [], later, ids: {}, more: true });
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.taker.view()!.failure).toBe("damaged");
+    expect(w.takerRecords.record.state).toBe("standby");
+  });
+
+  it("a manifest that lists one file id under two digests: the taker stops it as damaged before it writes either", async () => {
+    const w = world();
+    const one = w.profile.add("f1", bytesOf(1_000));
+    const two = w.profile.add("f2", bytesOf(2_000));
+    w.link.meddle = (from, frame) => (from === A && frame.t === "handoff-manifest" ? { ...frame, ids: { ...(frame.ids as object), [two.sha256]: [one.id] } } : frame);
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.step === "failed");
+    expect(w.taker.view()!.failure).toBe("damaged");
+    expect(w.storage.begun).toHaveLength(0);
+    expect(w.link.sent.find((s) => s.from === B && s.frame.t === "handoff-cancel")?.frame).toMatchObject({ why: "damaged" });
   });
 });
 

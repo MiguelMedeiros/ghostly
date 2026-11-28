@@ -96,11 +96,11 @@ function checked(card: Record<string, unknown>): StatusCard {
   return result.card;
 }
 
-/** Every text in a card's fields (title, step, items, runs, links…), as the contact's app may show it. */
-function cardTexts(value: unknown, out: string[] = []): string[] {
+/** Every text in a card's fields (title, step, items, runs, links…), as the contact's app may show it, or in a call's. */
+export function textsIn(value: unknown, out: string[] = []): string[] {
   if (typeof value === "string") out.push(value);
-  else if (Array.isArray(value)) for (const item of value) cardTexts(item, out);
-  else if (isObject(value)) for (const item of Object.values(value)) cardTexts(item, out);
+  else if (Array.isArray(value)) for (const item of value) textsIn(item, out);
+  else if (isObject(value)) for (const item of Object.values(value)) textsIn(item, out);
   return out;
 }
 
@@ -109,7 +109,7 @@ function cardTexts(value: unknown, out: string[] = []): string[] {
  * read as given and as a card carries it (`cardLine`).
  */
 export function secretIn(value: unknown): ReturnType<typeof findSecret> {
-  for (const text of cardTexts(value)) {
+  for (const text of textsIn(value)) {
     const secret = findSecret(text) ?? findSecret(cardLine(text, Infinity) ?? "");
     if (secret) return secret;
   }
@@ -130,7 +130,7 @@ function guardSecrets(fields: unknown, params: Params, verb: string): void {
     const secret = findSecret(text);
     if (secret) throw new CliError("confirm", `The card's text looks like ${secretWords(secret)}; ${verb} it with --force if you mean to`, { kind: secret.kind });
   };
-  for (const text of cardTexts([fields, params.run])) { check(text); check(cardLine(text, Infinity) ?? ""); }
+  for (const text of textsIn([fields, params.run])) { check(text); check(cardLine(text, Infinity) ?? ""); }
   if (typeof params.text === "string") check(params.text);
 }
 

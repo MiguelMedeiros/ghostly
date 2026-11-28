@@ -74,7 +74,8 @@ describe("ghostly x401 key and credential", { timeout: 120_000 }, () => {
     expect(folded.label).toBe("two lines three");
     const longest = ok(await add("é".repeat(80))).credential as Record<string, unknown>;
     expect(longest.label).toBe("é".repeat(80));
-    expect(error(await add("L".repeat(81)), "bad_request", 1).message).toBe("A credential's label is up to 80 characters on one line");
+    // The command line's own check, before the profile opens (the engine's, bad_request, stays for socket callers).
+    expect(error(await add("L".repeat(81)), "usage", 2).message).toBe("--label is up to 80 characters on one line, not 81");
     // The refused one is not kept.
     expect((ok(await run("x401", "credential", "list")).credentials as unknown[])).toHaveLength(2);
     for (const c of ok(await run("x401", "credential", "list")).credentials as { id: string }[]) ok(await run("x401", "credential", "remove", c.id));

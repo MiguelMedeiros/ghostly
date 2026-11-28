@@ -143,6 +143,18 @@ describe("a chat's reply index as its list changes", () => {
     expect(found.byRef.get(wire(999))?.text).toBe("m999");
   });
 
+  it("reads only an old row that changed in its place (a reaction on it), not the history after it", () => {
+    const index = replyIndexer();
+    const { reads, rows } = counted(Array.from({ length: 1_000 }, (_, i) => row(i)));
+    index(rows);
+    const reacted = rows.map((m, i) => (i === 100 ? { ...m, text: "reacted" } : m));
+    reads.n = 0;
+    const found = index(reacted);
+    expect(reads.n).toBeLessThan(40);
+    expect(found.byRef.get(wire(100))?.text).toBe("reacted");
+    expect(found.byId.get(`peer_${wire(999)}`)?.text).toBe("m999");
+  });
+
   it("reads only that row when a text I sent takes its wire id", () => {
     const index = replyIndexer();
     const { reads, rows } = counted(Array.from({ length: 1_000 }, (_, i) => row(i)));
@@ -178,6 +190,9 @@ describe("a chat's reply index as its list changes", () => {
       l => (l.length ? [...l, { ...l[pick(l.length)], id: `peer_copy${next++}` }] : l),
       // A row named by a payment now.
       l => l.map((m, i) => (i === l.length - 1 ? { ...m, paymentId: `pay${next++}` } : m)),
+      // An old row changed in its place, or named by a payment now there.
+      l => { const at = l.length ? pick(l.length) : -1; return l.map((m, i) => (i === at ? { ...m, text: "edited" } : m)); },
+      l => { const at = l.length ? pick(l.length) : -1; return l.map((m, i) => (i === at ? { ...m, paymentId: `pay${next++}` } : m)); },
     ];
     for (let i = 0; i < 600; i++) {
       list = steps[pick(steps.length)](list);

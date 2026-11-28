@@ -52,7 +52,8 @@ export function NameStep() {
   // name's own rule (one more letter fits), never in UTF-16 units; a change the hook cut says so after this (`onDropped`).
   const [full, setFull] = useState(false);
   const keep = (next: string) => { if (fitsOwnName(next + "a")) setFull(false); setName(next); };
-  // Counted in characters as seen, never cut inside an emoji (`fitsOwnName`): no `maxLength`, which counts UTF-16 units.
+  // Counted in code points as contacts count them, never cut inside an emoji (`fitsOwnName`): no `maxLength`, which
+  // counts UTF-16 units.
   const nameField = useFittedNameField(name, keep, fitsOwnName, () => setFull(true));
   const input = nameField.ref;
 

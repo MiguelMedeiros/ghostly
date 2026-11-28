@@ -1,4 +1,6 @@
 import { closeSync, openSync, readSync, type Stats, statSync } from "node:fs";
+import { sep } from "node:path";
+import { isatty } from "node:tty";
 import { reactionEmoji } from "@ghostly/core";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
@@ -6,6 +8,7 @@ import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESUL
 import { decimalNumber, type OptionSpec, type Parsed } from "../args";
 import { CliError, localFileError, shownValue } from "../errors";
 import { userPath } from "../profiles";
+import { typingStatus } from "../typing";
 
 /**
  * The commands that are one API method each: how the command line becomes the method's parameters. Commands with
@@ -54,6 +57,22 @@ export function here(path: unknown): string | undefined {
 }
 
 /**
+ * `here` for a file a command writes (`app publish --out` and `--key`, `listen --cursor`): a separator at its end names
+ * a folder, which resolving the path drops. Before, "--out sub/" with no sub folder wrote the bundle as a file named sub
+ * (and the next publish packed it). One not there is refused as `file save --path` refuses it; a folder that is there
+ * is the command's to answer, as without the slash.
+ */
+export function fileHere(path: unknown): string | undefined {
+  const resolved = here(path);
+  if (resolved === undefined || !((path as string).endsWith("/") || (path as string).endsWith(sep))) return resolved;
+  let there: Stats | undefined;
+  try { there = statSync(resolved); } catch { /* said below */ }
+  if (!there) throw new CliError("not_found", `No such folder: ${resolved} (make it first, or name a file in a folder that is there)`);
+  if (!there.isDirectory()) throw new CliError("not_found", `${resolved} is a file, not a folder: name a file in a folder that is there`);
+  return resolved;
+}
+
+/**
  * A path on this machine a command reads (`file send`, a picture, `profile backup --out`'s folder), looked at before the
  * profile opens: one not there is not_found (`missing`, or "No such file or folder"), one not allowed refused. Before, a
  * one-shot opened the profile and went online first (~1 s on a big profile) to say so. The API keeps its check for
@@ -85,6 +104,7 @@ export const STDIN_TOO_BIG = "More than 16 MiB came on stdin, more than any comm
  * create a string longer than 0x1fffffe8 characters", and past 16 MiB a daemon cut the line ("The daemon went away").
  */
 export function readInput(file: string | 0): string {
+  if (file === 0) noteTerminalRead();
   const fd = file === 0 ? 0 : openSync(file, "r");
   try {
     const chunks: Buffer[] = [];
@@ -98,6 +118,20 @@ export function readInput(file: string | 0): string {
       chunks.push(chunk.subarray(0, read));
     }
   } finally { if (file !== 0) closeSync(fd); }
+}
+
+/** What a read of stdin says first on a terminal: how to end what is typed there. */
+export const TERMINAL_READ = `Reading from the terminal: end with ${process.platform === "win32" ? "Ctrl-Z, then Enter" : "Ctrl-D"}`;
+
+/**
+ * Before every read of stdin (`readInput(0)`, main.ts's `readStdin`): on a terminal, one line on stderr saying how the
+ * input ends. `engine <method> -`, `send --stdin`, `app send … -` and a card's `--json -` sat there with no word until
+ * Ctrl-D, while the commands that refuse a terminal say so before they read. Never on stdout, nor on a pipe or a file.
+ * `isatty(0)`, not `process.stdin.isTTY`: making `process.stdin` turns a pipe non-blocking, and `readSync(0)` then
+ * fails with EAGAIN while the writer is slow.
+ */
+export function noteTerminalRead(tty = isatty(0), write: (text: string) => void = (text) => { process.stderr.write(text); }): void {
+  if (tty) write(`ghostly: ${TERMINAL_READ}\n`);
 }
 
 /**
@@ -148,6 +182,17 @@ export const buttonOptions: Record<string, OptionSpec> = {
   once: { type: "boolean", description: "Each person answers once: after a press their app offers the buttons no more" },
   id: { type: "string", description: "The question's id (default: made up, ask-…)" },
 };
+/**
+ * Bounds of list flags the engine counts, written out (the packages that hold them are not loaded here; test/flagCaps.test.ts
+ * checks they match): `group send --mention` (MENTION_LIMITS.count). Each value is counted once, as the method counts it.
+ * Past them, a usage error (exit 2) naming the flag before the profile opens: before, the method refused them after the
+ * profile opened (`bad_request`, exit 1), a one-shot online first. Not `forward --to`: the method counts the chats and
+ * groups its words name, and a chat named by its name and its id is one of the 5, which only the open profile knows.
+ */
+export const LIST_LIMITS = { mention: 16 } as const;
+export const listAtMost = (options: Parsed["options"], flag: keyof typeof LIST_LIMITS): void =>
+  given(flag, Array.isArray(options[flag]) ? [...new Set(options[flag] as unknown[])] : undefined, LIST_LIMITS[flag]);
+
 /** The group's entry link lets anyone join: printed only when asked for. */
 export const showSecret: Record<string, OptionSpec> = { "show-secret": { type: "boolean", description: "Print the group's entry link (anyone who has it can join)" } };
 /** A pending chat's invite code lets whoever reads it take the chat: printed only when asked for. */
@@ -170,6 +215,22 @@ export function typingFor(options: Parsed["options"]): number | undefined {
   if (typeof seconds !== "number" || !(seconds >= 1 && seconds <= 600)) throw new CliError("usage", `--for takes a number of seconds from 1 to 600, not ${shownValue(seconds)}`);
   if (options.stop === true) throw new CliError("usage", "--for keeps it on: not with --stop");
   return seconds;
+}
+
+/**
+ * `--kind` and `--status` of the typing commands, checked before the profile opens as `status set` checks its text: a
+ * usage error (exit 2) that names the option, and a status too long gives its count. Before, the API answered after the
+ * profile opened (`bad_request`, exit 1) in its socket words ("status: at most 40 characters"). A blank `--status` is
+ * no status, as `--status ""` already was.
+ */
+export function typingWords(options: Parsed["options"]): { kind?: string; status?: string } {
+  const status = typeof options.status === "string" && options.status.trim() ? options.status : undefined;
+  if (options.stop === true) {
+    const given = options.kind !== undefined ? "--kind" : status !== undefined ? "--status" : undefined;
+    if (given) throw new CliError("usage", `${given} goes with a start, not with --stop`);
+  }
+  typingStatus(status, "--status", "usage");
+  return { kind: options.kind as string | undefined, status };
 }
 
 /**
@@ -296,8 +357,8 @@ function oneWord(options: Parsed["options"], flag: string, words: readonly strin
   if (options[flag] !== undefined && !words.includes(options[flag] as string)) throw new CliError("usage", `--${flag} takes ${listed(words)}, not ${shownValue(options[flag])}`);
 }
 
-/** A flag given more times than the card holds: a usage error that says how many it takes. */
-function given(flag: string, values: unknown, max: number): void {
+/** A flag given more times than the card (or the method) holds: a usage error that says how many it takes. */
+export function given(flag: string, values: unknown, max: number): void {
   if (Array.isArray(values) && values.length > max) throw new CliError("usage", `--${flag} is given at most ${max} times, not ${values.length}`);
 }
 

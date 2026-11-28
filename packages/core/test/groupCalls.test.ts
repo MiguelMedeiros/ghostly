@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { utf8Decode } from "../src/bytes";
+import { fromBase64Url, utf8Decode } from "../src/bytes";
 import { identityFromSeed, publicKeyFromZ32 } from "../src/identity";
 import {
-  GROUP_CALL_NONCE_S, GROUP_CALL_SKEW_S, GROUP_CALL_SOURCES, MAX_GROUP_CALL_NAME, groupCallModerationBytes, groupCallRequestBytes, groupCallRoom,
-  signGroupCallModeration, signGroupCallRequest, verifyGroupCallModeration, verifyGroupCallRequest, type GroupCallNonces,
+  GROUP_CALL_NONCE_S, GROUP_CALL_SKEW_S, GROUP_CALL_SOURCES, MAX_GROUP_CALL_NAME, groupCallModerationBytes, groupCallOccupancyBytes, groupCallRequestBytes,
+  groupCallRoom, parseGroupCallOccupancy, signGroupCallModeration, signGroupCallOccupancy, signGroupCallRequest, verifyGroupCallModeration,
+  verifyGroupCallOccupancy, verifyGroupCallRequest, type GroupCallNonces,
 } from "../src/groupCalls";
 
 // WISP 602 § Test vector, byte for byte.
@@ -179,5 +180,102 @@ describe("group call moderation request (WISP 602 § Moderation)", () => {
       { ...mute(), act: "state" }, { ...mute(), act: "state", target: "", src: ["camera"] }, { ...mute(), ts: 1.5 }, { ...mute(), sig: MODERATE_SIG.slice(1) },
     ];
     for (const request of shapes) expect(verifyGroupCallModeration(request, SFU, NOW, new Map())).toEqual({ ok: false, reason: "malformed" });
+  });
+
+  it("refuses a name or any other field the WISP does not list, signed as it stands, and one missing a field", () => {
+    const shapes: unknown[] = [
+      { ...mute(), name: "Ana" }, { ...mute(), why: "x".repeat(2000) }, { ...mute(), sig2: MODERATE_SIG },
+      (({ src: _src, ...rest }) => rest)(signGroupCallModeration({ sfu: SFU, g: G, act: "state", ts: TS, n: N }, SEED)),
+    ];
+    for (const request of shapes) expect(verifyGroupCallModeration(request, SFU, NOW, new Map())).toEqual({ ok: false, reason: "malformed" });
+  });
+
+  it("takes the WISP's vector as written there, and every act as the app's builder sends it over the wire", () => {
+    const vector = { v: 1, g: G, k: K, room: ROOM, act: "mute", target: TARGET, src: ["microphone"], ts: TS, n: N, sig: MODERATE_SIG };
+    expect(verifyGroupCallModeration(vector, SFU, NOW, new Map())).toEqual({ ok: true, request: vector });
+    // The builder (unchanged since the route shipped in 1.13.0) is what the app posts as JSON.
+    const acts = [
+      { act: "mute", target: TARGET, src: ["camera", "microphone", "screen_share"] }, { act: "allow", target: TARGET, src: ["microphone"] },
+      { act: "remove", target: TARGET }, { act: "unban", target: TARGET }, { act: "state" },
+    ] as const;
+    for (const ask of acts) {
+      const wire = JSON.parse(JSON.stringify(signGroupCallModeration({ sfu: SFU, g: G, ts: TS, n: N, ...ask }, SEED)));
+      expect(Object.keys(wire).sort()).toEqual(["act", "g", "k", "n", "room", "sig", "src", "target", "ts", "v"]);
+      expect(verifyGroupCallModeration(wire, SFU, NOW, new Map())).toEqual({ ok: true, request: wire });
+    }
+  });
+});
+
+// WISP 602 § Occupancy's test vector: the token request's key and inputs, under the occupancy tag.
+const OCCUPANCY_HEX = "5b2267686f73746c792d7366752f31206f63637570616e6379222c2268747470733a2f2f63616c6c2e67686f73746c792e746f6f6c73222c226f4b47696f36536c7071656f71617172724b32757277222c22675f6f4b47696f36536c7071656f71617172724b32757277222c2279716f6f787839753361656d68386d6f3577637171313679756675366a69746f7571316f347a6137353164676572316967676879222c313739343730303830302c2245424553457851564668635947526f62484230654877225d";
+const OCCUPANCY_SIG = "hlyYqmKssxvlNpMEQIUUd5k2arVEyIVBKbwYL3L7CfLgvZYFlZy0ZfwA8DAujkC-rhmsG0oxTSJQBRNEfJl1CQ";
+const OCCUPANCY_SIG_HEX = "865c98aa62acb31be53693044085147799366ab544c8854129bc182f72fb09f2e0bd9605959cb465fc00f0302e8e40beae19ac1b4a314d22500513447c997509";
+
+const occupancy = () => signGroupCallOccupancy({ sfu: SFU, g: G, ts: TS, n: N }, SEED);
+
+describe("group call occupancy request (WISP 602 § Occupancy)", () => {
+  it("signs the test vector byte for byte", () => {
+    const bytes = groupCallOccupancyBytes(SFU, G, ROOM, K, TS, N);
+    expect(bytes).toHaveLength(199);
+    expect(utf8Decode(bytes)).toBe(`["ghostly-sfu/1 occupancy","https://call.ghostly.tools","oKGio6SlpqeoqaqrrK2urw","g_oKGio6SlpqeoqaqrrK2urw","${K}",1794700800,"EBESExQVFhcYGRobHB0eHw"]`);
+    expect(hex(bytes)).toBe(OCCUPANCY_HEX);
+    expect(occupancy()).toEqual({ v: 1, g: G, k: K, room: ROOM, ts: TS, n: N, sig: OCCUPANCY_SIG });
+    expect(hex(Buffer.from(OCCUPANCY_SIG, "base64url"))).toBe(OCCUPANCY_SIG_HEX);
+  });
+
+  it("draws a new 16-byte nonce for each request, so the node never takes the next ask for a replay", () => {
+    const a = signGroupCallOccupancy({ sfu: SFU, g: G }, SEED), b = signGroupCallOccupancy({ sfu: SFU, g: G }, SEED);
+    expect(a.n).not.toBe(b.n);
+    for (const { n } of [a, b]) {
+      expect(n).toMatch(/^[A-Za-z0-9_-]{22}$/);
+      expect(fromBase64Url(n)).toHaveLength(16);
+    }
+  });
+
+  it("takes the test vector, then refuses it again as replayed", () => {
+    const seen: GroupCallNonces = new Map();
+    expect(verifyGroupCallOccupancy(occupancy(), SFU, NOW, seen)).toEqual({ ok: true, request: occupancy() });
+    expect(verifyGroupCallOccupancy(occupancy(), SFU, NOW + 1000, seen)).toEqual({ ok: false, reason: "replayed" });
+  });
+
+  it("is none of the other two requests, and neither of them is one", () => {
+    const token = signGroupCallRequest({ sfu: SFU, g: G, ts: TS, n: N }, SEED);
+    const state = signGroupCallModeration({ sfu: SFU, g: G, act: "state", ts: TS, n: N }, SEED);
+    expect(verifyGroupCallOccupancy(token, SFU, NOW, new Map())).toEqual({ ok: false, reason: "signature" });
+    expect(verifyGroupCallRequest(occupancy(), SFU, NOW, new Map())).toEqual({ ok: false, reason: "signature" });
+    expect(verifyGroupCallModeration({ ...state, sig: occupancy().sig }, SFU, NOW, new Map())).toEqual({ ok: false, reason: "signature" });
+  });
+
+  it("refuses a request whose signed fields changed, or made for another node", () => {
+    const changed = [{ ...occupancy(), ts: TS + 1 }, { ...occupancy(), n: "EBESExQVFhcYGRobHB0eHA" }, { ...occupancy(), k: identityFromSeed(new Uint8Array(32).fill(7)).pubKeyZ32 }];
+    for (const request of changed) expect(verifyGroupCallOccupancy(request, SFU, NOW, new Map())).toEqual({ ok: false, reason: "signature" });
+    expect(verifyGroupCallOccupancy(occupancy(), "https://other.example", NOW, new Map())).toEqual({ ok: false, reason: "signature" });
+  });
+
+  it("refuses a stale time and keeps no nonce of a refused request", () => {
+    for (const skew of [-GROUP_CALL_SKEW_S, GROUP_CALL_SKEW_S]) expect(verifyGroupCallOccupancy(occupancy(), SFU, NOW + skew * 1000, new Map()).ok).toBe(true);
+    for (const skew of [-GROUP_CALL_SKEW_S - 1, GROUP_CALL_SKEW_S + 1]) expect(verifyGroupCallOccupancy(occupancy(), SFU, NOW + skew * 1000, new Map())).toEqual({ ok: false, reason: "stale" });
+    const seen: GroupCallNonces = new Map();
+    expect(verifyGroupCallOccupancy({ ...occupancy(), ts: TS + 1 }, SFU, NOW, seen).ok).toBe(false);
+    expect(seen.size).toBe(0);
+  });
+
+  it("refuses a request out of shape, a name or any other field among them", () => {
+    const shapes: unknown[] = [
+      null, [], { ...occupancy(), v: 2 }, { ...occupancy(), room: G }, { ...occupancy(), g: "short" }, { ...occupancy(), k: K.toUpperCase() },
+      { ...occupancy(), ts: 1.5 }, { ...occupancy(), n: N + "A" }, { ...occupancy(), sig: OCCUPANCY_SIG.slice(1) },
+      { ...occupancy(), name: "Ana" }, { ...occupancy(), extra: 1 }, (({ n: _n, ...rest }) => rest)(occupancy()),
+    ];
+    for (const request of shapes) expect(verifyGroupCallOccupancy(request, SFU, NOW, new Map())).toEqual({ ok: false, reason: "malformed" });
+  });
+
+  it("reads the node's reply: a count of 0 or more, and since only while someone is in", () => {
+    expect(parseGroupCallOccupancy({ count: 3, since: 1794700500 })).toEqual({ count: 3, since: 1794700500 });
+    expect(parseGroupCallOccupancy({ count: 0 })).toEqual({ count: 0 });
+    expect(parseGroupCallOccupancy({ count: 0, since: 1794700500 })).toEqual({ count: 0 });
+    expect(parseGroupCallOccupancy({ count: 2 })).toEqual({ count: 2 });
+    expect(parseGroupCallOccupancy({ count: 2, since: "1794700500" })).toEqual({ count: 2 });
+    for (const raw of [null, [], {}, { count: -1 }, { count: 1.5 }, { count: "3" }, { count: Number.MAX_SAFE_INTEGER + 1 }])
+      expect(parseGroupCallOccupancy(raw), JSON.stringify(raw)).toBeNull();
   });
 });

@@ -164,16 +164,19 @@ describe("a daemon restarted while its 50 contacts are online, one relay at the 
 });
 
 /**
- * The 20 chats first in line (`nativeStartOrder`: the most recently live in the last run first) have their contact
- * away: it quit while the app was off, and said so on the relay. The engine started again on the default budget, each
- * chat's turn (`ResumeTurns`) noted as it is taken and given back.
+ * The 20 chats first in line (`nativeStartOrder`: the most recently live in the last run first, ties by id) have their
+ * contact away: it quit while the app was off, and said so on the relay. The engine started again on the default
+ * budget, each chat's turn (`ResumeTurns`) noted as it is taken and given back.
  */
 async function restartedWithAway() {
   const { contacts, rows, liveIn } = await lastRun();
   const stored = new Map((await db.getLinks()).map((link) => [link.id, link]));
   const lastLive = (i: number) => Math.max(0, ...(stored.get(rows[i].id)!.transportHistory ?? [])
     .filter((e) => e.kind === "live" || e.kind === "switched" || (e.kind === "down" && !e.restart)).map((e) => e.at));
-  const inLine = rows.map((_, i) => i).sort((a, b) => lastLive(b) - lastLive(a));
+  // Chats last live in the same millisecond (the last run brought several back on one round of relay answers) in the
+  // order of their ids, as the engine lines them up: in the rows' order, `chat-9` went before `chat-11`, the engine put
+  // it after, and when that tie fell across the tenth place one chat thought first waited its turn for the whole window.
+  const inLine = rows.map((_, i) => i).sort((a, b) => lastLive(b) - lastLive(a) || (rows[a].id < rows[b].id ? -1 : 1));
   const away = inLine.slice(0, AWAY), online = inLine.slice(AWAY);
   await settled(Promise.all(away.map((i) => contacts[i].stop(true))));
   await run(10_000);

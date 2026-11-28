@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 /**
  * A maintenance script refuses an argument it does not take (a typo, an option it never had) with its usage and exit
  * 2, before it does anything: `coverage -- cor` ran nothing and exited 0, `test:map -- --wirte` wrote nothing, and
- * `locales:sort -- --check` sorted (wrote) the files instead of checking them.
+ * `locales:sort -- --chek` sorted (wrote) the files instead of checking them.
  */
 const root = resolve(import.meta.dirname, "../../..");
 const run = (script: string, ...args: string[]) =>
@@ -17,7 +17,8 @@ describe("maintenance scripts refuse an argument they do not take", () => {
     ["coverage.mjs", ["--html"]],
     ["test-map.mjs", ["--wirte"]],
     ["test-map.mjs", ["--summary", "--sumary"]],
-    ["locales-sort.mjs", ["--check"]],
+    ["locales-sort.mjs", ["--chek"]],
+    ["locales-sort.mjs", ["--check", "--check"]],
     ["changes.mjs", ["--preveiw", "1.12.0"]],
     ["changes.mjs", ["1.12.0"]],
     ["changes.mjs", ["--preview", "1.12.0", "extra"]],

@@ -1,4 +1,5 @@
 import { RTC_CONFIG, RelayTransport, type PkarrTransport } from "@ghostly/core";
+import { irohRelayProblem } from "../platform/irohWeb";
 import { iceServerProblem } from "../shared/ice";
 import type { Settings } from "../shared/types";
 import { amendDevice, readDeviceRecord } from "./store";
@@ -69,11 +70,13 @@ export function standbyNetwork(network: DeviceNetwork | undefined, given?: Pkarr
     if (relays) given.configure?.({ relays, readRelays: network?.readRelays === true });
   } else transport = new RelayTransport(relays ? { relays } : {});
   const iceServers = [...(RTC_CONFIG.iceServers ?? []), ...(network?.iceServers ?? []).filter((server) => !iceServerProblem(server))];
+  // Held to what Settings takes (an enrollment's grant writes them as the active device sent them); none left, the defaults.
+  const irohRelays = (network?.irohRelays ?? []).filter((relay) => !irohRelayProblem(relay));
   return {
     off: network?.off === true,
     transport,
     ...(typeof RTCPeerConnection === "undefined" ? {} : { createPeerConnection: () => new RTCPeerConnection({ iceServers }) }),
-    ...(network?.irohRelays?.length ? { irohRelays: network.irohRelays } : {}),
+    ...(irohRelays.length ? { irohRelays } : {}),
     ...(network?.hyperdhtRelay ? { hyperdhtRelay: network.hyperdhtRelay } : {}),
   };
 }

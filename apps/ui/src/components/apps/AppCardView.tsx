@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import { appFingerprint, appRefPublisher, type AppCard } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { usePlatformValue } from "../../hooks/useServicesPlatform";
@@ -48,6 +48,9 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   // makes long. The pressed button turns busy so the press shows, and a second press opens nothing more.
   const [opening, setOpening] = useState<"open" | "anyway" | null>(null);
   const app = useInstalledApp(card.ref);
+  // The details screen goes with the app, uninstalled on it or elsewhere (the Apps page, another card of it): it is no
+  // longer chosen, or it would open again by itself once the app is installed again.
+  if (details && !app) setDetails(false);
   // A refused Open's line is of the app as it was: once the installed app reads otherwise (a store allows it again,
   // its publisher revokes it), the card says what the Apps page says, not the old refusal.
   const [errorOf, setErrorOf] = useState(app);
@@ -60,6 +63,22 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   const openRef = useCallback((button: HTMLButtonElement) => () => { openHadFocus.current = document.activeElement === button; }, []);
   const runAnywayRef = useRef<HTMLButtonElement>(null);
   const checkRef = useRef<HTMLSpanElement>(null);
+  // The app went while the focus was on the details screen its Run anyway opened (or on that screen's Uninstall
+  // question): uninstalled there, or elsewhere meanwhile. That button went with the app, and the screen gave the focus
+  // back to nothing. The card's Join (or its line saying to ask for a link) has it, not the page; never taken from where
+  // the person went meanwhile (the Apps page's own screen, where its Uninstall gives the focus to its Add). The screen
+  // is drawn over the window, outside the card's element, but its focus events reach the card through React.
+  const detailsHadFocus = useRef(false);
+  const focusIn = (e: FocusEvent<HTMLDivElement>) => { detailsHadFocus.current = details && !e.currentTarget.contains(e.target); };
+  const focusOut = (e: FocusEvent<HTMLDivElement>) => { if (e.relatedTarget) detailsHadFocus.current = false; };
+  const joinRef = useRef<HTMLButtonElement>(null);
+  const askRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    if (!detailsHadFocus.current || details || app) return;
+    detailsHadFocus.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body) (joinRef.current ?? askRef.current)?.focus({ preventScroll: true });
+  });
   useLayoutEffect(() => {
     if (!openHadFocus.current) return;
     openHadFocus.current = false;
@@ -87,7 +106,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       .finally(() => setOpening(null));
   };
   return (
-    <div className="px-3 py-2.5 space-y-2" data-testid="app-card" data-ref={card.ref}>
+    <div className="px-3 py-2.5 space-y-2" data-testid="app-card" data-ref={card.ref} onFocus={focusIn} onBlur={focusOut}>
       <div className="flex items-start gap-3">
         <AppIcon size={40} installed={app} />
         <div className="min-w-0 flex-1">
@@ -109,8 +128,8 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       {error && <p role="alert" dir={ownDirection(error)} className="chat-text-card-line text-danger-ink" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
         {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
-          : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
-            : <span className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : withName(t("apps.card.ask", { name: NAME }), contact)}</span>}
+          : card.url ? <Button ref={joinRef} variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
+            : <span ref={askRef} tabIndex={-1} className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : withName(t("apps.card.ask", { name: NAME }), contact)}</span>}
         {runAnyway && <Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => setDetails(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>
       </div>

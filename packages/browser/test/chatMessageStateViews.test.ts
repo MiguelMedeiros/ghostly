@@ -10,7 +10,7 @@ import type { EngineState, GroupView, StoredLink, StoredMessage } from "../src/s
 /**
  * What changes in a 1:1 chat's messages (a delete here or the contact's for everyone, a pin or an unpin, a reaction,
  * either side's, a pinned message's row coming after its pin) and what its DHT delivery says builds again that chat's
- * view alone, as its link's states do: every other chat's view and every group's stay the
+ * view alone, as its link's states do (chatLinkStateViews.test.ts): every other chat's view and every group's stay the
  * same objects. So does a compatibility chat's text that the data link delivered. Each built every chat's and group's
  * view. GhostLink is replaced by a recorder.
  */

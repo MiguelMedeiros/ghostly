@@ -14,6 +14,8 @@ import { initial } from "../lib/initial";
 import { errorText } from "../lib/errorText";
 import { fillNames } from "../lib/fillNodes";
 import { callWindowShown, watchWindowFilled, windowFilledNow } from "../lib/serviceWindows";
+// `mm:ss`, or `h:mm:ss` past the hour (an hour and five minutes read 65:00 before); the lock screen shows it too.
+import { callTime as formatDuration } from "../lib/callUnderLock";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -24,6 +26,8 @@ interface CallOverlayProps {
   isVideoOff: boolean;
   /** We are sending our screen instead of the camera. */
   isScreenSharing?: boolean;
+  /** The shared screen's sound goes with it, or not (the picture alone): the sharing notice says which. */
+  screenSound?: boolean;
   /** Offer the camera button: the call has a video lane our side may send on. */
   canSendVideo?: boolean;
   /** The share button works: that lane, in a browser that can capture the screen. */
@@ -50,6 +54,11 @@ interface CallOverlayProps {
   /** The chat is off screen. The call rides along in its small window until you go back to it. */
   pinned?: boolean;
   onReturnToChat?: () => void;
+  /**
+   * Where the focus goes when the call ends and what had it before is gone: a call answered by a ringing card's End and
+   * answer (the card and the call that was on both gone) had no button of its own to go back to. Null off screen.
+   */
+  returnFocus?: () => HTMLElement | null;
   /** Where to hang the call window, so it does not go off screen with its chat. */
   layer?: HTMLElement | null;
   /** The microphone, camera and speaker menu, where the call can switch them (`useCallDevices`). */
@@ -74,15 +83,6 @@ function Grips({ handleProps }: { handleProps: (corner: Corner) => Record<string
   );
 }
 
-/** `mm:ss`, or `h:mm:ss` past the hour: an hour and five minutes read 65:00. */
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  const mmss = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  return h ? `${h}:${mmss}` : mmss;
-}
-
 export function CallOverlay({
   callState,
   localStream,
@@ -90,6 +90,7 @@ export function CallOverlay({
   isMuted,
   isVideoOff,
   isScreenSharing = false,
+  screenSound = true,
   canSendVideo = false,
   canShareScreen = false,
   screenShareUnavailable = null,
@@ -105,12 +106,14 @@ export function CallOverlay({
   onToggleScreenShare,
   pinned = false,
   onReturnToChat,
+  returnFocus,
   layer,
   devices = null,
   notices,
 }: CallOverlayProps) {
   const { t } = useI18n();
-  // A shared screen has to be seen whole; a face can be cropped to fill the window.
+  // A shared screen has to be seen whole; a face can be cropped to fill the window. A screen is one whatever its size:
+  // a window or a busy link's 960 × 540 was cropped to its middle, 26% of it on a phone held upright.
   const [remoteIsWide, setRemoteIsWide] = useState(false);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -148,9 +151,12 @@ export function CallOverlay({
   // Whole-screen, the call covers its chat: the focus comes into it and Tab stays in it, as with a ringing call. Not in
   // the small window: the chat beside it is in use. Either way, what had the focus (the button that started the call)
   // has it back when the call ends with the focus gone with it: a call ended from the small window's own End call, or
-  // by the contact while the focus was on its Mute, left it on the page body.
+  // by the contact while the focus was on its Mute, left it on the page body. With no such button left (End and
+  // answer), the chat's own call button has it, as after a call started from there.
   const box = miniWindow.boxProps.ref;
   const opener = useRef<HTMLElement | null>(null);
+  const fallback = useRef(returnFocus);
+  fallback.current = returnFocus;
   // Over a contact's app too (the web draws it over everything): it closes first, so Mute and End call are in reach.
   useEffect(callWindowShown, []);
   // A video made to fill the window after it (Desktop on Linux) is drawn over everything: the small window stays over
@@ -169,7 +175,7 @@ export function CallOverlay({
       if (!mini) box.current.focus({ preventScroll: true });
     }
     return () => {
-      const before = opener.current;
+      const before = opener.current?.isConnected ? opener.current : fallback.current?.();
       if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true });
     };
   }, [mini, box]);
@@ -303,7 +309,7 @@ export function CallOverlay({
         muted
         data-testid="remote-video"
         onResize={(e) => setRemoteIsWide(e.currentTarget.videoWidth >= 1000)}
-        className={`absolute inset-0 w-full h-full bg-black ${remoteIsWide ? "object-contain" : "object-cover"} ${showRemoteVideo ? "" : "hidden"}`}
+        className={`absolute inset-0 w-full h-full bg-black ${remoteIsWide || remoteIsScreenSharing ? "object-contain" : "object-cover"} ${showRemoteVideo ? "" : "hidden"}`}
       />
       
       {/* Placeholder when no remote video */}
@@ -364,6 +370,13 @@ export function CallOverlay({
           </svg>
           {/* The whole sentence, on two lines if need be: cut to one, "… está compartiendo su p…" lost what is shared. */}
           <span className="call-notice-words min-w-0 break-words">{sharingNotice}</span>
+          {/* What your contact gets of your screen's sound: all the system plays (but this page), or nothing when the
+              browser gave the picture alone (or the sound was left unticked). */}
+          {isScreenSharing && (
+            <span data-testid="call-sharing-sound" data-sound={screenSound} className="call-notice-words min-w-0 break-words">
+              {` · ${t(screenSound ? "calls.sharing.withSound" : "calls.sharing.noSound")}`}
+            </span>
+          )}
         </p>
       )}
 

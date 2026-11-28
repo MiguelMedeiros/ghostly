@@ -258,6 +258,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `desktop-macos/video-stream.spec.ts` | macOS only: a 100 MB video plays and seeks from the `ghostly-file` scheme, read in ranges of at most 4 MiB |
 | `desktop-macos/connection-ceiling.spec.ts` · `group-hubs-cost.spec.ts` | macOS only, measurements that run only when asked (`E2E_CONNECTION_CEILING=1`, `E2E_MESH_COST=1`): what a 1:1 chat and a call do at WebKit's ceiling of peer connections, and what a private group of 32 costs the app as a hub, a plain member and in a full mesh |
 | `desktop-macos/device-signing-key.spec.ts` | macOS only: the Desktop's WKWebView keeps a non-extractable Ed25519 device signing key (WISP 06), made by the app's own module, which signs after a reload and after the app is opened again |
+| `desktop-macos/menu-language.spec.ts` | macOS only: the menu bar (File, Edit, View, Window, Help and their items) takes the language chosen in Settings, keeps it when the app is opened again, and goes back to English with English; the driver reads the titles (`GET /menu`) |
 | `desktop-macos/notifications.spec.ts` | macOS only: Settings → System notifications in a Desktop copy in a temporary folder (macOS gives it none) says to move the app; from another folder the switch is offered and a notification call is answered. See [Desktop on macOS](#desktop-on-macos) |
 
 ## Desktop
@@ -332,7 +333,9 @@ npm run test:e2e:desktop-macos     # about 15 s once built
   e2e-driver --config apps/desktop/tauri.e2e.conf.json`. The feature compiles in `apps/desktop/src/e2e_driver.rs`: an HTTP
   server on 127.0.0.1 (only when the app starts with `GHOSTLY_E2E_DRIVER=<port>`, and only for requests carrying
   `GHOSTLY_E2E_DRIVER_TOKEN`) that runs a script in a window (`eval_with_callback`) and answers with its value. A
-  release build with the feature does not compile. The same build reads an empty clipboard, never the Mac's.
+  release build with the feature does not compile. The same build reads an empty clipboard, never the Mac's. It
+  bundles the UI without `npm run build`'s `tsc -b`, a minute of CI's Mac job that `npm run typecheck` already does in
+  Frontend lint and types.
   `support/desktopMac.ts` (`openMacDesktop`, `MacDriver`) speaks to it and implements `DesktopApp`, so
   `matrix/people.ts`'s `desktopPerson(name, { open })` drives it like the Linux one; `MacDriver.in(label)` reaches
   another window, such as the one a shared app opens in.

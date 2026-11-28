@@ -7,6 +7,7 @@ import { useComposition } from "../hooks/useComposition";
 import { useOpenedHeading } from "../hooks/useOpenedHeading";
 import { draftDirection } from "../lib/documentLanguage";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
+import { isolate } from "../lib/ownStatus";
 import { setChatOnCall, setChatRingsIn } from "../lib/chatsOnCall";
 import { callHoldsService, useCallService } from "../lib/callService";
 import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
@@ -64,12 +65,13 @@ import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, sent
 import { useKeptEdit } from "../lib/keptEdits";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
-import { replySnippet, type RoutineCard } from "@ghostly/core";
+import { DHT_EDIT_FITS, DHT_TEXT_FITS, replySnippet, type RoutineCard } from "@ghostly/core";
 import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
 import { IncomingCallNotification } from "../components/IncomingCallNotification";
 import { useIsLocked, useRingOnLockScreen, useSayOnLockScreen } from "../contexts/LockScreenContext";
+import { useCallOnLockScreen } from "../lib/callUnderLock";
 import { handOverCall, ringingCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
 import { othersName } from "../lib/groups";
@@ -126,6 +128,7 @@ import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
+import { ChatBlockedLine } from "../components/chat/ChatBlockedLine";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { ReconnectingBanner } from "../components/ReconnectingBanner";
 import { TasksButton } from "../components/chat/TasksButton";
@@ -148,7 +151,7 @@ import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { problemText, type Problem, problemLine } from "../lib/problemText";
-import { refusalLine, useDhtOnly } from "../lib/delivery";
+import { dhtOverLine, refusalLine } from "../lib/delivery";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -214,6 +217,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const { t, language } = useI18n();
   const { settings } = useSettings();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmBlock, setConfirmBlock] = useState(false);
 
   const session = useMemo(() => (sessionId ? loadSession(sessionId) : null), [sessionId]);
   const sharedNick = useShareProfile() ? settings.defaultNickname : "";
@@ -232,8 +236,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         : null,
     [session, sharedNick],
   );
-  // Whose choice keeps this chat on DHT only, if anyone's: what a refusal of a text too long for the DHT says to do.
-  const dhtOnly = useDhtOnly(params?.peerPubKeyB64);
 
   const {
     messages,
@@ -640,7 +642,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // On a touch screen the focus goes to the chat's name as it opens, not to the page (hooks/useOpenedHeading.ts).
   const headingRef = useRef<HTMLHeadingElement>(null);
   useOpenedHeading(headingRef, visible ? sessionId : null);
-  const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), callButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (sessionId) {
@@ -763,7 +765,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop && !webrtc.relayOnlyCallsOff
     && deviceOnline && engine.state?.settings.online !== false && callsWaitForLive(deliveryPeer?.callsUnavailable);
   const placeCall = webrtc.startCall;
-  const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
+  // Never placed to a contact blocked meanwhile (here, in Settings or on another device): its answer is not heard.
+  const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked && !chatLink?.blocked, placeCall);
   // Cancel goes with the wait, pressed or given up, and the focus it had fell to the page: it goes back to the call
   // button that started the wait, or to ⋮ when that was a row of its menu, unless it went elsewhere meanwhile. Once:
   // coming back to the chat while it still says it gave up does not move it again.
@@ -824,6 +827,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     ringOn: holdForUnlock
       ? () => { if (chatLink?.id && ringing.signal) engine.keepCallOffer(chatLink.id, ringing.signal); nav.conversation(chatPath(sessionId)); }
       : undefined,
+  } : null);
+  // On a call while locked, the lock screen shows whom with (as this chat's header names them), its time, and Mute and
+  // End call through this call's own controls, with no password (WISP 601 § Locked).
+  const callOnState = callState === "offering" ? "calling" as const
+    : callState === "answering" || callState === "connecting" ? "connecting" as const
+    : callState === "connected" ? (webrtc.reconnecting ? "reconnecting" as const : "connected" as const)
+    : null;
+  useCallOnLockScreen(params && !holdForUnlock && callOnState ? {
+    id: sessionId, name: shownName, named: !isAnonymous, peerPubKey: params.peerPubKeyB64, photo: face?.photo,
+    state: callOnState, startedAt: webrtc.callStartedAt, muted: webrtc.isMuted,
+    toggleMute: webrtc.toggleMute, end: () => webrtc.hangUp(),
   } : null);
   // A call answered from the lock screen before the first unlock, handed over to this chat: answered as it came.
   useEffect(() => {
@@ -890,6 +904,21 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     }
   };
 
+  // Block contact (the engine's `setContactBlocked`): by the contact's key, so every chat with it; the chat stays and
+  // nothing tells the contact. Unblocking asks nothing: it only lets the contact be heard again.
+  const blockKey = chatLink && params.peerPubKeyB64 ? params.peerPubKeyB64 : undefined;
+  const setBlocked = (blocked: boolean) => {
+    setConfirmBlock(false);
+    if (!blockKey) return;
+    // Blocked during a call (⋮, or the ringing card's Block contact): nothing of the contact is heard any more (its
+    // hang-up included), so the call ends here. One that rings in stops with nothing sent, no decline and no line in the
+    // chat, as if this app were closed; one that is on, or rings on their side, ends as a hang-up does.
+    if (blocked && webrtc.callState !== "idle") webrtc.hangUp(!ringsIn, !ringsIn);
+    // Nor is a call that waits for the contact's app to wake placed once it does.
+    if (blocked) wakeCall.cancel();
+    void engine.call("setContactBlocked", { peerPubKeyZ32: blockKey, blocked }).catch(() => {});
+  };
+
   const statusLabel = contactStatus(deliveryPeer, paired, status);
 
   const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
@@ -901,9 +930,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
 
   // The call buttons, in the header and (the video call on a phone) in the ⋮ menu: why they are off, and what they start.
-  const callBlocked = webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked;
+  // A blocked contact's answer is never heard: calling it would only ring it.
+  const callBlocked = chatLink?.blocked ? t("chat.block.blocked")
+    : webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked;
   const callBusy = webrtc.callState !== "idle" || wakeCall.waking;
   const startCall = (withVideo: boolean) => {
+    if (chatLink?.blocked) return;
     if (!(callsBlocked && canWakeForCall)) return webrtc.startCall(withVideo);
     wokeFrom.current = document.activeElement;
     void wakeCall.ring(withVideo);
@@ -1095,12 +1127,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
         <div className="flex items-center gap-1 max-md:gap-0 shrink-0">
           {/* The chat's one connection control: its icon, and one panel with the choice and the rest under Details. */}
-          <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
+          <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} contact={isAnonymous ? undefined : shownName} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
               ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined}
             scene={pairing.scene && !!pairing.progress} phone={phoneHeader} callOn={callState !== "idle" && !ringsIn}
             declineRingIn={ringsIn ? rejectCall : undefined} />
-          <CallButtons phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
+          <CallButtons audioRef={callButtonRef} phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={cardRows} open={tasksOpen} onOpenChange={setTasksOpen} returnFocus={phoneHeader ? optionsRef : undefined} />
           {/* Options dropdown */}
@@ -1197,6 +1229,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                   </MenuItem>
                 : rarerRows(closeMenu)}
               <MenuSeparator />
+              {blockKey && (chatLink?.blocked
+                ? <MenuItem testId="chat-unblock" onClick={() => { closeMenu(); setBlocked(false); }}
+                    icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /></svg>}>
+                    {t("chat.menu.unblock")}
+                  </MenuItem>
+                : <MenuItem testId="chat-block" danger onClick={() => { setConfirmBlock(true); closeMenu(); }}
+                    icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></svg>}>
+                    {t("chat.menu.block")}
+                  </MenuItem>)}
               <MenuItem danger onClick={() => { setConfirmDelete(true); closeMenu(); }}
                 icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>}>
                 {t("sidebar.deleteChat")}
@@ -1227,6 +1268,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} appCards={appCards} />
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
+
+      {chatLink?.blocked && blockKey && <ChatBlockedLine onUnblock={() => setBlocked(false)} returnFocus={optionsRef} />}
 
       {compat && session?.continuedIn && (
         <div data-testid="compat-continued" className="flex items-center justify-center gap-2 bg-panel-header/60 px-4 py-1.5 text-xs text-text-secondary">
@@ -1341,14 +1384,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           const error = await sendMessage(text, answering ? { ...options, replyTo: answering.id } : options);
           if (!error && answering) replied(answering);
           // The engine says why in English: said here in the app's language (lib/errorText.ts), as a group's composer does.
-          return error && refusalLine(error, t, dhtOnly);
+          // A text the DHT packet cannot carry in a chat on DHT only, as the count said it before Send (lib/delivery.ts).
+          return error && refusalLine(error, t, deliveryPeer, false);
         }}
         reply={replyBar}
         translation={composerTranslation}
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), preview: editing.preview, onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
-            .then(result => ({ error: result.error && refusalLine(result.error, t, dhtOnly) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
+            .then(result => ({ error: result.error && refusalLine(result.error, t, deliveryPeer, true) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
         onEditLast={paired && chatLink ? () => {
           const last = [...messages].reverse().find(editableText);
           if (last) { setReplyingTo(null); setEditing(last); }
@@ -1358,8 +1402,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         // The composer sends one at a time itself, and an Enter pressed meanwhile goes next.
         disabled={paired && (!!chatStop || engine.state?.settings.online === false)}
         disabledPlaceholder={t("chat.disabledPlaceholder")}
-        // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
-        softBytes={paired && !chatLive ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
+        // The DHT carries a few hundred characters, fewer for an edit; the direct link has room for long invoices and ecash tokens.
+        softBytes={paired && !chatLive ? editing ? DHT_EDIT_FITS : DHT_TEXT_FITS : undefined}
+        softTitle={paired && !chatLive ? dhtOverLine(t, deliveryPeer, !!editing) : undefined}
         maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
         // The engine's limit is 16 KiB of UTF-8, not characters: "é" counts two, an emoji four.
         textBytes={paired ? 16_384 : undefined}
@@ -1400,6 +1445,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           // On a call in another chat: End and answer ends it first (useWebRTC), or Decline. Never two calls at once.
           onCall={webrtc.otherCallOn}
           onDelete={() => setConfirmDelete(true)}
+          onBlock={blockKey && !chatLink?.blocked ? () => setConfirmBlock(true) : undefined}
         />,
         callLayer ?? document.body,
       )}
@@ -1419,12 +1465,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           layer={callLayer}
           pinned={!visible}
           onReturnToChat={() => nav.conversation(chatPath(sessionId))}
+          // Answered by End and answer, the call has no button of its own to give the focus back to: this chat's has it.
+          returnFocus={() => (visible ? callButtonRef.current : null)}
           callState={webrtc.callState}
           localStream={webrtc.localStream}
           remoteStream={webrtc.remoteStream}
           isMuted={webrtc.isMuted}
           isVideoOff={webrtc.isVideoOff}
           isScreenSharing={webrtc.isScreenSharing}
+          screenSound={webrtc.screenSound}
           canSendVideo={webrtc.canSendVideo}
           canShareScreen={webrtc.canShareScreen}
           screenShareUnavailable={webrtc.screenShareUnavailable}
@@ -1458,6 +1507,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
       )}
       {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} callOn={callHoldsChat} />}
+      {confirmBlock && blockKey && <DeleteChatDialog name={shownName} title={t("chat.block.title", { name: isolate(shownName) })} body={t("chat.block.body")}
+        confirm={t("chat.block.confirm")} onClose={() => setConfirmBlock(false)} onConfirm={() => setBlocked(true)} returnFocus={optionsRef} />}
       {showTechInfo && techInfo && (
         <TechInfoDialog onClose={() => setShowTechInfo(false)} returnFocus={optionsRef}>
         <div className="p-4 space-y-4 text-sm">

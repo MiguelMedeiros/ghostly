@@ -59,7 +59,7 @@ describe("a 1:1 voice note offered beside the files still coming lists them, as 
   it("while the room shown is short: the list behind a button", () => {
     world();
     show();
-    expect(screen.getByTestId("voice-room")).toHaveTextContent("4.0 MB");
+    expect(screen.getByTestId("voice-room")).toHaveTextContent("4.0 MB left");
     expect(screen.queryByTestId("files-coming-row")).toBeNull();
     const button = screen.getByTestId("files-coming-show");
     expect(button).toHaveTextContent("Files still coming (1)");
@@ -96,7 +96,7 @@ describe("a 1:1 voice note offered beside the files still coming lists them, as 
   it("a group's voice note lists none, before or after Download", async () => {
     world();
     show(GROUP_OFFER);
-    expect(screen.getByTestId("voice-room")).toHaveTextContent("4.0 MB");
+    expect(screen.getByTestId("voice-room")).toHaveTextContent("4.0 MB left");
     expect(screen.queryByTestId("files-coming")).toBeNull();
     fireEvent.click(screen.getByTestId("voice-download"));
     await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toContainEqual({ linkId: "group:g1", fileId: GROUP_OFFER, action: "accept" }));

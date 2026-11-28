@@ -26,6 +26,12 @@ export class CliError extends Error {
 }
 
 /**
+ * What `ghostly device` and `ghostly help device` say (WISP 06): the engine runs a CLI profile on one device only
+ * (`singleDevice`), and the app's devices cannot take it. Before, `ghostly device` suggested `service`.
+ */
+export const SINGLE_DEVICE = "A CLI profile is on this one device only: it cannot be added to another device, moved to one or taken over from one, and the app's Add a device cannot add it. To run it on another machine, back it up here (ghostly profile backup --out <file>), restore it there (ghostly profile restore <file> <name>) and stop using it here";
+
+/**
  * A value as a refusal quotes it (`--limit takes a number, not "x"`): a word with a line break or longer than 40
  * characters is described, not printed, as an unknown option is (docs/CLI.md "Secrets stay hidden"). A Cashu token, a
  * wallet connection link, an nsec, a seed or a hex key typed in the wrong place is that long, and bots keep the output.
@@ -79,6 +85,9 @@ export function asCliError(error: unknown): CliError {
   if (/^This contact is already a member$|^A group holds \d+ members at most$|^A group grows past \d+ only when |^Their app (does not take part in groups|takes groups of \d+ at most)|^This group runs through hubs, which their app /.test(message)) return new CliError("refused", message);
   // `group invite` into a community: it has no invitations, its link is how people join.
   if (message === "Share the group's link with them: anyone who opens it joins") return new CliError("bad_request", message);
+  // `engine groupCallModerate` given an act, a target or sources the engine does not take (node.ts `groupCallModerate`
+  // throws these words, and nothing is sent): the values given, not the engine failing. Before, `engine`.
+  if (/^act must be one of [a-z_, ]+$|^target must be the key of another member$|^src must list one or more of [a-z_, ]+$/.test(message)) return new CliError("bad_request", message);
   return new CliError("engine", message);
 }
 
@@ -86,10 +95,14 @@ export function asCliError(error: unknown): CliError {
  * The engine's known errors (`EngineError`, packages/core engineErrors.ts) a bot branches on, by their `engineCode`: a
  * host or the network not answering is `unavailable` (try again later), one too slow `timeout`, a value the person gave
  * `bad_request`, money that is not there `refused`, a contact that offers no way of paying `refused` with its reason in
- * `details.reason`. Any other keeps `engine`. Read by its shape, as `profileOpenError`.
+ * `details.reason`. A group call's pass (`groupCallToken`): not a member, no call node, or the node not letting me in
+ * (its 403 after the retries) `refused`, asking again does not help; the node busy (429) or answering no pass
+ * `unavailable`, try again later. Any other keeps `engine`. Read by its shape, as `profileOpenError`.
  */
 const ENGINE_CODES: Record<string, ErrorCode> = {
   mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable", mintFailedInvoice: "unavailable",
+  groupCallBusy: "unavailable", groupCallFailed: "unavailable",
+  groupCallNotMember: "refused", groupNoCall: "refused", groupCallRefused: "refused",
   hostTimedOut: "timeout", networkTimedOut: "timeout",
   invalidMintUrl: "bad_request", mintNotHttps: "bad_request", invalidMaxFee: "bad_request",
   notEnoughSats: "refused", notEnoughForFee: "refused", mintsNoAnyAmount: "refused", ecashAlreadySpent: "refused", ecashFeeTakesAll: "refused", lightningRefused: "refused", contactNoWallet: "refused", contactNoPayments: "refused",

@@ -17,9 +17,9 @@ import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 /**
  * `--button id:Label` (again for each, 1 to 6), `--style id=primary|neutral|danger`, `--once` and `--id`, as the
  * method's parameters: `buttons` and `buttonsId`. Nothing when no `--button` is given. The label may hold colons: the
- * id ends at the first one. An id given twice, two labels that read the same (ignoring case and spaces at the ends), a
- * label that is another button's id, or a style not listed are a usage error here, before the profile opens; other
- * bounds (ids, labels, how many) are the card's, checked when it is sent.
+ * id ends at the first one. More buttons than a message holds, an id given twice, two labels that read the same
+ * (ignoring case and spaces at the ends), a label that is another button's id, or a style not listed are a usage error
+ * here, before the profile opens; other bounds (ids, labels) are the card's, checked when it is sent.
  */
 export function buttonsOf(options: Parsed["options"]): { buttons: Record<string, unknown>[]; buttonsId?: string } | undefined {
   const given = Array.isArray(options.button) ? options.button as string[] : [];
@@ -28,6 +28,7 @@ export function buttonsOf(options: Parsed["options"]): { buttons: Record<string,
       if (options[flag] !== undefined) throw new CliError("usage", `--${flag} goes with --button id:Label`);
     return undefined;
   }
+  if (given.length > STATUS_CARD_LIMITS.buttons) throw new CliError("usage", `--button is given at most ${STATUS_CARD_LIMITS.buttons} times, not ${given.length}`);
   const buttons: Record<string, unknown>[] = given.map((value) => {
     const colon = value.indexOf(":");
     if (colon < 1 || colon === value.length - 1) throw new CliError("usage", `--button takes id:Label, like yes:Yes, not ${shownValue(value)}`);

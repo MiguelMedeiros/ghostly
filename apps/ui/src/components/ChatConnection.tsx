@@ -26,6 +26,7 @@ import { DiscoveryHealth } from "./DiscoveryHealth";
 import { DirectBlockedHint } from "./DirectBlockedHint";
 import { ClockOffHint } from "./ClockOffHint";
 import { rawError } from "../lib/errorText";
+import { othersName } from "../lib/groups";
 import { problemText, problemLine } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { useWindowAway } from "../lib/windowAway";
@@ -79,8 +80,13 @@ const SAID_BESIDE_SCENE = new Set<LabelState>(["offline", "issue", "publication"
  * not keep it off (a contact who called again as soon as one was declined kept the chat on its direct link): DHT only
  * declines it first (`declineRingIn`), while the live link is there for the decline to cross.
  */
-export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, scene = false, testIdPrefix = "", phone, callOn = false, declineRingIn }: {
+export function ChatConnection({ peerKey, contact: shownName, paired = true, myKey, status, pairing, scene = false, testIdPrefix = "", phone, callOn = false, declineRingIn }: {
   peerKey: string;
+  /**
+   * The contact's name as the chat shows it (a name given on this device first), or none when it shows only their key.
+   * Without it, the name the contact shared.
+   */
+  contact?: string;
   paired?: boolean;
   /** This side's key in the chat. */
   myKey?: string;
@@ -142,9 +148,12 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const pinned = !!link?.peerParticipationKey, canCompare = !!pair?.code && !!pair.peerKey && (pair.status === "ready" || pair.status === "waiting");
   const awaitingJoin = !pinned && !pair?.peerKey && link?.dataLink === "idle";
   const clock = (at: number) => clockTime(at, language);
-  // The contact's name; none when they shared none, and the Details text then says "your contact" in sentences of its
-  // own: a fallback name dropped into a sentence read "No attempt of Your contact's", "L'app di Il tuo contatto".
-  const contact = link?.peerNick || undefined;
+  // The contact's name, as the header and the chat's lines say it; none when the chat has only their key, and the
+  // Details text then says "your contact" in sentences of its own: a fallback name dropped into a sentence read "No
+  // attempt of Your contact's", "L'app di Il tuo contatto". A contact named as the app calls me is quoted
+  // (`othersName`): their "“You” chose Iroh" is not my "You chose Iroh".
+  const contactName = shownName || link?.peerNick;
+  const contact = contactName ? othersName(contactName, t) : undefined;
   // Their name in the waiting and not-live boxes: its own <bdi>, put where the line has `CONTACT`.
   const named = (text: string) => fillNames(text, { contact: contact ?? "" });
   // A chosen transport not reached yet (WISP 100): waited for, never a connection issue. `waitOff`: nothing else may

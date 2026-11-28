@@ -3,7 +3,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_FUTURE_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
 import type { EngineState, LinkView, Settings } from "@ghostly/browser/shared/types";
-import { dhtOnly, findChat, findOwnNamedChat } from "../apiKit";
+import { dhtOnly, findChat, findOwnNamedChats } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath, clearAudioSockets, feedQueue, sharedFolder } from "./audioSocket";
 import { callIceServers, CallMedia, callUsesTurn, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
@@ -492,12 +492,13 @@ export class CallManager {
 
   async start(chat: string, options: { rate?: unknown }): Promise<Record<string, unknown>> {
     const link = this.callable(chat);
-    if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
+    this.refuseBusy(link.id);
     // The contact's call held back here (QUICK_REDIAL_MS) may still ring there: ours would cross it, and theirs, the
     // earlier offer, would win on their side while this side has already spent it. It rings here instead, as the apps do.
     const held = this.held.get(link.id);
     if (held && this.within(held.at, RING_MS)) {
       this.incoming(link.id, held.offer);
+      this.refuseBusy(link.id);
       throw new CliError("busy", "The contact is calling: their call rings here");
     }
     this.paced(link.id);
@@ -505,7 +506,7 @@ export class CallManager {
     const rate = rateOf(options.rate, DEFAULT_RATE);
     const stack = await this.stack();
     // The contact's call may have come in while the stack loaded.
-    if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
+    this.refuseBusy(link.id);
     const call = this.add(link.id, "out", rate);
     try {
       await this.attach(call, (media) => CallMedia.offer(stack, media));
@@ -527,6 +528,8 @@ export class CallManager {
     // A one-shot answers no call: it said "No call is on" instead when none rang.
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     const call = this.find(ref, (c) => c.direction === "in" && c.state === "ringing");
+    // One placed here reads `ringing` too: it rings at the contact's, for them to answer.
+    if (call.direction === "out" && call.state === "ringing") throw new CliError("refused", "That call is yours: it rings at the contact's");
     if (call.direction !== "in" || call.state !== "ringing") throw new CliError("refused", "That call is not ringing here");
     this.callable(call.chat);
     call.rate = rateOf(options.rate, call.rate);
@@ -560,9 +563,10 @@ export class CallManager {
 
   async hangup(ref: string | undefined): Promise<Record<string, unknown>> {
     const call = this.find(ref);
-    const view = this.view(call);
+    // As it was, but ended: its socket is gone and its connection closed, so no audio or stats are left to read.
+    const { stats: _, ...view } = this.view(call);
     await this.end(call, "hangup", true);
-    return { ...view, state: "ended", reason: "hangup" };
+    return { ...view, state: "ended", reason: "hangup", audio: null };
   }
 
   /** One call, by its id or its chat (or the only one). */
@@ -588,7 +592,7 @@ export class CallManager {
   setAuto(next: { on: boolean; from?: string[]; rate?: unknown }): AutoAnswer {
     // The daemon answers these chats' calls from now on: never one found only by a name its contact chose.
     const { links, groups } = this.host.engine.getState();
-    const from = (next.from ?? []).map((ref) => findOwnNamedChat(links, ref, groups).id);
+    const from = findOwnNamedChats(links, next.from ?? [], groups).map((link) => link.id);
     // Each `on` sets the whole of it: the chats and the rate, 48000 when none is given, as the usage line says.
     this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, DEFAULT_RATE) };
     this.saveAuto();
@@ -604,6 +608,16 @@ export class CallManager {
     const from = this.auto.from.filter((c) => c !== chat);
     this.auto = from.length > 0 ? { ...this.auto, from } : { on: false, from: [], rate: DEFAULT_RATE };
     this.saveAuto();
+  }
+
+  /**
+   * A contact blocked here (`setContactBlocked`): nothing of theirs is heard any more, their hang-up included, so a call
+   * with them ends now, as the apps' Block contact ends it. One that only rings here stops with nothing sent, as if this
+   * side were closed; one that is on, or rings on their side, ends as a hang-up does.
+   */
+  async endBlocked(): Promise<void> {
+    await Promise.all([...this.calls.values()].filter((call) => this.link(call.chat)?.blocked).map((call) =>
+      this.end(call, "hangup", !(call.direction === "in" && call.state === "ringing"))));
   }
 
   private saveAuto(): void {
@@ -865,6 +879,16 @@ export class CallManager {
     };
   }
 
+  /** Refuses a call placed in a chat where one is on; the contact's that rings here says how to answer it. */
+  private refuseBusy(chat: string): void {
+    const on = this.byChat(chat);
+    if (!on) return;
+    if (on.direction === "in" && on.state === "ringing") {
+      throw new CliError("busy", `The contact is calling: their call rings here (ghostly call answer ${chat})`, { call: on.id });
+    }
+    throw new CliError("busy", "A call is already on in this chat");
+  }
+
   private byChat(chat: string): Call | undefined {
     for (const call of this.calls.values()) if (call.chat === chat) return call;
     return undefined;
@@ -881,15 +905,7 @@ export class CallManager {
     if (ref) {
       const byId = this.calls.get(ref);
       if (byId) return byId;
-      let chat: LinkView;
-      try {
-        chat = this.chatOf(ref);
-      } catch (error) {
-        if (CALL_ID.test(ref) && error instanceof CliError && error.code === "not_found" && !error.details) {
-          throw new CliError("not_found", `No call ${ref}: it ended or never existed (ghostly call list)`);
-        }
-        throw error;
-      }
+      const chat = this.chatOfCall(ref);
       const call = this.byChat(chat.id);
       if (!call) throw new CliError("not_found", `No call in chat ${ref}`);
       return call;
@@ -901,6 +917,26 @@ export class CallManager {
     throw new CliError("bad_request", "More than one call is on: name one (its id or its chat)", { calls: picked.map((c) => c.id) });
   }
 
+  /** The chat a ref that is no call's id names; one that names no chat either is no call. */
+  private chatOfCall(ref: string): LinkView {
+    try {
+      return this.chatOf(ref);
+    } catch (error) {
+      if (CALL_ID.test(ref) && error instanceof CliError && error.code === "not_found" && !error.details) {
+        throw new CliError("not_found", `No call ${ref}: it ended or never existed (ghostly call list)`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Refuses a ref that names no call and no chat, as `find` does, before a one-shot starts its chats (api.ts
+   * `startOnceFound`): a chat's call may still ring once they start, so one named by its chat is not looked for here.
+   */
+  named(ref: string): void {
+    if (!this.calls.has(ref)) this.chatOfCall(ref);
+  }
+
   private link(chat: string): LinkView | undefined {
     return this.host.engine.chatView(chat);
   }
@@ -908,18 +944,19 @@ export class CallManager {
   /**
    * A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. By its id (as
    * events name it, and a call's own chat), only that chat's view is built: a call placed and hung up built every chat's
-   * five times, one rung and answered six, ~0.2 s of the daemon's thread at 2,000 chats.
+   * five times, one rung and answered six, ~0.2 s of the daemon's thread at 2,000 chats. `onlyChat`: as `findChat`.
    */
-  private chatOf(ref: string): LinkView {
+  private chatOf(ref: string, onlyChat?: string): LinkView {
     const byId = this.link(ref);
     if (byId) return byId;
     const { links, groups } = this.host.engine.getState();
-    return findChat(links, ref, groups);
+    return findChat(links, ref, groups, onlyChat);
   }
 
   /** The chat, if a call can go in it now; else why not (the engine's reason). */
   private callable(ref: string): LinkView {
-    const link = this.chatOf(ref);
+    // A name more than one group has says a call is a chat's: no command calls a group (`group call` names its node).
+    const link = this.chatOf(ref, "a call goes to a contact, in their chat");
     // A one-shot's chat is not live yet, and never would be in time: it said "Calls need a live connection" before
     // the daemon it needs (`stack`).
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);

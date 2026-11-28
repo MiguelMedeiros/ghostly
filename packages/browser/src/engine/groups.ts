@@ -998,6 +998,9 @@ export class Groups {
     return view && this.pinned(view);
   }
 
+  /** Whether this profile holds the group: listed here (`view`), as it is until it is left or deleted (`historyGone`). */
+  holds(groupId: string): boolean { return !!this.view(groupId); }
+
   private pinned(view: GroupView): GroupView {
     // The pinned message was deleted for everyone: nothing of it stays, its pin neither (agents#1646). The pin is kept
     // as it came, so the same pin said again (a catch-up) is no newer, and shown as unpinned.
@@ -1431,11 +1434,11 @@ export class Groups {
     return { me: session.myKey, community: false, onHubs: this.hubs.active(groupId, session, this.now()), inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
   }
 
-  /** Me in a group I am active in, private or community alike, for its call (WISP 602): my member key, its seed, the admin's metadata, and whether I am the admin. */
-  callMember(groupId: string): { key: string; seedB64: string; meta?: GroupMeta; isAdmin: boolean } | undefined {
+  /** Me in a group I am active in, private or community alike, for its call (WISP 602): my member key, its seed, the admin's metadata, whether I am the admin, and how many keys its roster has. */
+  callMember(groupId: string): { key: string; seedB64: string; meta?: GroupMeta; isAdmin: boolean; members: number } | undefined {
     if (this.isCommunity(groupId)) return this.communities.callMember(groupId);
     const session = this.sessions.get(groupId);
-    return session?.status === "active" ? { key: session.myKey, seedB64: session.state.seedB64, meta: session.state.meta, isAdmin: session.isAdmin } : undefined;
+    return session?.status === "active" ? { key: session.myKey, seedB64: session.state.seedB64, meta: session.state.meta, isAdmin: session.isAdmin, members: session.roster.length } : undefined;
   }
 
   /**

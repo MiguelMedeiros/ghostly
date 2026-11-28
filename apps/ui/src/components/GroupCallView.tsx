@@ -21,6 +21,8 @@ import { DeviceMenu, DeviceNoticeBar } from "./CallOverlay";
 import { InfoButton } from "./layout/Section";
 import { useCallModeration, type GroupCallModerator } from "../hooks/useCallModeration";
 import { ModerationProblem, RemovedFromCall, TileModerationMenu } from "./GroupCallModerationMenu";
+import { TileVolume } from "./GroupCallVolume";
+import { elementTakesVolume, gainPlays, setVolumeOf, volumeMaxOn, volumeOf } from "../lib/groupCallVolume";
 
 /** One person in a group call, as `useGroupCall` gives them: what they send, and the tracks to show and play. */
 export interface GroupCallParticipant {
@@ -29,11 +31,13 @@ export interface GroupCallParticipant {
   mic: boolean;
   camera: boolean;
   screen: boolean;
+  /** Their shared screen carries its sound (a tab's or the system's); false while sharing a screen without it. */
+  screenSound?: boolean;
   speaking: boolean;
   /** What the group's admin took away from them in this call (WISP 602 § Moderation): off until the admin allows it. */
   byAdmin?: { mic: boolean; camera: boolean; screen: boolean };
   /** Played and shown here: the hook attaches none of them to the page itself. */
-  tracks: { audio?: MediaStreamTrack | null; camera?: MediaStreamTrack | null; screen?: MediaStreamTrack | null };
+  tracks: { audio?: MediaStreamTrack | null; camera?: MediaStreamTrack | null; screen?: MediaStreamTrack | null; screenAudio?: MediaStreamTrack | null };
 }
 
 /** The `useGroupCall` state the view draws. `local` is you; `participants` are everyone else. */
@@ -152,9 +156,22 @@ function TrackVideo({ track, fit, mirror }: { track: MediaStreamTrack; fit: "cov
   return <video ref={ref} autoPlay playsInline muted className={`absolute inset-0 w-full h-full bg-black ${fit === "contain" ? "object-contain" : "object-cover"}`} style={mirror ? { transform: "scaleX(-1)" } : undefined} />;
 }
 
-/** Someone's sound, on the chosen speaker. */
-function TrackAudio({ track, speaker }: { track: MediaStreamTrack; speaker?: string }) {
+/**
+ * Someone's sound (their voice, or their shared screen's), on the chosen speaker, as loud as you set them (`volume`,
+ * 1 as sent). Up to 1 the element's own volume, and 0 mutes it. Past 1, which an element can't play, or any level on
+ * an engine that ignores the element's volume (iOS), through a Web Audio gain with the element muted while the gain
+ * plays: it keeps the stream, which Chrome plays to Web Audio only while an element holds it. A context that doesn't
+ * run (WebKit starts none outside a gesture, iOS interrupts one) leaves the element playing, as close to the level as
+ * it can (at most 1), and each move of the slider, a gesture, asks it to start again. An engine whose Web
+ * Audio can't play on the speaker you chose stays at 1 there, and its slider stops there too (`volumeMaxOn`).
+ */
+function TrackAudio({ track, speaker, volume = 1, testId = "group-call-audio" }: { track: MediaStreamTrack; speaker?: string; volume?: number; testId?: string }) {
   const ref = useRef<HTMLAudioElement>(null);
+  const boost = useRef<{ context: AudioContext; gain: GainNode; live: () => void } | null>(null);
+  const [takesVolume] = useState(elementTakesVolume);
+  const played = Math.min(volume, volumeMaxOn(speaker));
+  const level = useRef(played);
+  level.current = played;
   useEffect(() => {
     if (!ref.current || typeof MediaStream !== "function") return;
     try {
@@ -166,7 +183,56 @@ function TrackAudio({ track, speaker }: { track: MediaStreamTrack; speaker?: str
   useEffect(() => {
     void applySpeaker(ref.current, speaker).catch(() => {});
   }, [speaker, track]);
-  return <audio ref={ref} autoPlay className="hidden" data-testid="group-call-audio" />;
+  const throughGain = played !== 1 && (played > 1 || !takesVolume) && gainPlays(speaker);
+  useEffect(() => {
+    const element = ref.current;
+    if (!throughGain || !element) return;
+    let context: AudioContext;
+    let gain: GainNode;
+    try {
+      context = new AudioContext();
+      gain = context.createGain();
+      gain.gain.value = level.current;
+      context.createMediaStreamSource(new MediaStream([track])).connect(gain).connect(context.destination);
+    } catch {
+      // no Web Audio for this track: it plays at 1
+      return;
+    }
+    // The element is muted only while the gain plays, and only for this gain (a closed one's late resume says nothing).
+    const live = () => {
+      if (boost.current?.context !== context) return;
+      const plays = context.state === "running";
+      element.muted = plays || level.current === 0;
+      // Not yet: the element plays them, as close to the level as it can.
+      if (!plays) element.volume = Math.min(1, level.current);
+    };
+    boost.current = { context, gain, live };
+    context.onstatechange = live;
+    live();
+    void context.resume().catch(() => {}).then(live);
+    void applySpeaker(context, speaker).catch(() => {});
+    return () => {
+      boost.current = null;
+      context.onstatechange = null;
+      void context.close().catch(() => {});
+      element.muted = level.current === 0;
+    };
+  }, [throughGain, track, speaker]);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    if (boost.current) {
+      const { context, gain, live } = boost.current;
+      gain.gain.value = played;
+      live();
+      // A context made outside a gesture (a kept level, as a call starts) can start in this one: the slider's.
+      if (context.state !== "running") void context.resume().catch(() => {}).then(live);
+      return;
+    }
+    element.volume = Math.min(1, played);
+    element.muted = played === 0;
+  }, [played, throughGain, track]);
+  return <audio ref={ref} autoPlay className="hidden" data-testid={testId} />;
 }
 
 /** Muted, or muted by the admin (`byAdmin`): ringed, and named so, on the tile and to a screen reader. */
@@ -182,8 +248,11 @@ function MutedMark({ label, byAdmin = false }: { label: string; byAdmin?: boolea
   );
 }
 
-/** A face (camera or avatar) or a shared screen, with the name and a muted mark; the active speaker wears a ring. */
-function Tile({ person, you, kind, speaking, name, face, menu }: { person: GroupCallParticipant; you: boolean; kind: "face" | "screen"; speaking: boolean; name: ReactNode; face: string; menu?: ReactNode }) {
+/**
+ * A face (camera or avatar) or a shared screen, with the name and a muted mark; the active speaker wears a ring. `whole`:
+ * the screen the whole window shows, edge to edge on black, without a tile's rounded corners.
+ */
+function Tile({ person, you, kind, speaking, name, face, menu, whole = false }: { person: GroupCallParticipant; you: boolean; kind: "face" | "screen"; speaking: boolean; name: ReactNode; face: string; menu?: ReactNode; whole?: boolean }) {
   const { t } = useI18n();
   const track = kind === "screen" ? person.tracks.screen : person.camera ? person.tracks.camera : null;
   return (
@@ -193,7 +262,7 @@ function Tile({ person, you, kind, speaking, name, face, menu }: { person: Group
       data-kind={kind}
       data-speaking={speaking}
       data-video={!!track}
-      className={`group-call-tile relative min-w-0 min-h-0 overflow-hidden rounded-xl bg-surface-hover flex items-center justify-center ${speaking ? "ring-[3px] ring-accent" : ""}`}
+      className={`group-call-tile relative min-w-0 min-h-0 overflow-hidden ${whole ? "bg-black" : "rounded-xl bg-surface-hover"} flex items-center justify-center ${speaking ? "ring-[3px] ring-accent" : ""}`}
     >
       {track ? (
         <TrackVideo track={track} fit={kind === "screen" ? "contain" : "cover"} mirror={you && kind === "face"} />
@@ -203,9 +272,16 @@ function Tile({ person, you, kind, speaking, name, face, menu }: { person: Group
           <span aria-hidden="true" className="text-text-muted text-2xl">{initial(face)}</span>
         </div>
       )}
-      <div className="absolute bottom-1.5 inset-x-1.5 flex items-center gap-1.5">
+      <div className={`absolute flex items-center gap-1.5 ${whole ? "bottom-[calc(0.375rem+env(safe-area-inset-bottom))] left-[calc(0.375rem+env(safe-area-inset-left))] right-[calc(0.375rem+env(safe-area-inset-right))]" : "bottom-1.5 inset-x-1.5"}`}>
         {kind === "face" && (person.byAdmin?.mic ? <MutedMark label={t("calls.group.mutedByAdmin")} byAdmin /> : !person.mic && <MutedMark label={t("calls.group.muted")} />)}
         <span dir="auto" className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">{name}</span>
+        {/* What the others get of your screen's sound: all the system plays (but this page), or nothing when the
+            browser gave the picture alone (or the sound was left unticked). */}
+        {kind === "screen" && you && person.screenSound !== undefined && (
+          <span data-testid="group-call-screen-sound" data-sound={person.screenSound} className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">
+            {t(person.screenSound ? "calls.sharing.withSound" : "calls.sharing.noSound")}
+          </span>
+        )}
       </div>
       {menu}
     </div>
@@ -219,6 +295,12 @@ function Tile({ person, you, kind, speaking, name, face, menu }: { person: Group
 export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, onToggleScreen, onLeave, canShareScreen = false, pinned = false, onReturnToChat, layer, devices = null, connected = true, error = null, nameOf: groupNameOf, raised = 0, moderator }: GroupCallViewProps) {
   const { t } = useI18n();
   const moderation = useCallModeration(moderator, connected);
+  // How loud each of the others plays here, kept by their key past this call (lib/groupCallVolume.ts).
+  const [, setVolumesSet] = useState(0);
+  const setVolume = (identity: string, volume: number) => {
+    setVolumeOf(identity, volume);
+    setVolumesSet((n) => n + 1);
+  };
   // Each new error is said anew (its own alert), and goes after a few seconds; a failed join has no window to say it in.
   const [said, setSaid] = useState({ error, id: 0, over: false });
   if (said.error !== error) setSaid({ error, id: said.id + 1, over: false });
@@ -307,9 +389,13 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
     swapped.current = large ?? null;
     setPicked(id);
   };
-  // The admin's menu, on the others' faces in the whole window: the small one has no room for it.
-  const menuOf = (p: GroupCallParticipant) => moderation && !mini && p !== local
-    ? <TileModerationMenu identity={p.identity} name={shown(p)} moderation={moderation} host={box} /> : undefined;
+  // Each other face's volume (one level for their voice and their screen's sound) and the admin's menu, in the whole window: the small one has no room for them.
+  const menuOf = (p: GroupCallParticipant) => mini || p === local ? undefined : (
+    <>
+      <TileVolume name={shown(p)} volume={volumeOf(p.identity)} max={volumeMaxOn(devices?.speaker)} onChange={(volume) => setVolume(p.identity, volume)} host={box} />
+      {moderation && <TileModerationMenu identity={p.identity} name={shown(p)} moderation={moderation} host={box} />}
+    </>
+  );
   const faces = everyone.map((p) => (
     <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} face={shown(p)} menu={menuOf(p)} />
   ));
@@ -342,7 +428,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       className={
         mini
           ? "call-mini floating fixed z-50 bg-chat-bg flex flex-col items-center justify-center rounded-xl border border-border shadow-2xl overflow-hidden"
-          : "fixed inset-0 max-md:top-6 max-md:rounded-t-2xl max-md:border-t max-md:border-border z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col focus:outline-none"
+          : `fixed inset-0 ${presenter ? "" : "max-md:top-6 max-md:rounded-t-2xl max-md:border-t max-md:border-border"} z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col focus:outline-none`
       }
     >
       {mini && !compact && CORNERS.map((corner) => <div key={corner} className={`float-grip float-grip-${corner}`} {...miniWindow.handleProps(corner)} />)}
@@ -360,7 +446,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
 
       <div role="status" className="sr-only" data-testid="group-call-news">{news.map((line) => <p key={line}>{line}</p>)}</div>
 
-      {participants.map((p) => p.tracks.audio && <TrackAudio key={p.identity} track={p.tracks.audio} speaker={devices?.speaker} />)}
+      {participants.map((p) => p.tracks.audio && <TrackAudio key={p.identity} track={p.tracks.audio} speaker={devices?.speaker} volume={volumeOf(p.identity)} />)}
+      {participants.map((p) => p.tracks.screenAudio && <TrackAudio key={`${p.identity}-screen`} track={p.tracks.screenAudio} speaker={devices?.speaker} volume={volumeOf(p.identity)} testId="group-call-screen-audio" />)}
 
       {mini ? (
         <div className="call-mini-tile absolute inset-0 grid">
@@ -372,23 +459,31 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         </div>
       ) : (
         <>
-          {/* On a phone the row keeps 12 px (the ⓘ's grown side) from the Small window button and from the "N removed" chip. */}
-          <div className="call-top flex items-center justify-center gap-1.5 max-md:gap-3 px-16 max-md:px-[72px] pt-6 pb-2">
-            <p dir="auto" className="min-w-0 truncate text-text-primary font-medium">{groupName}</p>
+          {/* On a phone the row keeps 12 px (the ⓘ's grown side) from the Small window button and from the "N removed" chip.
+              Over a shared screen the window starts at the phone's top, so the row starts below its status bar. */}
+          <div data-testid="group-call-top" className={`call-top flex items-center justify-center gap-1.5 max-md:gap-3 px-16 max-md:px-[72px] ${presenter ? "pt-[calc(1.5rem+env(safe-area-inset-top))]" : "pt-6"} pb-2`}>
+            {/* Over a shared screen the name is on a black chip too, as the ⓘ and "Removed": white alone vanished on a white screen. */}
+            <p dir="auto" data-over-picture={presenter ? true : undefined} data-testid="group-call-name" className={`min-w-0 truncate font-medium ${presenter ? "rounded-full bg-black/70 px-3 py-1 text-white" : "text-text-primary"}`}>{groupName}</p>
             {/* Its phone hit area reaches up into the window's top, not down onto the tiles drawn over it 8 px below. */}
-            <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="group-call-info" className="max-md:before:-top-4 max-md:before:-bottom-2" />
-            {moderation && <RemovedFromCall moderation={moderation} nameOf={(identity) => (groupNameOf ? groupNameOf(identity) : identity)} host={box} />}
+            <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="group-call-info" className={`max-md:before:-top-4 max-md:before:-bottom-2 ${presenter ? "bg-black/70 text-white hover:bg-black/80 hover:text-white aria-expanded:text-white" : ""}`} />
+            {moderation && <RemovedFromCall moderation={moderation} nameOf={(identity) => (groupNameOf ? groupNameOf(identity) : identity)} host={box} overPicture={!!presenter} />}
           </div>
-          {info && <p id={infoId} data-testid="group-call-info-text" className="mx-auto max-w-md px-4 pb-2 text-center text-xs text-text-secondary break-words">{t("calls.group.info")}</p>}
+          {/* Over a shared screen in the theme's grey it was 2.3:1 on black in the light theme: there it is a dark chip, as the error notice is. */}
+          {info && <p id={infoId} data-testid="group-call-info-text" className={`mx-auto text-center text-xs break-words ${presenter ? "mb-2 w-max max-w-[min(28rem,calc(100%-2rem))] rounded-lg bg-black/70 px-3 py-2 text-white" : "max-w-md px-4 pb-2 text-text-secondary"}`}>{t("calls.group.info")}</p>}
+          {/* A shared screen fills the whole window, fitted whole, and the rest is drawn over it as in the 1:1 call: the
+              name above, the faces at the side (along the bottom on a phone), the controls below. Laid out between them
+              it had 60% of a 1280 × 800 window, and 22% of a phone's. Under the name row, which stays in the flow. */}
           {presenter ? (
-            <div data-testid="group-call-stage" className="call-tiles flex-1 min-h-0 flex max-md:flex-col gap-2">
-              <div className="flex-1 min-w-0 min-h-0 grid">
-                <Tile person={presenter} you={presenter === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(presenter) })} face={shown(presenter)} />
+            <>
+              <div data-testid="group-call-stage" className="absolute inset-0 -z-10 grid">
+                <Tile person={presenter} you={presenter === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(presenter) })} face={shown(presenter)} whole />
               </div>
-              <div data-testid="group-call-side" className="md:w-48 max-md:h-28 shrink-0 flex md:flex-col gap-2 overflow-auto">
-                {[...screenTiles, ...faces].map((tile) => <div key={tile.key} className="shrink-0 grid md:h-28 max-md:w-36">{tile}</div>)}
+              <div data-testid="group-call-faces" className="call-tiles absolute inset-0 pt-[calc(3.5rem+env(safe-area-inset-top))] z-10 pointer-events-none flex md:justify-end max-md:items-end">
+                <div data-testid="group-call-side" className="pointer-events-auto md:w-48 max-md:h-28 max-md:w-full shrink-0 flex md:flex-col gap-2 overflow-auto">
+                  {[...screenTiles, ...faces].map((tile) => <div key={tile.key} className="shrink-0 grid md:h-28 max-md:w-36">{tile}</div>)}
+                </div>
               </div>
-            </div>
+            </>
           ) : (
             <div data-testid="group-call-grid" className="call-tiles flex-1 min-h-0 grid gap-2 auto-rows-fr" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
               {faces}

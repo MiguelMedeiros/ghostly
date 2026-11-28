@@ -16,7 +16,7 @@ import type { CardIndexRow, CashuInspection, EngineState, MessageDetailsView, Me
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrNoteView, NostrPublishResult } from "../nostr/types";
 import type { MessageChanges } from "./messageChanges";
 import type { GroupCallModerationAct, GroupCallSource } from "@ghostly/core";
-import type { GroupCallModerationResult } from "../engine/groupCall";
+import type { GroupCallModerationResult, GroupCallOccupancyResult } from "../engine/groupCall";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
 export interface EngineApi {
@@ -398,6 +398,12 @@ export interface EngineApi {
    * A private group's `group:<id>` does the same for every member of it (WISP 902 · Group Mesh § Wake-up push).
    */
   setWakeMuted(params: { linkId: string; muted: boolean }): Promise<void>;
+  /**
+   * Blocks or unblocks a contact, by its key: a blocked contact's 1:1 chats keep what they have, take nothing new
+   * from it (messages, files, reactions, pins, edits, call offers: dropped, nothing shown or rung) and it is told not to
+   * wake this app. Its chats in groups are not touched.
+   */
+  setContactBlocked(params: { peerPubKeyZ32: string; blocked: boolean }): Promise<void>;
   /** Whether paired contacts are asked to say when they come online while this app is closed (on by default): each live one is told again. */
   setWakeOnline(params: { on: boolean }): Promise<void>;
   /** A call to a contact whose app is closed: a "call" wake-up; true when it can be woken this way (the caller then waits). */
@@ -493,6 +499,15 @@ export interface EngineApi {
    * `retryAfter` seconds), `unreachable`.
    */
   groupCallModerate(params: { groupId: string; act: GroupCallModerationAct; target?: string; src?: GroupCallSource[] }): GroupCallModerationResult;
+  /**
+   * Whether the group's call is on, asked of the node its `call` names (WISP 602 § Occupancy): `count` members in the
+   * room, and `since` (unix seconds) the room opened once one is; or why that is not known, which says nothing about
+   * the call: `not_member`, `hidden` (nothing sent while Hide my IP is on) and `unsupported` (no node named, or one without the route, not asked again until the
+   * group's `call` changes) before anything is sent, `refused` (403), `rate_limited` (429, with `retryAfter` seconds,
+   * or null when it said none it could read), `no_answer` (no status at all, as from a node that refuses the preflight),
+   * `bad_reply` (any other status, a 200 that is not an occupancy, or a count above the group's roster).
+   */
+  groupCallOccupancy(params: { groupId: string }): GroupCallOccupancyResult;
   /**
    * The key that seals the group's call media for its newest epoch (WISP 602 § End-to-end encryption): base64url of
    * 32 bytes, and that epoch. Null until the epoch's secret arrives, once out of the group, or in a private group.
@@ -590,6 +605,11 @@ export interface EngineApi {
    * start with `remove-<reason>:`.
    */
   deviceRemove(params: { key: string }): import("../devices/links").DeviceSetView;
+  /**
+   * "Get them now", on the active device: the files a move left for later on the device with this signing key come over
+   * its link while it is on, on mobile data too (without it they wait for a connection that is not metered).
+   */
+  deviceFetchLeftFiles(params: { key: string }): import("../devices/links").DeviceSetView;
   /**
    * Rename (WISP 06 § User experience), on the active device: the device with this signing key gets this name in the
    * set's next record, which every device reads. The name is trimmed; one the record would change (empty, over 16 bytes,

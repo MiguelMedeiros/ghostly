@@ -37,12 +37,13 @@ const FILE_IN_PATH = /\.(?:md|py|rs|sh)$/i;
  * become a space and an accent) and after it ("･" becomes "・").
  */
 const DOTS =
-  /[\u00b7\u02d9\u0660\u06d4\u06f0\u0701\u0702\u0f0b\u0f0c\u1427\u16eb\u2022\u2024\u2027\u2219\u22c5\u2e30\u2e31\u2e33\u2e3c\u3002\u30fb\u318d\ua4f8\ua60e\ua78f\uff0e\uff61\u{10a50}\u2981]/gu;
+  /[\u00b7\u02d9\u0660\u06d4\u06f0\u0701\u0702\u0f0b\u0f0c\u1427\u16eb\u2022\u2024\u2027\u2219\u22c5\u2e30\u2e31\u2e33\u2e3c\u3002\u30fb\u318d\ua4f8\ua60e\ua78f\uff0e\uff61\u{10a50}\u{10101}\u2981\u2b1d]/gu;
 /**
- * Combining dots below a letter ("paypaḷcom"), several on one letter included: they draw in one place, so they are one
- * dot, and none beside a written one ("paypaḷ.com"). Only other marks between two of them, so the run has one reading.
+ * Combining dots below a letter ("paypaḷcom") and the ring below, which draws as one at a label's size, several on one
+ * letter included: they draw in one place, so they are one dot, and none beside a written one ("paypaḷ.com"). Only
+ * other marks between two of them, so the run has one reading.
  */
-const MARK_DOTS = /(\.\p{M}*)?[̣\u{1d16d}](?:[^\P{M}̣\u{1d16d}]*[̣\u{1d16d}])*(\p{M}*\.)?/gu;
+const MARK_DOTS = /(\.\p{M}*)?[̣̥\u{1d16d}](?:[^\P{M}̣̥\u{1d16d}]*[̣̥\u{1d16d}])*(\p{M}*\.)?/gu;
 /**
  * A word: letters with their marks, and digits, across the narrow spaces that read as no gap (as `SPACE_BY_DOT` has
  * them), so a space of a pixel or two cannot set a stroke letter and its mark off as a word of their own script.
@@ -55,10 +56,11 @@ const scriptDot = (script: string, marks: string) => ({
   other: new RegExp(`(?=\\p{L})[^\\p{sc=${script}}\\p{sc=Common}\\p{sc=Inherited}]`, "u"),
 });
 /**
- * Thai and Lao phinthu, the Hebrew hiriq and lower dot and the Arabic dot below draw on an "l" like U+0323. "ภิกฺขุ"
- * and "שִׁיר" keep theirs; on a letter of the script that looks like an "l", in a Latin word, it is a dot ("paypaๅฺcom").
+ * Thai and Lao phinthu, the Hebrew hiriq and lower dot and the Arabic dot below and tone dot below draw on an "l" like
+ * U+0323. "ภิกฺขุ" and "שִׁיר" keep theirs; on a letter of the script that looks like an "l", in a Latin word, it is a
+ * dot ("paypaๅฺcom").
  */
-const SCRIPT_DOTS = [scriptDot("Thai", "ฺ"), scriptDot("Lao", "຺"), scriptDot("Hebrew", "ִׅ"), scriptDot("Arabic", "ٜ")];
+const SCRIPT_DOTS = [scriptDot("Thai", "ฺ"), scriptDot("Lao", "຺"), scriptDot("Hebrew", "ִׅ"), scriptDot("Arabic", "ٜ࣭")];
 
 /** The label with each thing that reads as the dot between a host's labels written as one ".". */
 function readDots(text: string): string {
@@ -76,6 +78,33 @@ function readDots(text: string): string {
  * word's space, a no-break one and an ideographic one show their gap and are left alone.
  */
 const SPACE_BY_DOT = /[\u2000-\u200a\u202f\u205f]+(?=\.)|(?<=\.)[\u2000-\u200a\u202f\u205f]+/gu;
+/**
+ * Bars a font can draw as an "l" ("paypa\u2223.com"): the vertical line, divides, Hebrew paseq, the vertical line extension,
+ * the broken-circle bar, box drawing light vertical, the light vertical bar and the danda. Read after NFKC, which makes
+ * the fullwidth and halfwidth ones two of these.
+ */
+const BARS = /[|\u2223\u05c0\u23d0\u23fd\u2502\u2758\u0964]/gu;
+/**
+ * The same spaces between two letters or digits too ("paypal.c om"), a mark beside the space included (a
+ * one-character look either side, so a run of marks costs no more than a run of letters). Some of them read as no
+ * gap, others (the em space) as a word's: a label is read both with `SPACE_BY_DOT` and with this, and either reading
+ * naming another host counts, so neither "paypal.c om" nor "paypal.com secure.net" passes.
+ */
+const NARROW_SPACE =
+  /[\u2000-\u200a\u202f\u205f]+(?=\.)|(?<=\.)[\u2000-\u200a\u202f\u205f]+|(?<=[\p{L}\p{N}\p{M}])[\u2000-\u200a\u202f\u205f]+(?=[\p{L}\p{N}\p{M}])/gu;
+/** Any of those spaces, to tell how many kinds a label holds. */
+const TYPO_SPACE = /[\u2000-\u200a\u202f\u205f]/gu;
+/**
+ * The same spaces, narrowest first (hair, six-per-em, thin and narrow no-break, punctuation and medium mathematical,
+ * four-per-em, three-per-em, en and figure, em): a reading takes out those up to one width and keeps the wider ones as
+ * gaps, as the eye does when one text holds an em space and a hair space ("secure paypal.c om").
+ */
+const BY_WIDTH = ["\u200a", "\u2006", "\u2009\u202f", "\u2008\u205f", "\u2005", "\u2004", "\u2000\u2002\u2007", "\u2001\u2003"].map(
+  (_, i, all) => {
+    const set = all.slice(0, i + 1).join("");
+    return new RegExp(`[${set}]+(?=\\.)|(?<=\\.)[${set}]+|(?<=[\\p{L}\\p{N}\\p{M}])[${set}]+(?=[\\p{L}\\p{N}\\p{M}])`, "gu");
+  },
+);
 
 /**
  * A whole emoji: a keycap ("1️⃣"), a flag drawn from tags (🏴 and its tag letters), or pictographs joined by zero-width
@@ -84,6 +113,12 @@ const SPACE_BY_DOT = /[\u2000-\u200a\u202f\u205f]+(?=\.)|(?<=\.)[\u2000-\u200a\u
  */
 const EMOJI =
   /[#*0-9]️?⃣|\u{1f3f4}[\u{e0020}-\u{e007e}]+\u{e007f}|\p{Extended_Pictographic}(?:[︎️]|\p{Emoji_Modifier})?(?:‍\p{Extended_Pictographic}(?:[︎️]|\p{Emoji_Modifier})?)*/gu;
+
+/**
+ * A control character other than a tab, which draws as a space: browsers draw NUL, CR, DEL and the C1 controls as
+ * nothing ("paypal\0.com"). A label holds no line break.
+ */
+const CONTROL = /(?!\t)\p{Cc}/u;
 
 /**
  * Whether a link's text would make a reader think it goes somewhere else: it names a host that is not the link's (nor
@@ -98,8 +133,19 @@ export function labelMisleads(label: string, url: string): boolean {
   label = label.normalize("NFD");
   const target = hostOf(url);
   if (!target) return true;
-  if (new RegExp(INVISIBLE.source, "u").test(label.replace(EMOJI, ""))) return true;
-  const text = readDots(readDots(label).replace(SPACE_BY_DOT, "").normalize("NFKC"));
+  if (CONTROL.test(label) || new RegExp(INVISIBLE.source, "u").test(label.replace(EMOJI, ""))) return true;
+  const read = (spaces: RegExp) => readDots(readDots(label).replace(spaces, "").normalize("NFKC"));
+  // Two kinds of those spaces in one text can be one gap the eye sees and one it does not: read it at each width too.
+  // Only then, so a text with one kind costs two readings.
+  const kinds = new Set(label.match(TYPO_SPACE));
+  const readings = new Set([read(SPACE_BY_DOT), read(NARROW_SPACE), ...(kinds.size > 1 ? BY_WIDTH.map(read) : [])]);
+  // A bar reads as an "l" in some fonts and as a bar in others: either reading naming another host counts.
+  for (const text of readings) for (const t of new Set([text, text.replace(BARS, "l")])) if (namesAnotherHost(t, target)) return true;
+  return false;
+}
+
+/** Whether one reading of a link's text names a host that is not the link's `target` (nor one it sits under). */
+function namesAnotherHost(text: string, target: string): boolean {
   for (const found of text.matchAll(ADDRESS)) {
     const written = found[0];
     const bare = written.replace(/^[a-z][a-z\d+.-]*:\/\//i, "");

@@ -1,3 +1,4 @@
+import { checkVersionFeed } from "@ghostly/browser/updateFeed";
 import { carryIncomingShare, incomingShare, receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
 import { activeProfileId, listProfiles, switchProfile } from "../../../ui/src/lib/profiles";
 import type { ChatTaken, FromWorker, ToWorker, WindowSays } from "../sw/messages";
@@ -45,43 +46,92 @@ export function prepareUpdate(): void {
 /**
  * The new worker once it is installed. Called after `update()` settled: a new script is `installing` by then, so
  * with neither a waiting nor an installing worker the active one is already the newest (another tab's Reload put it
- * in control of this page too) and there is nothing to wait for.
+ * in control of this page too) and there is nothing to wait for (`"none"`). `"failed"`: the new worker's install
+ * failed (it went redundant: a file of its precache missing, storage full, the network gone mid-way) or did not
+ * finish in time.
+ *
+ * One installing goes before one already waiting: `update()` found a deploy newer than the waiting one's (a worker
+ * waits while its banner is not pressed, and later deploys come). Told to skip waiting, the older one would take
+ * over with the newer one still filling its cache, and the newer one would take over again at the next start. Not
+ * done in time, the waiting one is still a whole newer build than the page's, and goes as before.
  */
-function installed(registration: ServiceWorkerRegistration, timeoutMs: number): Promise<ServiceWorker | null> {
-  if (registration.waiting) return Promise.resolve(registration.waiting);
+function installed(registration: ServiceWorkerRegistration, timeoutMs: number): Promise<ServiceWorker | "none" | "failed"> {
   const worker = registration.installing;
-  if (!worker) return Promise.resolve(null);
+  if (!worker) return Promise.resolve(registration.waiting ?? "none");
+  if (worker.state === "redundant") return Promise.resolve("failed");
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(registration.waiting), timeoutMs);
+    const timer = setTimeout(() => resolve(registration.waiting ?? "failed"), timeoutMs);
     worker.addEventListener("statechange", () => {
       if (worker.state === "installed") { clearTimeout(timer); resolve(worker); }
-      if (worker.state === "redundant") { clearTimeout(timer); resolve(null); }
+      if (worker.state === "redundant") { clearTimeout(timer); resolve("failed"); }
     });
   });
+}
+
+/** The build this page runs, as `/version.json` names it; null where the build does not say (the dev server, tests). */
+function runningBuild(): { version: string; build: string } | null {
+  return typeof __APP_VERSION__ === "string" && typeof __APP_BUILD__ === "string" ? { version: __APP_VERSION__, build: __APP_BUILD__ } : null;
+}
+
+/**
+ * Whether the server answers now with another build than this page's (a new version, a redeploy or a rollback).
+ * False whenever that is not sure: no answer (offline, a timeout, an error status), one that does not read as a
+ * version file, or a page that does not know its own build. `/version.json` always goes to the network (`policy.ts`).
+ */
+async function otherBuildOut(): Promise<boolean> {
+  const running = runningBuild();
+  if (!running) return false;
+  try {
+    return (await checkVersionFeed({
+      url: new URL("version.json", document.baseURI).toString(),
+      currentVersion: running.version,
+      currentBuild: running.build,
+      // Any other build than this one, whatever its version: the worker that failed to install was that build's.
+      buildGone: true,
+      apply: "reload",
+    })) !== null;
+  } catch {
+    return false;
+  }
 }
 
 /** This page pressed Reload and reloads on its own once the new worker takes it (not `followNewVersion`). */
 let applying = false;
 
 /**
- * Reload into the new version: the waiting worker (fetched now if it is not yet) takes over, then the page
- * reloads on it. The worker never does this on its own, so a deploy never swaps the app under a chat. With no
- * worker, none newer, or one that does not finish installing in time, it is a plain reload.
+ * Reload into the new version: the newest worker takes over (the one `update()` finds installing, waited for, else
+ * the one waiting), then the page reloads on it. The worker never does this on its own, so a deploy never swaps the
+ * app under a chat. With no worker or none newer, it is a plain reload.
+ *
+ * A new worker that cannot install (its fetch refused, its install failed, or not done in time) would leave the old
+ * one answering the reload with the old build's page, every time Reload is pressed. So once `/version.json` says
+ * another build is out, the old worker is unregistered first: the reload then loads the new build from the network,
+ * which registers its own worker again (`registerServiceWorker`), and only offline use waits for that one to install.
+ * Without that answer (offline, the server down, no other build) the old worker stays: it is what opens the app
+ * offline. The old build's caches stay too: the next worker's install takes the files they share from them, and its
+ * activation deletes them.
  */
 export async function applyUpdate({ timeoutMs = 60_000, reload = () => window.location.reload() } = {}): Promise<void> {
   const workers = container();
   const registration = await workers?.getRegistration().catch(() => undefined);
   if (workers && registration?.active && workers.controller) {
-    await registration.update().catch(() => {});
-    const next = await installed(registration, timeoutMs);
-    if (next) {
-      applying = true;
-      await new Promise<void>((resolve) => {
-        workers.addEventListener("controllerchange", () => resolve(), { once: true });
-        setTimeout(resolve, 10_000);
-        tell(next, { type: "skip-waiting" });
-      });
-      applying = false;
+    const fetched = await registration.update().then(() => true, () => false);
+    const found = await installed(registration, timeoutMs);
+    if ((found === "failed" || (found === "none" && !fetched)) && await otherBuildOut()) {
+      await registration.unregister().catch(() => false);
+    } else {
+      // The newer worker failed to install and the server could not say another build is out (offline): one that
+      // was already waiting is still a whole build newer than the page's, and goes as before.
+      const next = found === "failed" ? registration.waiting : found;
+      if (next && next !== "none") {
+        applying = true;
+        await new Promise<void>((resolve) => {
+          workers.addEventListener("controllerchange", () => resolve(), { once: true });
+          setTimeout(resolve, 10_000);
+          tell(next, { type: "skip-waiting" });
+        });
+        applying = false;
+      }
     }
   }
   reload();
@@ -173,7 +223,7 @@ export function listenForShares(peerLock?: string): void {
     const { item } = message;
     // The page restarts with it still in the picker (a profile switch): the worker holds it again for the next page,
     // with the count of those not kept that it shows.
-    const carry = (lost?: number) => {
+    const carry = ({ dropped: lost }: IncomingShare) => {
       if (!workers.controller) return false;
       tell(workers.controller, { type: "share-keep", item, ...(typeof lost === "number" && lost > 0 && { dropped: lost }) });
       return true;

@@ -1,6 +1,6 @@
 import {
-  GROUP_CALL_SOURCES, engineError, isZ32Key, randomBytes, sign, signGroupCallModeration, toBase64Url, utf8Encode,
-  type GroupCallModerationAct, type GroupCallSource, type GroupMeta,
+  GROUP_CALL_SKEW_S, GROUP_CALL_SOURCES, engineError, isZ32Key, parseGroupCallOccupancy, randomBytes, sign, signGroupCallModeration, signGroupCallOccupancy, toBase64Url,
+  utf8Encode, type GroupCallModerationAct, type GroupCallOccupancy, type GroupCallSource, type GroupMeta,
 } from "@ghostly/core";
 
 /**
@@ -46,6 +46,11 @@ export function groupCallSfu(meta: GroupMeta | undefined): string | undefined {
     const url = new URL(sfu);
     return url.protocol === "https:" && url.origin === sfu ? sfu : undefined;
   } catch { return undefined; }
+}
+
+/** The group's `call` as its metadata writes it, so a change to it (its node, its sealing) is told from a rename. */
+export function groupCallStamp(meta: GroupMeta | undefined): string {
+  try { return JSON.stringify((JSON.parse(meta?.body ?? "null") as { call?: unknown } | null)?.call ?? null); } catch { return "null"; }
 }
 
 /** WISP 602 § Signed bytes. */
@@ -121,14 +126,15 @@ export async function fetchGroupCallToken(ask: GroupCallAsk): Promise<GroupCallP
   for (let attempt = 0; ; attempt++) {
     const request = signGroupCallRequest(ask.sfu, { g: ask.g, k: ask.k, ts: Math.floor(now() / 1000), n: toBase64Url(randomBytes(16)), name }, ask.seed);
     let response: Response;
+    const signal = AbortSignal.timeout(GROUP_CALL_TIMEOUT_MS);
     try {
       // No redirect: one would send my key, name and signed request to a host the group never named.
       response = await doFetch(`${ask.sfu}/sfu/group-token`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request), signal: AbortSignal.timeout(GROUP_CALL_TIMEOUT_MS),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request), signal,
         redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store",
       });
     } catch (error) {
-      throw (error as { name?: string } | null)?.name === "TimeoutError" ? engineError("hostTimedOut", { host }) : engineError("hostUnreachable", { host });
+      throw timedOut(error, signal) ? engineError("hostTimedOut", { host }) : engineError("hostUnreachable", { host });
     }
     if (response.status === 403 && attempt < GROUP_CALL_RETRY_MS.length) {
       await sleep(GROUP_CALL_RETRY_MS[attempt]);
@@ -142,6 +148,17 @@ export async function fetchGroupCallToken(ask: GroupCallAsk): Promise<GroupCallP
     if (!pass) throw engineError("groupCallFailed", { host });
     return pass;
   }
+}
+
+/**
+ * Whether a request failed because its time ran out. A browser's `fetch` rejects with the signal's reason, a
+ * `TimeoutError`; Node's `https.request` (the CLI's fetch, packages/cli groupCallFetch.ts) with an `AbortError` whose
+ * `cause` is that `TimeoutError`; and a fetch may say only `AbortError` once the signal timed out. Moderation and
+ * occupancy say both ways with one code, so only the token request asks.
+ */
+function isTimeout(error: unknown): boolean { return (error as { name?: unknown } | null)?.name === "TimeoutError"; }
+function timedOut(error: unknown, signal: AbortSignal): boolean {
+  return isTimeout(error) || isTimeout((error as { cause?: unknown } | null)?.cause) || (signal.aborted && isTimeout(signal.reason));
 }
 
 /** The room's state after an act (WISP 602 § Moderation, the reply): the sources taken from each key, and who is banned. */
@@ -195,12 +212,15 @@ export async function sendGroupCallModeration(ask: GroupCallModerationAsk): Prom
   return state ? { ok: true, state } : { ok: false, code: "unreachable" };
 }
 
-/** `Retry-After` in seconds, given as seconds or as an HTTP date. */
-function retryAfterS(header: string | null, now: number): number {
+/** `Retry-After` in seconds, given as seconds or as an HTTP date; the node's minute when it says none. */
+const retryAfterS = (header: string | null, now: number): number => readRetryAfterS(header, now) ?? DEFAULT_RETRY_AFTER_S;
+
+/** `Retry-After` in seconds, given as seconds or as an HTTP date, an hour at most; null when it is absent or unreadable. */
+function readRetryAfterS(header: string | null, now: number): number | null {
   const value = header?.trim() ?? "";
   if (/^\d{1,10}$/.test(value)) return Math.min(Number(value), MAX_RETRY_AFTER_S);
   const at = value ? Date.parse(value) : NaN;
-  return Number.isFinite(at) ? Math.min(Math.max(0, Math.ceil((at - now) / 1000)), MAX_RETRY_AFTER_S) : DEFAULT_RETRY_AFTER_S;
+  return Number.isFinite(at) ? Math.min(Math.max(0, Math.ceil((at - now) / 1000)), MAX_RETRY_AFTER_S) : null;
 }
 
 /**
@@ -218,6 +238,60 @@ export function parseGroupCallRoomState(raw: unknown): GroupCallRoomState | null
   }
   if (!state.banned.every(isZ32Key)) return null;
   return { muted, banned: [...new Set(state.banned as string[])].sort() };
+}
+
+/**
+ * Whether the group's call is on (WISP 602 § Occupancy): how many members are in the room, and since when (unix
+ * seconds) once one is; or why that is not known. `not_member`: I am not in the group, so nothing was sent.
+ * `unsupported`: the group names no node, or its node is older than the route (404 or 405). `refused`: its 403.
+ * `hidden`: Hide my IP is on, so nothing was sent (the node, the admin's choice, would learn this device's address).
+ * `rate_limited`: its 429, with `retryAfter` the seconds its `Retry-After` says, or null when the page cannot read one.
+ * `no_answer`: the request got no status at all (a network error, the timeout, or a node from before the route that
+ * refuses the browser's preflight); the page waits longer each time. `bad_reply`: any other status, or a 200 that is
+ * not an occupancy, or counts more members than the group's roster has. A `since` past now (beyond the clock skew a
+ * request is allowed) is left out. Each of them says nothing about the call: a page shows it as it would without the route.
+ */
+export type GroupCallOccupancyResult =
+  | ({ ok: true } & GroupCallOccupancy)
+  | { ok: false; code: "not_member" | "hidden" | "unsupported" | "refused" | "no_answer" | "bad_reply" }
+  | { ok: false; code: "rate_limited"; retryAfter: number | null };
+export type GroupCallOccupancyCode = Extract<GroupCallOccupancyResult, { ok: false }>["code"];
+
+export interface GroupCallOccupancyAsk {
+  sfu: string;
+  g: string;
+  /** The seed of my member key in the group. */
+  seed: Uint8Array;
+  /** How many keys the group's roster has: a count above it is no occupancy. */
+  members?: number;
+  fetch?: typeof fetch;
+  now?: () => number;
+}
+
+/**
+ * Asks `<sfu>/sfu/group-occupancy` once, signed with my member key (WISP 602 § Occupancy), as a token request goes (no
+ * redirect, no cookie, the same timeout and capped read), and says what came back as a result, never as a throw.
+ */
+export async function fetchGroupCallOccupancy(ask: GroupCallOccupancyAsk): Promise<GroupCallOccupancyResult> {
+  const doFetch = ask.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
+  const now = ask.now ?? Date.now;
+  const request = signGroupCallOccupancy({ sfu: ask.sfu, g: ask.g, ts: Math.floor(now() / 1000) }, ask.seed);
+  let response: Response;
+  try {
+    response = await doFetch(`${ask.sfu}/sfu/group-occupancy`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request), signal: AbortSignal.timeout(GROUP_CALL_TIMEOUT_MS),
+      redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store",
+    });
+  } catch { return { ok: false, code: "no_answer" }; }
+  if (response.status === 403) return { ok: false, code: "refused" };
+  if (response.status === 429) return { ok: false, code: "rate_limited", retryAfter: readRetryAfterS(response.headers.get("Retry-After"), now()) };
+  if (response.status === 404 || response.status === 405) return { ok: false, code: "unsupported" };
+  let raw: unknown = null;
+  if (response.status === 200) try { const text = await readCapped(response, MAX_REPLY_BYTES); raw = text === null ? null : JSON.parse(text); } catch { raw = null; }
+  const occupancy = parseGroupCallOccupancy(raw);
+  if (!occupancy || (ask.members !== undefined && occupancy.count > ask.members)) return { ok: false, code: "bad_reply" };
+  if (occupancy.since !== undefined && occupancy.since > Math.floor(now() / 1000) + GROUP_CALL_SKEW_S) delete occupancy.since;
+  return { ok: true, ...occupancy };
 }
 
 /**

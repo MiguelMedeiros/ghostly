@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
+import { anyCallOn, subscribeCalls } from "@ghostly/react";
 import { useSettings } from "./SettingsContext";
 import { hashPassword, needsRehash } from "../lib/settings";
 import { lockRetryAt, tryLockPassword } from "../lib/lockAttempts";
@@ -71,6 +72,11 @@ const LockScreenContext = createContext<LockScreenContextValue | null>(null);
 
 /** The longest wait between two looks at the clock while unlocked (see `checkIdle`). */
 const LOCK_CHECK_MS = 30_000;
+/**
+ * A gap this long between two looks at the clock means the device slept meanwhile: awake, they come at most every
+ * LOCK_CHECK_MS, or a minute later where a hidden page's timers are held back.
+ */
+const SLEPT_MS = LOCK_CHECK_MS + 60_000;
 /** The channel the app's pages of one origin hear Lock Now on (`lock`). */
 const LOCK_CHANNEL = "ghostly-lock";
 
@@ -102,6 +108,10 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   }, []);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
+  /** When `checkIdle` last looked at the clock: a long gap since says the device slept. */
+  const lastLookRef = useRef<number>(Date.now());
+  /** A call just ended: the time away counts from now, its end (see `checkIdle`). */
+  const callEndedRef = useRef(false);
   const checkIdleRef = useRef<() => void>(() => {});
 
   // The apps running (Desktop's windows of their own, the web's frames under the lock) stop when it locks: their
@@ -162,6 +172,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
       setIsLocked(false);
       setHasUnlocked(true);
       lastActivityRef.current = Date.now();
+      lastLookRef.current = lastActivityRef.current;
       // Older, weaker hashes are replaced now that the password is known.
       if (needsRehash(storedHash)) {
         updateLockScreen({ passwordHash: await hashPassword(password) });
@@ -181,15 +192,23 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   // (a phone with the screen off, a suspended laptop), so a timer alone would bring the app back unlocked after hours
   // away. Locks when the time since the last activity is up; otherwise looks again when it would be, and at least
   // every LOCK_CHECK_MS, which is how long a device that woke with nobody touching it may stay unlocked.
+  // A call on keeps the lock away (WISP 601 § On a call already): the person talks and touches nothing, and the time
+  // counts again from the call's end. Only while the page runs: a device that slept meanwhile was not on the call, and
+  // its time asleep counts as before. Lock Now still locks.
   const checkIdle = useCallback(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    const ended = callEndedRef.current;
+    callEndedRef.current = false;
     if (!settings.lockScreen.enabled || !settings.lockScreen.passwordHash || isLocked) return;
     const now = Date.now();
+    const awake = now - lastLookRef.current < SLEPT_MS;
+    lastLookRef.current = now;
     // A clock set back must not make the wait longer than the chosen time.
     if (lastActivityRef.current > now) lastActivityRef.current = now;
+    if (awake && (ended || anyCallOn())) lastActivityRef.current = now;
     const left = lastActivityRef.current + timeoutMs - now;
     if (!(left > 0)) {
       lockHere();
@@ -198,6 +217,18 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
     timerRef.current = setTimeout(() => checkIdleRef.current(), Math.min(left, LOCK_CHECK_MS));
   }, [settings.lockScreen.enabled, settings.lockScreen.passwordHash, timeoutMs, isLocked, lockHere]);
   checkIdleRef.current = checkIdle;
+
+  // A call starting or ending (1:1 or a group's, `callRegistry`) looks at the clock again: its end starts the time.
+  useEffect(() => {
+    let on = anyCallOn();
+    return subscribeCalls(() => {
+      const now = anyCallOn();
+      if (now === on) return;
+      on = now;
+      if (!now) callEndedRef.current = true;
+      checkIdleRef.current();
+    });
+  }, []);
 
   const resetTimer = useCallback(() => {
     lastActivityRef.current = Date.now();

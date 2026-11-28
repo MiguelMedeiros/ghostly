@@ -29,6 +29,9 @@
   .rich-codeblock { overflow: visible; }
   /* A text line's controls sit at a fraction of a pixel (the text size's line heights): 44px there took 43 whole ones. */
   .rich-action.tap-target::after { min-width: 46px; min-height: 46px; }
+  /* The block's own Copy: its hit area starts at the block's top edge (the bar's 3px padding above the button) and grows
+     down over the bar and the code, never up over the line above, whose controls (a key's Copy, a link) it took. */
+  .rich-codeblock-bar .rich-action.tap-target::after { top: -3px; transform: translateX(-50%); }
 }
 .rich-codeblock-bar {
   display: flex;

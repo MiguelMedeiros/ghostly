@@ -38,7 +38,16 @@ const KEYS: Record<string, TranslationKey> = {
   "files-not-found": "apps.errors.filesNotFound",
   // Its stored files are not what was installed: the engine dropped them, and Get its files fetches them again.
   damaged: "apps.errors.damaged",
+  // Uninstalled meanwhile (another tab, the Apps page) while its Open or a read waited: nothing was refused.
+  "not-installed": "apps.errors.notInstalled",
   storage: "apps.errors.storage",
+  // A store removed meanwhile (another tab): its block reads the list again (Apps.tsx), and goes.
+  "no-store": "apps.errors.noStore",
+  // A built-in app whose copy in this client did not load as that app: nothing was refused, a reload brings this
+  // build's file. Offline, the host not reached or its answer come as their own (engine/apps.ts `bundled`).
+  "not-carried": "apps.errors.notCarried",
+  // A built-in app installed or removed meanwhile (another tab): nothing was refused either.
+  "not-offered": "apps.errors.notOffered",
 };
 
 /**

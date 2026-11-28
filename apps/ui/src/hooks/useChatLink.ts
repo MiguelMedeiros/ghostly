@@ -6,10 +6,11 @@ import { useEngineValue } from "../lib/engineState";
  * transport and identity lines. The rest changes all the time with nothing of it on the page (each poll, the contact
  * typing or coming online, the last message's time): the parts that show those read the link themselves.
  */
-export type ChatLinkShown = Pick<LinkView, "id" | "pin" | "peerWakes" | "transportLog" | "identityTimeline" | "identities">;
+export type ChatLinkShown = Pick<LinkView, "id" | "pin" | "peerWakes" | "transportLog" | "identityTimeline" | "identities" | "blocked">;
 
 const shown = (link: LinkView): ChatLinkShown => ({
   id: link.id, pin: link.pin, peerWakes: link.peerWakes, transportLog: link.transportLog, identityTimeline: link.identityTimeline, identities: link.identities,
+  ...(link.blocked && { blocked: true as const }),
 });
 
 /** The chat's link as the page shows it (`ChatLinkShown`), by the contact's key: drawn again only when that changes. */

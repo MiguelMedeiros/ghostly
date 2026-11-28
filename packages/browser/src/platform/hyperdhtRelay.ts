@@ -146,6 +146,91 @@ function forgetServer(server: RelayedServer): void {
   if (internal._onStreamClose) internal._protocol?._stream?.off("close", internal._onStreamClose);
 }
 
+/** The parts of dht-relay 0.4.3's own `Stream` (the one under each SecretStream) that `forgetStream` reads. */
+interface RelayStreamInternals {
+  noiseStream?: unknown;
+  _onStreamClose: () => void;
+  _protocol: { _stream: { off(event: string, listener: () => void): unknown } };
+}
+function relayStreamInternals(value: unknown): RelayStreamInternals | null {
+  const stream = value as Partial<RelayStreamInternals> | null;
+  return typeof stream?._onStreamClose === "function" && typeof stream._protocol?._stream?.off === "function" ? stream as RelayStreamInternals : null;
+}
+
+/**
+ * The same as `forgetServer`, for every relayed stream, dialled or dialled in: dht-relay 0.4.3's `Stream` waits for the
+ * relay connection to close (to close itself) and never stops waiting, so each one ever opened on the connection, with
+ * its SecretStream and buffers (about 7 KB), stayed in memory until the connection went. Once the stream has closed,
+ * that wait goes. An incoming stream's `Stream` is its SecretStream's `rawStream`; a dialled one gets it only when the
+ * dial opens, so it is found where `connect` just put it (the node's `_connecting`, by its `noiseStream`). A dht-relay
+ * of another shape leaves everything as it was (test/hyperdhtRelayStreams.test.ts fails then).
+ */
+function forgetStream(socket: SecretSocket, node: RelayedNode): void {
+  let stream = relayStreamInternals((socket as { rawStream?: unknown }).rawStream);
+  const connecting = (node as { _connecting?: unknown })._connecting;
+  if (!stream && connecting instanceof Map) {
+    for (const candidate of connecting.values()) {
+      if ((candidate as { noiseStream?: unknown } | null)?.noiseStream === socket) {
+        stream = relayStreamInternals(candidate);
+        forgetHandshakes(candidate as object, socket, node);
+        break;
+      }
+    }
+  }
+  if (!stream) return;
+  const found = stream;
+  socket.once("close", () => { found._protocol._stream.off("close", found._onStreamClose); });
+}
+
+/** The parts of dht-relay 0.4.3's node that `forgetHandshakes` reads. */
+interface RelayNodeInternals {
+  _connecting: Map<unknown, unknown>;
+  _handshakes: Map<unknown, unknown>;
+  _protocol: { on(event: "noiseSend", listener: (message: { isInitiator?: unknown; id?: unknown; remoteStreamAlias?: unknown } | null) => void): unknown };
+}
+function relayNodeInternals(value: unknown): RelayNodeInternals | null {
+  const node = value as Partial<RelayNodeInternals> | null;
+  return node?._connecting instanceof Map && node._handshakes instanceof Map && typeof node._protocol?.on === "function" ? node as RelayNodeInternals : null;
+}
+/** The relay nodes `forgetHandshakes` watches, and each dial's handshakes as its node made them (by its dht-relay `Stream`). */
+const watchedNodes = new WeakSet<object>();
+const dialHandshakes = new WeakMap<object, Map<unknown, unknown>>();
+
+/**
+ * dht-relay 0.4.3's node keeps each dial's Noise handshake (about 1.9 KB) in its `_handshakes` and removes it only when
+ * the dial opens: every dial that failed after its noise step (a contact's Desktop that has just quit, a peer that
+ * refuses) left one there until the relay connection went. Entries are keyed by the relay's handshake id, and another
+ * dial to the same key may be under way, so only this dial's own are taken: the node makes one when the relay's
+ * `noiseSend` names the dial's `Stream`, and each is recorded then, and deleted once the dial opens or closes if the
+ * node still holds that same object. A dht-relay of another shape leaves everything as it was
+ * (test/hyperdhtRelayHandshakes.test.ts fails then).
+ */
+function forgetHandshakes(stream: object, socket: SecretSocket, node: RelayedNode): void {
+  const internals = relayNodeInternals(node);
+  const opened = stream as { once?: unknown };
+  if (!internals || typeof opened.once !== "function") return;
+  if (!watchedNodes.has(internals)) {
+    watchedNodes.add(internals);
+    // Added after the node's own listener, so it runs once the node has made the dial's handshake.
+    internals._protocol.on("noiseSend", message => {
+      if (!message?.isInitiator) return;
+      const dial = internals._connecting.get(message.remoteStreamAlias);
+      const handshake = internals._handshakes.get(message.id);
+      if (dial && handshake) dialHandshakes.get(dial)?.set(message.id, handshake);
+    });
+  }
+  const kept = new Map<unknown, unknown>();
+  dialHandshakes.set(stream, kept);
+  const forget = () => {
+    dialHandshakes.delete(stream);
+    for (const [id, handshake] of kept) if (internals._handshakes.get(id) === handshake) internals._handshakes.delete(id);
+    kept.clear();
+  };
+  // The `Stream` opens only after the node has read (and removed) the handshake it opened with.
+  (opened.once as (event: string, listener: () => void) => unknown).call(stream, "open", forget);
+  socket.once("close", forget);
+}
+
 function release(url: string, client: RelayClient, endpoint: { unavailable(): void }): void {
   client.endpoints.delete(endpoint);
   if (client.endpoints.size || client.gone) return;
@@ -339,6 +424,7 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
   };
   client.endpoints.add(member);
   const server = client.node.createServer({}, socket => {
+    forgetStream(socket, client.node);
     void attach(socket, channels, dialledIn).then(bound => {
       if (stopped) bound.channel.close();
       else if (handler) handler(bound);
@@ -379,7 +465,9 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
     async connect(address) {
       const publicKey = (address as { publicKey?: unknown } | null)?.publicKey;
       if (stopped || typeof publicKey !== "string" || !/^[a-f0-9]{64}$/.test(publicKey)) throw new Error("Invalid HyperDHT endpoint");
-      return attach(client.node.connect(fromHex(publicKey), { keyPair }), channels);
+      const socket = client.node.connect(fromHex(publicKey), { keyPair });
+      forgetStream(socket, client.node);
+      return attach(socket, channels);
     },
     async close() {
       stopped = true;

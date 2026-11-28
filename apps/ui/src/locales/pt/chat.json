@@ -29,6 +29,12 @@
     "save": "Salvar áudio",
     "tooLarge": "Grande demais para tocar aqui. Baixe para ouvir."
   },
+  "block": {
+    "blocked": "Você bloqueou este contato",
+    "body": "Essa pessoa não poderá mais ligar nem enviar nada para você, e nada avisa a ela. A conversa fica. Desbloqueie por este menu ou em Ajustes → Privacidade e segurança.",
+    "confirm": "Bloquear",
+    "title": "Bloquear {{name}}?"
+  },
   "compat": {
     "burned": "A conversa foi apagada",
     "continued": "Você convidou seu contato para uma nova conversa.",
@@ -174,7 +180,7 @@
     "leftHoursMinutes": "{{hours}} h {{minutes}} min restantes",
     "leftMinutes": "{{minutes}} min restantes",
     "leftUnderMinute": "menos de um minuto restante",
-    "noRoomDevice": "Espaço insuficiente: {{size}} livres neste aparelho",
+    "noRoomDevice": "Espaço insuficiente: sobram {{size}} neste aparelho",
     "nobodyHas": "Ninguém com quem você está conectado tem este arquivo ainda",
     "nobodyHasHint": "Ele chega sozinho quando um membro que o tem estiver online.",
     "notDownloaded": "{{size}} · não baixado",
@@ -190,7 +196,7 @@
     "resendHint": "Oferece de novo. Continua do que seu contato já tem.",
     "restoring": "Carregando… · {{size}}",
     "resume": "Continuar",
-    "roomDevice": "{{size}} livres neste aparelho",
+    "roomDevice": "Sobram {{size}} neste aparelho",
     "senderOnly": "Ainda não está com suas conexões",
     "senderOnlyHint": "Em um grupo deste tamanho, seu app se conecta por meio de poucos membros, não com quem enviou. Ele chega sozinho quando um deles baixar, ou peça a quem enviou que o mande para você em uma conversa.",
     "stalled": "Parado · {{progress}}",
@@ -271,13 +277,14 @@
   },
   "media": {
     "downloadSize": "Baixar {{size}}",
-    "noRoom": "Espaço insuficiente: {{size}} livres",
+    "noRoom": "Espaço insuficiente: sobram {{size}}",
     "noRoomToPlay": "Sem espaço livre em disco para tocar aqui. Baixe o arquivo.",
     "notYet": "Toca depois de enviado.",
     "positionOf": "{{position}} de {{duration}}",
-    "wantsToSend": "{{name}} quer enviar · {{size}} livres"
+    "wantsToSend": "{{name}} quer enviar · sobram {{size}}"
   },
   "menu": {
+    "block": "Bloquear contato",
     "continueNew": "Continuar numa nova conversa",
     "hold": "Reter mensagens…",
     "more": "Mais…",
@@ -287,6 +294,7 @@
     "pin": "Fixar conversa",
     "refresh": "Atualizar",
     "techInfo": "Informações técnicas",
+    "unblock": "Desbloquear contato",
     "unpin": "Desafixar conversa"
   },
   "message": {

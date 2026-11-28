@@ -29,6 +29,12 @@
     "save": "Save audio",
     "tooLarge": "Too large to play here. Download it to listen."
   },
+  "block": {
+    "blocked": "You blocked this contact",
+    "body": "They can no longer call you or send you anything, and nothing tells them. The chat stays. Unblock them from this menu or in Settings → Privacy & security.",
+    "confirm": "Block",
+    "title": "Block {{name}}?"
+  },
   "compat": {
     "burned": "Chat has been burned",
     "continued": "You invited your contact to a new chat.",
@@ -174,7 +180,7 @@
     "leftHoursMinutes": "{{hours}} h {{minutes}} min left",
     "leftMinutes": "{{minutes}} min left",
     "leftUnderMinute": "less than a minute left",
-    "noRoomDevice": "Not enough space: {{size}} free on this device",
+    "noRoomDevice": "Not enough space: {{size}} left on this device",
     "nobodyHas": "Nobody you are connected to has this file yet",
     "nobodyHasHint": "It comes by itself when a member who has it is online.",
     "notDownloaded": "{{size}} · not downloaded",
@@ -190,7 +196,7 @@
     "resendHint": "Offers it again. It goes on from what your contact already has.",
     "restoring": "Loading… · {{size}}",
     "resume": "Resume",
-    "roomDevice": "{{size}} free on this device",
+    "roomDevice": "{{size}} left on this device",
     "senderOnly": "Not with your connections yet",
     "senderOnlyHint": "In a group this large, your app connects through a few members, not to the sender. It comes by itself once one of them downloads it, or ask the sender to send it to you in a chat.",
     "stalled": "Not moving · {{progress}}",
@@ -271,13 +277,14 @@
   },
   "media": {
     "downloadSize": "Download {{size}}",
-    "noRoom": "Not enough space: {{size}} free",
+    "noRoom": "Not enough space: {{size}} left",
     "noRoomToPlay": "Not enough free disk space to play it here. Download it instead.",
     "notYet": "It plays once it has been sent.",
     "positionOf": "{{position}} of {{duration}}",
-    "wantsToSend": "{{name}} wants to send it · {{size}} free"
+    "wantsToSend": "{{name}} wants to send it · {{size}} left"
   },
   "menu": {
+    "block": "Block contact",
     "continueNew": "Continue in a new chat",
     "hold": "Hold messages…",
     "more": "More…",
@@ -287,6 +294,7 @@
     "pin": "Pin chat",
     "refresh": "Refresh",
     "techInfo": "Tech Info",
+    "unblock": "Unblock contact",
     "unpin": "Unpin chat"
   },
   "message": {

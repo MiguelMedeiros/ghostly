@@ -158,6 +158,20 @@ export interface LeftFile {
 }
 
 /**
+ * A file a handoff left for later on the device it came from (`on`, its signing key), as the device that took the
+ * profile notes it: its records name it by `ids`, and its bytes are fetched over the device link (`handoffFiles.ts`).
+ */
+export interface FetchFile {
+  sha256: string;
+  size: number;
+  /** The ids of its records in the profile: the bytes are written under the first, and copied for the others. */
+  ids: string[];
+  on: string;
+}
+/** The most files a record lists to fetch: each is over the "Bring large files later" size, so few profiles come near. */
+export const MAX_FETCH_FILES = 2_000;
+
+/**
  * A grant this device sent while adding a device whose `enroll-done` never came back (WISP 06 § Adding a device): that
  * device holds `D` and is in no record. It is noted before the grant leaves, and dropped in the write that adds the
  * device; one that stays is shown as "Not finished", and is what moving the set to a new `D` (removal) has to cover.
@@ -281,6 +295,8 @@ export interface DeviceRecord {
   settle?: { at: number | null; sources: string[] };
   /** Written at quiesce: the files left for later. */
   leftFiles?: LeftFile[];
+  /** Written with the release a taker holds: the files the handoff left for later on the device it came from, until fetched. */
+  fetchFiles?: FetchFile[];
   /**
    * Written at quiesce: every file the frozen copy holds, by digest. A pull says these are here (`handoff-have`) and
    * copies them into the staged state, without opening the frozen copy's database.
@@ -435,6 +451,8 @@ export function transition(from: DeviceRecord | null, profile: string, to: Store
   // A device that runs the profile again changes and deletes its files: the list of what its frozen copy held is of
   // another copy, and a pull would claim files no longer here.
   if (to === "active" && !("heldFiles" in patch)) delete next.heldFiles;
+  // A take that lost: the files to fetch were for the profile it would have run.
+  if (from.state === "taking" && to !== "active" && !("fetchFiles" in patch)) delete next.fetchFiles;
   return checked(rising(from, next));
 }
 
@@ -525,6 +543,13 @@ export function isEarlierSet(value: unknown): value is EarlierDeviceSet {
   return set.pending.length <= MAX_DEVICES && (set.foreign === undefined || set.foreign === true) && optional(set.removed, bytes);
 }
 
+/** One file to fetch as a record keeps it, and as a handoff's part `devices` carries it. */
+export function isFetchFile(value: unknown): value is FetchFile {
+  const file = value as Partial<FetchFile> | null;
+  return !!file && typeof file === "object" && bytes(file.sha256) && count(file.size, Number.MAX_SAFE_INTEGER) && bytes(file.on)
+    && Array.isArray(file.ids) && file.ids.length > 0 && file.ids.length <= 64 && file.ids.every(text);
+}
+
 /** Why a stored record cannot be trusted. The gate then starts nothing (see `gate.ts`). */
 export class DeviceRecordError extends Error {
   constructor(what: string) {
@@ -581,6 +606,10 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (r.leftFiles !== undefined) {
     if (!Array.isArray(r.leftFiles)) return bad("leftFiles");
     for (const file of r.leftFiles as Partial<LeftFile>[]) if (!file || !bytes(file.sha256) || !count(file.size, Number.MAX_SAFE_INTEGER) || !text(file.where)) return bad("a file left for later");
+  }
+  if (r.fetchFiles !== undefined) {
+    if (!Array.isArray(r.fetchFiles) || r.fetchFiles.length > MAX_FETCH_FILES) return bad("fetchFiles");
+    if (!r.fetchFiles.every(isFetchFile)) return bad("a file to fetch");
   }
   if (r.heldFiles !== undefined) {
     if (!Array.isArray(r.heldFiles)) return bad("heldFiles");

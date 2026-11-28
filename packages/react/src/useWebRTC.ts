@@ -18,9 +18,11 @@ import {
   type CallSignal,
   type CallEventType,
   type CallMedia,
+  type CallAudioMix,
   type CallIceServer,
 } from "@ghostly/core";
 import { endOtherCalls, otherCallOn as anotherCallOn, setCallOn, setRingingIn, subscribeCalls } from "./callRegistry";
+import { captureScreen, mixWithWebAudio } from "./screenCapture";
 
 /** What a peer can put on the video lane of a call. */
 export type Picture = "camera" | "screen";
@@ -100,6 +102,7 @@ const browserMedia: CallMedia = {
   createPeerConnection: (config) => new RTCPeerConnection(config),
   getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
   getDisplayMedia: (options) => navigator.mediaDevices.getDisplayMedia(options),
+  mixAudio: mixWithWebAudio,
 };
 
 /** How long a failed screen share stays explained in the call window. */
@@ -259,6 +262,14 @@ export function screenShareErrorMessage(error: unknown, elapsedMs = Infinity): s
     default:
       return "Could not share the screen. Try again.";
   }
+}
+
+/** Lets a shared screen's sound go: its mix with the voice closed, its capture stopped. Safe to call twice. */
+function letScreenSoundGo(ref: { current: { sound: MediaStreamTrack; mix: CallAudioMix } | null }): void {
+  const held = ref.current;
+  ref.current = null;
+  held?.mix.close();
+  held?.sound.stop();
 }
 
 /** The video section of the call, once the peers agreed on one. */
@@ -522,6 +533,9 @@ export function useWebRTC({
   const pictureBeforeShareRef = useRef<Picture | null>(null);
   /** A share is being started or stopped: the picker may be open. */
   const shareBusyRef = useRef(false);
+  /** The shared screen's sound and its mix with the voice, on the audio sender while the screen is shared. */
+  const screenSoundRef = useRef<{ sound: MediaStreamTrack; mix: CallAudioMix } | null>(null);
+  const [screenSound, setScreenSound] = useState(false);
   /** Counts the picture changes asked for: one whose camera or screen opens after a later one was asked is dropped. */
   const pictureRequestRef = useRef(0);
   /** The same for the microphone switches: one that opens after a later one was picked is dropped. */
@@ -670,6 +684,8 @@ export function useWebRTC({
     }
     askingCameraRef.current?.getTracks().forEach((t) => t.stop());
     askingCameraRef.current = null;
+    letScreenSoundGo(screenSoundRef);
+    setScreenSound(false);
 
     if (pcRef.current) {
       pcRef.current.close();
@@ -985,36 +1001,81 @@ export function useWebRTC({
       const request = ++pictureRequestRef.current;
 
       let track: MediaStreamTrack | null = null;
+      /** The shared screen's sound, when the browser gave one and this call's media can mix it in (`mixAudio`). */
+      let sound: MediaStreamTrack | null = null;
       try {
         if (next === "camera") {
           track = (await mediaRef.current.getUserMedia({ video: camera === undefined ? captureFrom("video") : exactly(camera) })).getVideoTracks()[0];
         } else if (next === "screen") {
-          const { getDisplayMedia } = mediaRef.current;
+          const { getDisplayMedia, mixAudio } = mediaRef.current;
           if (!getDisplayMedia) throw Object.assign(new Error("Screen sharing is not available here"), { name: "NotSupportedError" });
-          track = (await getDisplayMedia({ video: true, audio: false })).getVideoTracks()[0];
+          const shared = await captureScreen(getDisplayMedia);
+          track = shared.getVideoTracks()[0];
+          const [heard, ...more] = shared.getAudioTracks();
+          more.forEach((other) => other.stop());
+          if (heard && mixAudio) sound = heard;
+          else heard?.stop();
         }
       } catch (error) {
         yieldRequest(pictureRequestRef, request);
         throw error;
       }
+      const letGo = () => {
+        track?.stop();
+        sound?.stop();
+      };
       // The call ended while the prompt or the picker was open: what it gave is let go, and nobody is told.
       if (attemptRef.current !== attempt) {
-        track?.stop();
+        letGo();
         return;
       }
       // Something else was asked for while it opened (the camera turned off, another camera picked): that one wins.
       if (pictureRequestRef.current !== request) {
-        track?.stop();
+        letGo();
         return;
       }
 
       try {
         await sender.replaceTrack(track);
       } catch (error) {
-        track?.stop();
+        letGo();
         throw error;
       }
       // Hung up while the track was swapped (the Linux Desktop opens the device meanwhile): the call's tracks were stopped without this one.
+      if (attemptRef.current !== attempt || !localStreamRef.current) {
+        letGo();
+        return;
+      }
+
+      // The screen's sound of the share this picture replaces ends with it: the microphone alone goes out again.
+      if (screenSoundRef.current) {
+        const mic = localStreamRef.current.getAudioTracks()[0];
+        letScreenSoundGo(screenSoundRef);
+        setScreenSound(false);
+        await audioTransceiver(pc)?.sender.replaceTrack(mic ?? null).catch(() => {});
+      }
+      // This screen's sound goes mixed with the voice on the call's one audio section (no new offer). A mix that
+      // cannot be made, or a sender that will not take it, leaves the screen shared without its sound.
+      const voice = localStreamRef.current?.getAudioTracks()[0];
+      const audioSender = audioTransceiver(pc)?.sender;
+      const { mixAudio } = mediaRef.current;
+      if (sound && voice && audioSender && mixAudio && attemptRef.current === attempt) {
+        let mix: CallAudioMix | null = null;
+        try {
+          mix = mixAudio(voice, sound);
+          screenSoundRef.current = { sound, mix };
+          await audioSender.replaceTrack(mix.track);
+          // Hung up meanwhile: the call's end already let it go.
+          if (screenSoundRef.current?.sound === sound) setScreenSound(true);
+        } catch {
+          if (screenSoundRef.current?.sound === sound) screenSoundRef.current = null;
+          mix?.close();
+          sound.stop();
+          await audioSender.replaceTrack(voice).catch(() => {});
+        }
+      } else {
+        sound?.stop();
+      }
       if (attemptRef.current !== attempt || !localStreamRef.current) {
         track?.stop();
         return;
@@ -1491,7 +1552,10 @@ export function useWebRTC({
     if (attemptRef.current !== attempt || microphoneRequestRef.current !== request) { track.stop(); return; }
     track.enabled = localStreamRef.current?.getAudioTracks()[0]?.enabled ?? true;
     try {
-      await sender.replaceTrack(track);
+      // While a screen's sound is mixed in, the mix stays on the sender and takes the new microphone in.
+      const mixed = screenSoundRef.current;
+      if (mixed) mixed.mix.setVoice(track);
+      else await sender.replaceTrack(track);
     } catch (error) {
       track.stop();
       throw error;
@@ -1821,6 +1885,7 @@ export function useWebRTC({
         localStreamRef.current = null;
       }
       askingCameraRef.current?.getTracks().forEach((t) => t.stop());
+      letScreenSoundGo(screenSoundRef);
 
       if (pcRef.current) {
         pcRef.current.close();
@@ -1844,6 +1909,8 @@ export function useWebRTC({
     /** We are not sending any picture: an audio call, or a camera turned off. */
     isVideoOff: picture === null,
     isScreenSharing: picture === "screen",
+    /** The shared screen's sound goes with it (a tab's or the system's). False while sharing a screen without it. */
+    screenSound: picture === "screen" && screenSound,
     /** The peer is sending a picture we can show. */
     remoteHasVideo: remotePicture !== null,
     /** The picture the peer is sending is its screen. */

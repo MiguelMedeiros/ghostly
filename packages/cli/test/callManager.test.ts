@@ -696,6 +696,26 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  // Found in a bug hunt: `call start` over the contact's call ringing here said only that a call was on, `call answer`
+  // on a call placed here that it was not ringing (while it read `ringing`), and `call hangup` answered with the audio
+  // socket it had just removed and the stats of a connection it had closed.
+  it("says how to answer the contact's call that rings here, whose a ringing call is, and leaves a hung-up call no audio", async () => {
+    const { a, b } = pairOfManagers();
+    const placed = await a.calls.start("chat-ab", {}) as { call: string; audio: { socket: string } };
+    const rang = await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await expect(b.calls.start("chat-ba", {})).rejects.toMatchObject({
+      code: "busy", message: "The contact is calling: their call rings here (ghostly call answer chat-ba)", details: { call: rang.call },
+    });
+    await expect(a.calls.answer(undefined, {})).rejects.toMatchObject({ code: "refused", message: "That call is yours: it rings at the contact's" });
+    const ended = await a.calls.hangup(undefined);
+    expect(ended).toMatchObject({ call: placed.call, direction: "out", state: "ended", reason: "hangup", audio: null });
+    expect(ended).not.toHaveProperty("stats");
+    expect(existsSync(placed.audio.socket)).toBe(false);
+    await until(() => b.events.find((e) => e.type === "call.ended"));
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("a call placed, rung and answered by its chat's id builds no engine state; a call placed by a name builds it once", async () => {
     const { a, b } = pairOfManagers();
     b.calls.setAuto({ on: true, from: ["chat-ba"], rate: 16000 });
@@ -1398,6 +1418,21 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  // The engine drops a blocked contact's hang-up: the call went on here until its media went quiet.
+  it("a contact blocked during a call ends it as a hang-up, and the contact hears it", async () => {
+    const { a, b } = pairOfManagers();
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    await a.calls.start("chat-ab", {});
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected")))).catch(diagnose(a, b));
+    a.link.blocked = true;
+    await a.calls.endBlocked();
+    expect(a.calls.list()).toEqual([]);
+    expect(a.events.find((e) => e.type === "call.ended")).toMatchObject({ direction: "out", reason: "hangup" });
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   /** Both sides call each other at once; the side whose offer lost is the one that ends its call as `crossed`. */
   async function glare(a: Side, b: Side) {
     await Promise.allSettled([a.calls.start("chat-ab", {}), b.calls.start("chat-ba", {})]);
@@ -1645,7 +1680,7 @@ describe("two call managers", { timeout: 60_000 }, () => {
         callee.side.calls.onSignal("chat-ba", offer());
         await new Promise((r) => setTimeout(r, 50));
         expect(rang()).toBe(3);
-        await expect(callee.side.calls.start("chat-ba", {})).rejects.toMatchObject({ code: "busy" });
+        await expect(callee.side.calls.start("chat-ba", {})).rejects.toMatchObject({ code: "busy", message: "The contact is calling: their call rings here (ghostly call answer chat-ba)" });
         expect(rang()).toBe(4);
         expect(signalsOf(callee.side, "o")).toEqual([]);
         await caller.side.calls.stopAll();
@@ -1878,7 +1913,15 @@ describe("auto-answer from the chats named", () => {
 
   it("takes a chat by its id, its contact's key or this side's label", () => {
     const calls = manager();
-    expect(calls.setAuto({ on: true, from: ["chat-mallory", KEY, "alice"] }).from).toEqual(["chat-mallory", "chat-mallory", "chat-real-alice"]);
+    expect(calls.setAuto({ on: true, from: ["chat-mallory", KEY, "alice"] }).from).toEqual(["chat-mallory", "chat-real-alice"]);
+  });
+
+  it("keeps each chat once", () => {
+    // Found in a bug hunt: 50,000 refs from a script were each resolved (8 s of the daemon's thread) and all kept in
+    // calls.json (900 KB), read again on each incoming call.
+    const calls = manager();
+    expect(calls.setAuto({ on: true, from: Array(50_000).fill("chat-mallory") }).from).toEqual(["chat-mallory"]);
+    expect(JSON.parse(readFileSync(saved(calls), "utf8")).autoAnswer.from).toEqual(["chat-mallory"]);
   });
 
   it("refuses a chat named only by its contact's own name or a prefix of its id, and keeps nothing", () => {

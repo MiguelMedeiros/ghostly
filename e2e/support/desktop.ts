@@ -490,7 +490,7 @@ const BUS_CONFIG = `<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Co
 `;
 
 /** A process, with when it started: a PID the system hands out again later is not the same process. */
-interface Launched { pid: number; started: string }
+export interface Launched { pid: number; started: string }
 
 /** `/proc/<pid>/stat`'s fields after the command name: [0] is the state, [1] the parent, [19] the start time. */
 function stat(pid: number): string[] | null {
@@ -522,30 +522,61 @@ function descendants(root: number): Launched[] {
   return found;
 }
 
-/** Still running: the same process (same start time), and not a zombie waiting for its parent to reap it. */
-function running({ pid, started }: Launched): boolean {
-  const fields = stat(pid);
-  return fields !== null && fields[19] === started && fields[0] !== "Z";
+/** What `endAll` reads and signals: the system's processes, or a test's. */
+export interface Processes {
+  stat: (pid: number) => string[] | null;
+  /** The command name (`/proc/<pid>/comm`): the app, or a WebKit child such as WebKitWebProcess. */
+  name: (pid: number) => string;
+  /** Where in the kernel it waits (`/proc/<pid>/wchan`). */
+  wchan: (pid: number) => string;
+  kill: (pid: number, signal: NodeJS.Signals) => void;
 }
+
+const procFile = (pid: number, file: string) => {
+  try {
+    return readFileSync(`/proc/${pid}/${file}`, "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+
+const SYSTEM: Processes = {
+  stat,
+  name: (pid) => procFile(pid, "comm"),
+  wchan: (pid) => procFile(pid, "wchan"),
+  kill: (pid, signal) => void process.kill(pid, signal),
+};
+
+/** How long `endAll` waits: on its own, after each signal, and longer after SIGKILL for one in uninterruptible sleep. */
+export const END_WAITS = { own: 5_000, signal: 5_000, uninterruptible: 30_000 };
 
 /**
  * Waits for each process to end: 5 s on its own (the app is done writing to its home before the test removes it),
  * then SIGTERM, then SIGKILL. Throws if one is still there after that, rather than let the next open run two apps.
+ *
+ * SIGKILL takes effect only once a process leaves uninterruptible sleep (state D: a WebKitGTK/GPU or disk wait in the
+ * kernel), so one still in it gets up to 30 s more. The error names each leftover, its state and its wait channel.
  */
-async function endAll(launched: Launched[]): Promise<void> {
+export async function endAll(launched: Launched[], procs: Processes = SYSTEM, waits = END_WAITS): Promise<void> {
+  // Still running: the same process (same start time), and not a zombie waiting for its parent to reap it.
+  const running = ({ pid, started }: Launched) => {
+    const fields = procs.stat(pid);
+    return fields !== null && fields[19] === started && fields[0] !== "Z";
+  };
   const left = () => launched.filter(running);
   const until = async (ms: number) => {
-    for (const deadline = Date.now() + ms; left().length > 0 && Date.now() < deadline;) await sleep(100);
+    for (const deadline = Date.now() + ms; left().length > 0 && Date.now() < deadline;) await sleep(Math.min(100, ms));
   };
-  await until(5_000);
+  await until(waits.own);
   for (const signal of ["SIGTERM", "SIGKILL"] as const) {
     for (const { pid } of left()) {
-      try { process.kill(pid, signal); } catch { /* ended meanwhile */ }
+      try { procs.kill(pid, signal); } catch { /* ended meanwhile */ }
     }
-    await until(5_000);
+    await until(waits.signal);
   }
-  const still = left();
-  if (still.length > 0) throw new Error(`The Desktop app's processes ${still.map(({ pid }) => pid).join(", ")} outlived SIGKILL`);
+  if (left().some(({ pid }) => procs.stat(pid)?.[0] === "D")) await until(waits.uninterruptible);
+  const still = left().map(({ pid }) => `${pid} (${procs.name(pid)}, state ${procs.stat(pid)?.[0] ?? "?"} in ${procs.wchan(pid) || "?"})`);
+  if (still.length > 0) throw new Error(`The Desktop app's processes ${still.join(", ")} outlived SIGKILL`);
 }
 
 async function withRetries<T>(attempt: () => Promise<T>, budgetMs: number, stop?: AbortSignal): Promise<T> {

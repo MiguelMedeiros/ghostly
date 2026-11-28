@@ -1,7 +1,7 @@
 import { CliError } from "../errors";
 import type { OptionSpec } from "../args";
 import { TRANSPORT_NAMES } from "../words";
-import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, reaction, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, usageFields, usageOptions, wait } from "./shared";
+import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, reaction, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, typingWords, usageFields, usageOptions, wait } from "./shared";
 
 /** `react` and `pin` in a 1:1 chat: until the contact confirmed it, by default without a daemon (the process leaves). */
 const confirmWait: Record<string, OptionSpec> = {
@@ -82,7 +82,7 @@ export const commands: Record<string, Command> = {
   "chat transport": { method: "chat.transport", usage: "chat transport <chat> <auto|dht|webrtc|iroh|hyperdht>", summary: "Choose what carries a chat", args: ["chat", "transport"], words: { transport: Object.keys(TRANSPORT_NAMES) }, params: (_, a) => ({ chat: a.chat, transport: a.transport }) },
   "chat verify": {
     method: "chat.verify", usage: "chat verify <chat> --code <code>", summary: "Mark a contact verified after comparing codes", args: ["chat"],
-    options: { code: { type: "string", description: "The code the contact reads out" } }, params: ({ options }, { chat }) => {
+    options: { code: { type: "string", description: "The code the contact reads out: the comparisonCode their chat show prints (spaces or hyphens between its groups, or none)" } }, params: ({ options }, { chat }) => {
       if (typeof options.code !== "string" || !options.code.trim()) throw new CliError("usage", "--code is needed: ghostly chat verify <chat> --code <code>");
       return { chat, code: options.code };
     },
@@ -144,10 +144,12 @@ export const commands: Record<string, Command> = {
       timeout: groupWait.timeout,
     },
     params: ({ options }, a) => {
-      // --remove names no message: the chat has one pin. One given beside it is taken as before, and not read. One given
-      // as "" (an unset variable in a script) is missing too, as for `react`: before, a one-shot went online to refuse it.
+      // --remove names no message: the chat has one pin. One given beside it was taken and not read, so a script that
+      // meant "unpin X" unpinned whatever was pinned: refused. One given as "" (an unset variable in a script) is
+      // missing too, as for `react`: before, a one-shot went online to refuse it.
       if (!a.message && options.remove !== true) throw new CliError("usage", "Missing <message>: ghostly pin <chat|group> <message> | --remove");
       if (a.message?.includes(" ")) throw new CliError("usage", "Too many arguments: ghostly pin <chat|group> <message> | --remove");
+      if (a.message && options.remove === true) throw new CliError("usage", "--remove names no message, it unpins whatever is pinned: ghostly pin <chat|group> --remove");
       return { chat: a.chat, message: a.message, remove: options.remove === true, wait: options.wait, timeout: timeout(options) };
     },
   },
@@ -196,7 +198,7 @@ export const commands: Record<string, Command> = {
       status: { type: "string", description: "A short line shown instead, e.g. \"Transcribing your audio…\" (40 characters, no links)" },
       for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" },
     },
-    params: ({ options }, { chat }) => ({ chat, stop: options.stop === true, kind: options.kind, status: options.status, for: typingFor(options) }),
+    params: ({ options }, { chat }) => ({ chat, stop: options.stop === true, ...typingWords(options), for: typingFor(options) }),
   },
   "usage send": {
     method: "usage.send", usage: "usage send [<chat|group>] [--all] --left <percent> [--window \"5 h\"] [--resets <time>] [--label Claude] [--account <name>] [--also week=80@<time>]... [--used n --limit n] [--id id] [--text <text>] [--json json|-|file] [--force] [--wait none|sent] [--timeout s]",

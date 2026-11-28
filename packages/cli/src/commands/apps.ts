@@ -1,10 +1,21 @@
-import { CliError } from "../errors";
-import { here, localStat, readInput, type Command } from "./shared";
+import { CliError, shownValue } from "../errors";
+import { fileHere, here, localStat, readInput, type Command } from "./shared";
+
+/**
+ * `app serve --grant`: chat or name (appServe.ts's GRANTABLE), or internet and files, which the method refuses with
+ * why. Another word is a usage error (exit 2) naming the flag before the profile opens: before, the method answered it
+ * once the profile was open (`bad_request`, exit 1), as "grant takes chat or name".
+ */
+function grants(values: unknown): void {
+  if (!Array.isArray(values)) return;
+  const other = values.filter((value) => !["chat", "name", "internet", "files"].includes(value));
+  if (other.length) throw new CliError("usage", `--grant takes chat or name, not ${other.map((value) => shownValue(value)).join(", ")}`);
+}
 
 /** The key file a command signs with: always named, never a default, never on the command line itself. */
 function keyFile(value: unknown, usage: string): string {
   if (typeof value !== "string" || !value) throw new CliError("usage", `--key <file> is needed: ghostly ${usage}`);
-  return value;
+  return fileHere(value)!;
 }
 
 /**
@@ -64,7 +75,7 @@ export const commands: Record<string, Command> = {
       out: { type: "string", description: "Where the bundle goes (default <dir>/app.ghostlyapp); the bundle there is the version this one follows" },
       sequence: { type: "number", description: "This version's sequence, higher than the bundle at --out's (default: one more than it)" },
     },
-    run: async ({ options }, a) => (await import("../apps")).publishApp(a.dir!, keyFile(options.key, "app publish <dir> --key <file> [--out <file>] [--sequence n]"), here(options.out), options.sequence as number | undefined, options.home as string | undefined),
+    run: async ({ options }, a) => (await import("../apps")).publishApp(a.dir!, keyFile(options.key, "app publish <dir> --key <file> [--out <file>] [--sequence n]"), fileHere(options.out), options.sequence as number | undefined, options.home as string | undefined),
   },
   "app revoke": {
     method: "app.revoke", usage: "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]",
@@ -97,7 +108,10 @@ export const commands: Record<string, Command> = {
       grant: { type: "list", description: "A permission the app asks and you allow: chat (talk to the contact's app) or name (your name in that chat); again for each" },
       url: { type: "string", description: "Where a contact's app reads the bundle, for the card (raw.githubusercontent.com, or cdn.jsdelivr.net at a commit; default: the first of those it was served from or its manifest names)" },
     },
-    params: ({ options }, a) => ({ bundle: /^[a-z][a-z0-9+.-]*:\/\//i.test(a.bundle ?? "") ? a.bundle : bundleFile(here(a.bundle)!), grant: options.grant, url: options.url }),
+    params: ({ options }, a) => {
+      grants(options.grant);
+      return { bundle: /^[a-z][a-z0-9+.-]*:\/\//i.test(a.bundle ?? "") ? a.bundle : bundleFile(here(a.bundle)!), grant: options.grant, url: options.url };
+    },
   },
   "app served": {
     method: "app.served", usage: "app served",

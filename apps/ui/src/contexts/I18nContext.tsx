@@ -13,6 +13,7 @@ import type { Language } from "../lib/settings";
 import { applyDocumentLanguage, textDirection } from "../lib/documentLanguage";
 import { setDefaultProfileName, setRestoredProfileName } from "../lib/profiles";
 
+import { applyAppMenu } from "../lib/appMenu";
 import { loadLocale, loadedLocale, translatorFor } from "../locales";
 import { englishT, type Translate } from "../locales/translate";
 
@@ -77,6 +78,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   // And a restored profile's "(restored)", which the registry keeps as a flag.
   setRestoredProfileName((name) => t("profile.restoredName", { name }));
   useEffect(() => { window.dispatchEvent(new Event("profiles-updated")); }, [t]);
+  // Desktop on a Mac: the menu bar is in the app's language too (lib/appMenu.ts), under the lock screen as well.
+  useEffect(() => applyAppMenu(t), [t]);
 
   // The same object while none of it changes: this draws on every setting, and a fresh one drew everything that
   // translates (every message on screen) again with it.

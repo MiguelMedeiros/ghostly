@@ -53,6 +53,13 @@ describe("group auto", () => {
     expect(w.auto.set({ on: true, from: ["Miguel", "chat-owner"] })).toEqual({ on: true, from: ["chat-owner"] });
   });
 
+  it("reads a chat given many times once, as call auto on --from does", () => {
+    // Found in a bug hunt: 50,000 refs from a script were each resolved (8 s of the daemon's thread) before the one chat
+    // they named was kept.
+    const w = world();
+    expect(w.auto.set({ on: true, from: Array(50_000).fill("Miguel") })).toEqual({ on: true, from: ["chat-owner"] });
+  });
+
   it("--from a group says it is a group, not a chat, with its id, as call auto on --from does", () => {
     const w = world();
     w.s.groups = [{ id: "g1crew", name: "Crew", profile: "mesh", members: [], isAdmin: false, status: "active" } as unknown as GroupView];
@@ -313,6 +320,28 @@ describe("group auto", () => {
     expect(await callApi(ctx, "group.list", {})).toMatchObject({ autoJoin: { on: true, from: ["chat-owner"] } });
     await callApi(ctx, "chat.remove", { chat: "chat-owner", yes: true });
     expect(await callApi(ctx, "group.auto", {})).toEqual({ autoJoin: { on: false, from: [] } });
+  });
+
+  it("over the API: the chats of group.auto and call.auto go with on: true, as the command line refuses them without on", async () => {
+    // Found in a bug hunt: from with on: false emptied the whole list (a bot dropping one chat dropped them all), and from
+    // with no on only read the setting: each answered as if done.
+    const w = world();
+    const calls = new CallManager({ engine: { chatView: chatViewOf, getState: w.state, setCallSignal: async () => {} } as unknown as CallEngine, emit: () => {}, profileDir: w.dir });
+    const ctx = { runtime: { server: { node: w.engine }, paths: { name: "default" } }, calls, groupAuto: w.auto, mode: "daemon", version: "test" } as unknown as ApiContext;
+    expect(await callApi(ctx, "group.auto", { on: true, from: ["Miguel"] })).toEqual({ autoJoin: { on: true, from: ["chat-owner"] } });
+    expect(await callApi(ctx, "call.auto", { on: true, from: ["Miguel"], rate: 16000 })).toEqual({ autoAnswer: { on: true, from: ["chat-owner"], rate: 16000 } });
+    for (const params of [{ on: false, from: ["Miguel"] }, { from: ["Miguel"] }, { on: null, from: ["Miguel"] }]) {
+      await expect(callApi(ctx, "group.auto", params), JSON.stringify(params)).rejects.toMatchObject({ code: "bad_request", message: "from goes with on: true" });
+      await expect(callApi(ctx, "call.auto", params), JSON.stringify(params)).rejects.toMatchObject({ code: "bad_request", message: "from and rate go with on: true" });
+    }
+    for (const params of [{ on: false, rate: 16000 }, { rate: 16000 }])
+      await expect(callApi(ctx, "call.auto", params), JSON.stringify(params)).rejects.toMatchObject({ code: "bad_request", message: "from and rate go with on: true" });
+    expect(await callApi(ctx, "group.auto", {})).toEqual({ autoJoin: { on: true, from: ["chat-owner"] } });
+    expect(await callApi(ctx, "call.auto", {})).toEqual({ autoAnswer: { on: true, from: ["chat-owner"], rate: 16000 } });
+    // Off alone, or with an empty list, still turns each off; a word for on is refused as before.
+    expect(await callApi(ctx, "group.auto", { on: false, from: [] })).toEqual({ autoJoin: { on: false, from: [] } });
+    expect(await callApi(ctx, "call.auto", { on: false })).toEqual({ autoAnswer: { on: false, from: [], rate: 48000 } });
+    await expect(callApi(ctx, "group.auto", { on: "false", from: ["Miguel"] })).rejects.toMatchObject({ code: "bad_request", message: "on must be true or false" });
   });
 
   it("over the API: a key the method does not take is refused, never read as left out (call.auto on for every contact)", async () => {

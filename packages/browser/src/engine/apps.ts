@@ -422,9 +422,12 @@ function listingUrls(urls: readonly string[]): string[] {
   return [...readable.filter(isPinnedAppUrl), ...readable.filter((u) => !isPinnedAppUrl(u))];
 }
 
-/** A read that failed for a reason that may pass: offline, the host not reached or too slow, its own trouble (5xx, 429). */
+/**
+ * A read that failed for a reason that may pass: offline, the host not reached or too slow, its own trouble (5xx, 429,
+ * its own timeout 408), as the install screen says it with Try again (apps/ui lib/apps/errors.ts `appErrorRetryable`).
+ */
 const passing = (error: unknown): boolean => error instanceof AppFetchError
-  && (error.code === "offline" || error.code === "network" || error.code === "slow" || (error.status ?? 0) >= 500 || error.status === 429);
+  && (error.code === "offline" || error.code === "network" || error.code === "slow" || (error.status ?? 0) >= 500 || error.status === 429 || error.status === 408);
 
 /** What one app's revocation reads in an update check met (`readRevocations`): some host answered, some read failed for a passing reason. */
 interface RevocationsReach { answered: boolean; failed: boolean }

@@ -4,7 +4,7 @@ import { parseProofBunker } from "@ghostly/browser/proofs/nostr";
 import { SignerTimeout, type IdentityProofProvider, type IdentitySigner, type SignerField, type SignerInstructions } from "@ghostly/browser/proofs/contract";
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
 import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
-import { chatOf, node, num, ownChatOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { chatOf, node, num, ownChatOf, state, str, type ApiContext, type Lookup, type Method, type Params } from "./apiKit";
 import { CliError, shownValue } from "./errors";
 
 /**
@@ -98,15 +98,45 @@ function pruneDrafts(now = Date.now()) {
   for (const [id, draft] of drafts) if (now - draft.createdAt > IDENTITY_DRAFT_TTL_MS) drafts.delete(id);
 }
 
-async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
+function canonical(p: IdentityProofProvider, subject: string): string {
   let normalized: string;
   try { normalized = p.subject?.normalize ? p.subject.normalize(subject) : subject; } catch (error) {
     throw new CliError("bad_request", error instanceof Error ? error.message : String(error));
   }
   if (!normalized) throw new CliError("bad_request", `Not a ${p.subject?.label ?? "subject"} ${p.label} takes`);
+  return normalized;
+}
+
+/**
+ * An in-app signer's fields with the subject given where the usage line puts it: in the signer's field that is the
+ * subject (NIP-05's domain), or, for a signer that brings its own key, the subject that key must be. It was dropped.
+ */
+function withSubject(p: IdentityProofProvider, signer: IdentitySigner<unknown>, values: Record<string, string>, subject: string | undefined) {
+  if (!subject) return { values };
+  const field = signer.kind === "in-app" ? signer.fields?.find((f) => f.kind !== "secret" && f.label === p.subject?.label) : undefined;
+  if (!field) return { values, expected: canonical(p, subject) };
+  // Compared as the provider reads them (a domain in capitals is the same one); one that is no subject of it is refused
+  // in its words, and either is quoted as a refusal quotes a value: a link or key typed in its place is not printed back.
+  const given = canonical(p, subject), other = values[field.name];
+  if (other && canonical(p, other) !== given) throw new CliError("usage", `Two ${field.label.toLowerCase()}s: ${shownValue(subject)} as <subject>, ${shownValue(other)} as --field ${field.name}; give one`);
+  return { values: { ...values, [field.name]: subject } };
+}
+
+async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
+  const normalized = canonical(p, subject);
   const days = params.days === undefined ? undefined : num(params, "days", 0, { min: 1, max: p.validity.maxDays, whole: true });
   return node(ctx).beginIdentityProof({ provider: p.id, subject: normalized, ...(days ? { validityDays: days } : {}) });
 }
+
+/** The proof `identity remove` names: the engine removes nothing for an id it does not know, and says nothing. */
+function proofToRemove(ctx: ApiContext, params: Params): string {
+  const id = str(params, "id", true);
+  if (!state(ctx).identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${shownValue(id)} (ghostly identity list)`);
+  return id;
+}
+
+/** What a one-shot looks up before any chat starts (api.ts `startOnceFound`). */
+export const IDENTITY_LOOKUPS: Record<string, Lookup> = { "identity.remove": proofToRemove };
 
 export const IDENTITY_METHODS: Record<string, Method> = {
   async "identity.providers"() {
@@ -129,8 +159,9 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     const p = identityProvider(str(params, "provider", true));
     const signer = signerOf(p, str(params, "signer"));
     if (signer.kind === "in-app") {
-      const values = (params.fields ?? {}) as Record<string, string>;
-      if (typeof values !== "object" || Array.isArray(values) || Object.values(values).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
+      const fields = (params.fields ?? {}) as Record<string, string>;
+      if (typeof fields !== "object" || Array.isArray(fields) || Object.values(fields).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
+      const { values, expected } = withSubject(p, signer, fields, str(params, "subject"));
       for (const field of signer.fields ?? []) if (!field.optional && !values[field.name]) throw new CliError("usage", `${signer.label} needs ${field.name} (${field.label}): ${howToGive(field)}`);
       // A NIP-46 link read as the signer will read it: one it refuses is the user's input, not an engine failure.
       const bunker = signer.fields?.find((f) => f.name === "bunker");
@@ -159,7 +190,13 @@ export const IDENTITY_METHODS: Record<string, Method> = {
           if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { ...tag, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
         },
       }, async (session) => {
-        const { draftId, binding } = await begin(ctx, p, await session.subject(), params);
+        // In the form `expected` is in: a signer may answer its key another way (a Pubky key in capitals).
+        const subject = canonical(p, await session.subject());
+        if (expected !== undefined && subject !== expected) {
+          const shown = (key: string) => p.publicUri?.(key) ?? key;
+          throw new CliError("bad_request", `${signer.label} holds ${shown(subject)}, not ${shown(expected)}: nothing was signed`);
+        }
+        const { draftId, binding } = await begin(ctx, p, subject, params);
         try {
           const evidence = await session.sign(identityStatement(binding));
           signed = true;
@@ -225,9 +262,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
   },
 
   async "identity.remove"(ctx, params) {
-    const id = str(params, "id", true);
-    // The engine removes nothing for an id it does not know, and says nothing.
-    if (!state(ctx).identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${shownValue(id)} (ghostly identity list)`);
+    const id = proofToRemove(ctx, params);
     await node(ctx).removeIdentityProof({ id });
     return { removed: id };
   },

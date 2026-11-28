@@ -149,6 +149,8 @@ const CLOSED = "__ghostly_closed__";
 const FOLLOWS = "__ghostly_journal__";
 /** The database an entry's first op names, with the entry's number (`seq`): SQLite's trees hold the entries up to theirs. */
 const SEQ = "__ghostly_entry__";
+/** How many times `peekStores` reads a store that a fold changed under it. */
+const PEEK_TRIES = 5;
 /** How long `close` waits for the transactions still running: one left open for good does not keep the process. */
 const CLOSE_WAIT_MS = 5_000;
 /** Records an export reads and serializes in one turn of the event loop, then writes: a few milliseconds' worth. */
@@ -246,6 +248,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   let holdsDelete = false;
   /** The exports under way (a backup's), each holding rows.db as it was when it began (`openTreeReader`). */
   const exporting = new Set<Promise<void>>();
+  /** The scrubs' folds queued or under way: an export begins after them (`exportSnapshot`). */
+  const scrubbing = new Set<Promise<void>>();
   /** The scrub's fold asked for that has not begun yet: a scrub asked meanwhile is that one (`compact`). */
   let nextScrub: Promise<void> | null = null;
   const pending = new WeakMap<unknown[], Op[]>();
@@ -749,9 +753,6 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     // commit meanwhile wait behind it in the queue (`append`), so the journal it replaces gets none of them.
     const file = await open(temporaryPath, "w", 0o600);
     try { await writeSnapshotTo(file, snapshot); await file.sync(); } finally { await file.close(); }
-    // A scrub's checkpoint stops at an export's reader: rows.db kept the pages from before it, a purged text in them,
-    // after `message delete --purge` answered. None begins between this wait and the checkpoint: no turn passes.
-    while (scrub && trees && exporting.size) await Promise.allSettled(exporting);
     if (trees) {
       // Every transaction the snapshot holds goes to the trees, and to the disk, in the turn the snapshot takes the
       // journal's place: also one whose entry waits behind this snapshot in the queue (the snapshot holds what it did
@@ -760,10 +761,18 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       // to rows.db with it, half of it (a file's state deleted, its record kept). rows.db names this snapshot with
       // them: a process killed before the rename below comes back to it (at open).
       trees.apply(upTo, name);
-      if (scrub) trees.scrub();
-      trees.sync();
     }
-    renameSync(temporaryPath, snapshotPath);
+    try {
+      if (scrub) trees?.scrub();
+      trees?.sync();
+      renameSync(temporaryPath, snapshotPath);
+    } catch (error) {
+      // The fold did not take the journal's place: the store goes on writing to it. Left on disk, that snapshot is the
+      // one rows.db names, and a process killed later came back to it, the journal dropped: every transaction completed
+      // since the failure lost its writes outside rows.db (a purge's VACUUM with no room for its copy, a rename refused).
+      rmSync(temporaryPath, { force: true });
+      throw error;
+    }
     foldedUpTo = upTo;
     // Trees of stores and indexes gone from the schema: once no snapshot on disk names them, nor the schema now.
     try { if (live) trees!.sweep(new Set([...live, ...liveTrees()])); } catch (error) { process.stderr.write(`ghostly: storage: old trees not removed: ${error instanceof Error ? error.message : String(error)}\n`); }
@@ -844,15 +853,20 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       // 100,000 messages, 4.6 s of it in one stretch.
       if (scrub && nextScrub) return nextScrub;
       const fold = (async () => {
-        // A scrub waits for the exports under way here, out of the queue: the writes meanwhile do not wait with it.
+        // A scrub's checkpoint stops at an export's reader: rows.db kept the pages from before it, a purged text in them,
+        // after `message delete --purge` answered. It waits for the exports under way here, out of the queue: the writes
+        // meanwhile do not wait with it. One that begins later waits for the fold (`scrubbing`, set in this same turn):
+        // waited for in the queue, a backup begun while the fold was written held every write for its whole export.
         while (scrub && exporting.size) await Promise.allSettled(exporting);
         // The caller reads the snapshot next (a backup): a fold that failed is its failure, not a line on stderr.
         let thrown: { error: unknown } | null = null;
-        await enqueue(() => {
+        const queued = enqueue(() => {
           // Begun: a scrub asked from now on may come after what this one captures.
           if (scrub) nextScrub = null;
           return writeSnapshot(scrub).catch((error: unknown) => { thrown = { error }; throw error; });
         });
+        if (scrub) scrubbing.add(queued);
+        try { await queued; } finally { scrubbing.delete(queued); }
         if (thrown) throw (thrown as { error: unknown }).error;
       })();
       if (scrub) nextScrub = fold;
@@ -872,6 +886,9 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     journalBytes,
     async exportSnapshot(path: string) {
       await settled();
+      // Not before a scrub's fold: it reads rows.db once the purged text is out of it. None begins between this wait
+      // and the export's reader (`exporting`, below): no turn passes.
+      while (scrubbing.size) await Promise.allSettled(scrubbing);
       // Written and synced off the thread: 215 ms of the export of 100,000 messages, in one turn when it was sync.
       const run = (async () => {
         const file = await open(path, "w", 0o600);
@@ -1282,6 +1299,58 @@ export function keyOrder(cmp: (a: Key, b: Key) => number): (a: Key, b: Key) => n
     return cmp(a, b);
   };
   return order;
+}
+
+/**
+ * A few small stores of the store in `dir`, read from its files without opening it and never written: the snapshot,
+ * then the whole entries of the journal after it. The process that holds the store (a daemon) may fold meanwhile: it
+ * renames a new snapshot in, then removes the journal, so a snapshot read before a fold and a journal read after it
+ * miss what the journal held. The two are read again until the snapshot is the same file before and after both reads,
+ * and the journal follows it. Only stores kept inline and their string keys; a store kept in rows.db reads as empty,
+ * and so does one the files do not have.
+ */
+export function peekStores(dir: string, db: string, names: string[]): Map<string, Map<string, unknown>> {
+  const snapshotPath = join(dir, SNAPSHOT);
+  /** Which file the snapshot is: a fold's rename puts another one (another inode) there. */
+  const which = () => { const found = statSync(snapshotPath, { throwIfNoEntry: false }); return found ? `${found.ino}:${found.size}:${found.mtimeMs}` : ""; };
+  for (let attempt = 1; ; attempt++) {
+    const found = new Map(names.map((name) => [name, new Map<string, unknown>()]));
+    const before = which();
+    const saved = before ? (deserialize(readFileSync(snapshotPath)) as Snapshot) : null;
+    for (const store of saved?.databases.find((one) => one.name === db)?.stores ?? []) {
+      const into = found.get(store.name);
+      if (!into || store.onDisk || store.rows) continue;
+      for (const [key, value] of store.records) if (typeof key === "string") into.set(key, value);
+    }
+    let journal: Buffer | null = null;
+    try { journal = readFileSync(join(dir, JOURNAL)); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const named = journal ? follows(journal) : undefined;
+    if (which() !== before) {
+      if (attempt < PEEK_TRIES) continue;
+      throw new Error("The store was folded again at each read");
+    }
+    // One that follows another snapshot is in this one already (its fold died before removing it), as an open reads it.
+    if (!journal || (named !== undefined && saved?.journal !== undefined && named !== saved.journal)) return found;
+    for (let offset = 0; offset + 4 <= journal.length;) {
+      const length = journal.readUInt32BE(offset);
+      if (offset + 4 + length > journal.length) break;
+      let ops: Op[];
+      try { ops = deserialize(journal.subarray(offset + 4, offset + 4 + length)) as Op[]; } catch { break; }
+      offset += 4 + length;
+      for (const op of ops) {
+        const into = op.db === db ? found.get(op.store) : undefined;
+        if (!into) continue;
+        if (op.kind === "clear") into.clear();
+        else if (op.kind === "put") { if (typeof op.key === "string") into.set(op.key, op.value); }
+        else {
+          const key = keyFromDisk(op.key);
+          if (key instanceof IDBKeyRange) { for (const held of [...into.keys()]) if (key.includes(held)) into.delete(held); }
+          else if (typeof key === "string") into.delete(key);
+        }
+      }
+    }
+    return found;
+  }
 }
 
 /**

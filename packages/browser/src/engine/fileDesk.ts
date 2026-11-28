@@ -35,7 +35,7 @@ export interface FileDeskDeps {
   receivedBytes(linkId: string): number;
   /** Wire ids this chat used already, in either direction. */
   wireIds(linkId: string): Set<string> | undefined;
-  /** A message the person deleted here: a transfer for it is not taken. */
+  /** A message the person deleted here, or any of a blocked contact's (`setContactBlocked`): a transfer for it is not taken. */
   deleted(linkId: string, messageId: string): boolean;
   /** A message the chat holds already (a new file must not take the id of the contact's text, say). */
   messageExists?(linkId: string, messageId: string): Promise<boolean>;
@@ -114,6 +114,9 @@ const ANNOUNCED_FOR_MS = 7 * 24 * 60 * 60_000;
  */
 const floorRefusal = (why: unknown): string =>
   why === "no-room" ? "No room on this device for this file" : why === "too-many" ? "Too many files are waiting here" : "It was refused here";
+
+/** The files/3 frames a receiver sends about a file it is sent (`ChatFiles.handle`'s answers to the sender). */
+const ANSWERS_TO_MINE = new Set<unknown>(["pf-accept", "pf-wait", "pf-got", "pf-done", "pf-refuse"]);
 
 /** Progress is written to the database at most this often; every change of state is written at once. */
 const SAVE_EVERY_MS = 2_000;
@@ -242,6 +245,26 @@ export class FileDesk {
     chat.places.set(id, this.deps.place(linkId));
     // An offer that was refused has no message: its place is let go.
     return chat.files.handle(frame).finally(() => { if (!chat.local.has(id)) chat.places.delete(id); });
+  }
+
+  /**
+   * Whether a frame answers a file this chat sends (taken, waited for, confirmed, checked, refused), or says the room the
+   * contact has for them: what a blocked contact still sends that reaches this desk (`GhostlyNode`'s `onFilesFrame`). One
+   * that names no file sent here is not about one of mine, and stays unanswered as the rest of its frames do.
+   */
+  answersMine(linkId: string, frame: Record<string, unknown>): boolean {
+    if (frame.t === "pf-room") return true;
+    if (!ANSWERS_TO_MINE.has(frame.t) || typeof frame.id !== "string") return false;
+    return !!this.chats.get(linkId)?.files.get("out", frame.id);
+  }
+
+  /**
+   * Whether a frame this side sends is a receiver's (an answer about a file the contact sends, or the room here): what a
+   * blocked contact's chat does not say (`GhostlyNode`'s `send`). Said, a file arriving from it when it was blocked was
+   * asked for again every quiet spell (`pf-accept`), and the contact sent its bytes again each time, all dropped here.
+   */
+  receiverFrame(frame: Record<string, unknown>): boolean {
+    return frame.t === "pf-room" || ANSWERS_TO_MINE.has(frame.t);
   }
 
   /**

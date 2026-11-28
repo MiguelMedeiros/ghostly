@@ -1,4 +1,4 @@
-import { appendFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +6,7 @@ import { open as openFile, type FileHandle } from "node:fs/promises";
 import { deserialize, serialize, setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { keyOrder, openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtime/storage";
+import { keyOrder, openPersistentIndexedDb, peekStores, type PersistentIndexedDb } from "../src/runtime/storage";
 import { openTreeFile, openTreeReader, TreeFile } from "../src/runtime/sqlTree";
 // covers: headless.storage
 
@@ -24,6 +24,7 @@ vi.mock("node:fs", async (original) => {
       const go = () => fs.fsync(fd, (error) => (disk.syncMs ? setTimeout(() => end(error), disk.syncMs) : end(error)));
       if (disk.held) void disk.held.then(go); else go();
     },
+    readFileSync: ((path: string, ...rest: unknown[]) => { reads.before?.(String(path)); return (fs.readFileSync as (...args: unknown[]) => unknown)(path, ...rest); }) as typeof fs.readFileSync,
     renameSync: (from: string, to: string) => {
       disk.beforeRename?.(to);
       if (faults.next[0] === "rename") faults.next.shift();
@@ -52,6 +53,9 @@ vi.mock("node:fs", async (original) => {
  * disk, a sync off the thread that fails. `next`: the calls that fail once each, in this order (the others between go).
  */
 const faults = vi.hoisted(() => ({ rename: false, short: false, full: false, sync: false, next: [] as ("rename" | "write")[] }));
+/** Called before each synchronous read of a file: what another process does to the store between two of them. */
+const reads = vi.hoisted(() => ({ before: undefined as ((path: string) => void) | undefined }));
+afterEach(() => { reads.before = undefined; });
 /**
  * How long a sync off the thread takes, at least: a slow disk's (a test's own; 0, as fast as this one is), and what it
  * waits for first, when a test holds it. And the syncs done. `beforeRename`, when a test sets it, runs before each rename.
@@ -1769,6 +1773,31 @@ describe("messages kept in rows.db", () => {
     expect(found).toEqual({ "before the rename": { file: undefined, state: undefined }, "between the entries": { file: undefined, state: undefined } });
   });
 
+  it("a fold whose VACUUM or rename failed is not, in a process killed later, what the transactions completed since come back to", async () => {
+    const errors = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const found: Record<string, unknown> = {};
+    try {
+      for (const fault of ["vacuum", "rename"] as const) {
+        const dir = folder();
+        const store = await openPersistentIndexedDb(dir);
+        opened.push(store);
+        const d = await db(store.factory);
+        await tx(d, ["messages", "settings"], (s) => { s.messages.put({ linkId: "a", id: "1", text: "before" }); s.settings.put("before", "name"); });
+        // A purge's fold with no room for VACUUM's copy, or a backup's whose rename is refused: rows.db names its snapshot.
+        const scrub = fault === "vacuum" ? vi.spyOn(TreeFile.prototype, "scrub").mockImplementationOnce(() => { throw new Error("database or disk is full"); }) : null;
+        if (fault === "rename") faults.next.push("rename");
+        await expect(store.compact({ scrub: fault === "vacuum" })).rejects.toThrow();
+        scrub?.mockRestore();
+        // Completed after it: the message's half in rows.db, the setting's in the journal.
+        await tx(d, ["messages", "settings"], (s) => { s.messages.put({ linkId: "a", id: "2", text: "after" }); s.settings.put("after", "name"); });
+        await store.flush();
+        const t = (await db(await open(copyOf(dir)))).transaction(["messages", "settings"]);
+        found[fault] = { name: await read(t.objectStore("settings").get("name")), message: (await read(t.objectStore("messages").get(["a", "2"])) as { text?: string } | undefined)?.text };
+      }
+    } finally { errors.mockRestore(); faults.next.length = 0; }
+    expect(found).toEqual({ vacuum: { name: "after", message: "after" }, rename: { name: "after", message: "after" } });
+  });
+
   it("a put a unique index refuses in a store kept on disk leaves the store writable by the next transaction", async () => {
     const dir = folder();
     const factory = await open(dir);
@@ -2283,5 +2312,60 @@ describe("messages kept in rows.db", () => {
     expect(newest).toEqual(["m029", "m026", "m023"]);
     expect((await read(messages.index("byCard").getAll("task"))).map((m) => (m as { id: string }).id)).toEqual(["m000", "m012", "m024", "m004", "m016", "m028", "m008", "m020"]);
     expect(await read(messages.index("byLink").count("chat-0"))).toBe(10);
+  });
+});
+
+describe("peekStores", () => {
+  it("reads inline stores from the files of a store another holds: the snapshot, then the journal's puts, deletes and clears", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["settings", "messages"], (s) => { s.settings.put({ publicKey: "first" }, "profileDid"); s.settings.put(1, "gone"); s.messages.put({ linkId: "a", id: "1" }); });
+    await store.compact();
+    // After the snapshot: in the journal only, with the store still open.
+    await tx(d, ["settings"], (s) => { s.settings.put(2, "later"); s.settings.delete("gone"); });
+    const seen = peekStores(dir, "ghostly", ["settings", "messages", "none"]);
+    expect(Object.fromEntries(seen.get("settings")!)).toEqual({ profileDid: { publicKey: "first" }, later: 2 });
+    expect(seen.get("messages")!.size, "a store kept in rows.db is not read").toBe(0);
+    expect(seen.get("none")!.size).toBe(0);
+    expect(peekStores(dir, "other", ["settings"]).get("settings")!.size).toBe(0);
+
+    await tx(d, ["settings"], (s) => { s.settings.clear(); s.settings.put(3, "after"); });
+    expect(Object.fromEntries(peekStores(dir, "ghostly", ["settings"]).get("settings")!)).toEqual({ after: 3 });
+    // A journal that follows another snapshot (a fold between the two reads) is not read over this one.
+    const stale = readFileSync(join(dir, "journal.bin"));
+    await tx(d, ["settings"], (s) => { s.settings.put(4, "after"); });
+    await store.compact();
+    writeFileSync(join(dir, "journal.bin"), stale);
+    expect(Object.fromEntries(peekStores(dir, "ghostly", ["settings"]).get("settings")!)).toEqual({ after: 4 });
+    expect(peekStores(folder(), "ghostly", ["settings"]).get("settings")!.size, "no store yet").toBe(0);
+  });
+
+  it("a fold between the snapshot's read and the journal's (new snapshot renamed in, journal removed) loses nothing", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    await tx(d, ["settings"], (s) => { s.settings.put("old", "kept"); });
+    await store.compact();
+    // Only in the journal: what the fold below moves into the next snapshot.
+    await tx(d, ["settings"], (s) => { s.settings.put({ publicKey: "recent" }, "profileDid"); });
+    const snapshotPath = join(dir, "snapshot.bin"), journalPath = join(dir, "journal.bin");
+    const before = { snapshot: readFileSync(snapshotPath), journal: readFileSync(journalPath) };
+    await store.compact();
+    const folded = readFileSync(snapshotPath);
+    // The files as they were before the fold, and the fold done by the daemon right between the peek's two reads.
+    writeFileSync(snapshotPath, before.snapshot);
+    writeFileSync(journalPath, before.journal);
+    let journalReads = 0;
+    reads.before = (path) => {
+      if (path !== journalPath || journalReads++) return;
+      writeFileSync(`${snapshotPath}.tmp`, folded);
+      renameSync(`${snapshotPath}.tmp`, snapshotPath);
+      rmSync(journalPath, { force: true });
+    };
+    expect(Object.fromEntries(peekStores(dir, "ghostly", ["settings"]).get("settings")!)).toEqual({ kept: "old", profileDid: { publicKey: "recent" } });
+    expect(journalReads, "read again after the fold").toBe(2);
   });
 });

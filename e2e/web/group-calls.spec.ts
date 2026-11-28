@@ -10,7 +10,8 @@ import { installSealProbe, pictures, sealProbe, shareTestPattern, type Picture }
  * A community group's call through its node (WISP 602), end to end: a headless Ghostly is the group's admin, as the
  * node is, and names the e2e stack's token mock as the group's SFU (`ghostly group call --sfu`). Three browsers join
  * by the link and press Join call: each asks the mock for a pass with a request its member key signs, and all three
- * meet in the stack's LiveKit room. They see each other's tiles, a mute shows on the others, one shares the screen
+ * meet in the stack's LiveKit room. They see each other's tiles, one turns another down and off on their own window
+ * alone, a mute shows on the others, one shares the screen
  * (Chromium's fake one, picked by --auto-select-desktop-capture-source) and the other two get it, and a leave takes the
  * tile away. A fourth browser in the group but not in the node's roster gets no pass and sees why.
  *
@@ -33,6 +34,15 @@ async function plays(peer: Peer, identity: string, kind: "face" | "screen"): Pro
   await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 15_000 }).toBeGreaterThan(at);
 }
 
+/** How this member's whole call window draws the shared screen it shows large: its video's box against the viewport, and its fit. */
+const stageBox = (peer: Peer) =>
+  peer.page.evaluate(() => {
+    const video = document.querySelector<HTMLVideoElement>("[data-testid=group-call-stage] video");
+    if (!video) return "none";
+    const r = video.getBoundingClientRect();
+    return `${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)} of ${innerWidth}x${innerHeight} ${getComputedStyle(video).objectFit}`;
+  });
+
 /** The group's SFU origin, as the group names it, reaches the e2e stack's token mock from this browser. */
 async function routeSfu(peer: Peer): Promise<void> {
   await peer.context.route(`${endpoints.sfu.origin}/**`, async (route) => {
@@ -51,7 +61,7 @@ async function joinGroup(peer: Peer, link: string): Promise<void> {
   await expect(peer.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 180_000 });
 }
 
-test("three members join a community group's call, see and hear each other, see a shared screen; an outsider gets no pass", { tag: ["@feature:calls.group", "@feature:calls.group.room", "@feature:calls.group.screen"] }, async ({ peer, relay }, testInfo) => {
+test("three members join a community group's call, see and hear each other, set one's volume for themselves, see a shared screen; an outsider gets no pass", { tag: ["@feature:calls.group", "@feature:calls.group.room", "@feature:calls.group.screen", "@feature:calls.group.volume"] }, async ({ peer, relay }, testInfo) => {
   const started = Date.now();
   const node = new HeadlessBot();
   try {
@@ -94,6 +104,28 @@ test("three members join a community group's call, see and hear each other, see 
       await expect(p.page.getByTestId("group-call-muted")).toHaveCount(0);
     }
 
+    // Ana sets Bia's volume on Bia's tile: at 50% Bia's <audio> plays at half for Ana, at 0 it's muted for her, and
+    // her tile says so. Only on Ana's window: Cleo's two stay as sent. Back at 100%, Ana hears Bia as sent again.
+    const players = (peer: Peer) =>
+      peer.page.getByTestId("group-call-audio").evaluateAll((els) => (els as HTMLAudioElement[]).map((el) => `${el.muted ? "muted" : "on"} ${el.volume}`).sort());
+    const volumeOf = async (percent: number) => {
+      await tile(ana, b, "face").getByTestId("group-call-volume").click();
+      await ana.page.getByTestId("group-call-volume-slider").fill(String(percent));
+      await ana.page.keyboard.press("Escape");
+      await expect(ana.page.getByTestId("group-call-volume-menu")).toHaveCount(0);
+      await expect(tile(ana, b, "face").getByTestId("group-call-volume")).toHaveAttribute("data-volume", String(percent / 100));
+    };
+    await expect(tile(ana, a, "face").getByTestId("group-call-volume")).toHaveCount(0);
+    await volumeOf(50);
+    await expect.poll(() => players(ana)).toEqual(["on 0.5", "on 1"]);
+    await volumeOf(0);
+    await expect.poll(() => players(ana)).toEqual(["muted 0", "on 1"]);
+    await expect(tile(ana, b, "face").getByTestId("group-call-volume")).toHaveAttribute("aria-label", /is muted for you$/);
+    expect(await players(cleo)).toEqual(["on 1", "on 1"]);
+    await volumeOf(100);
+    await expect.poll(() => players(ana)).toEqual(["on 1", "on 1"]);
+    expect(await hearing(ana)).toBe(2);
+
     // Ana mutes: the mark shows on her tile for Bia and Cleo.
     await ana.page.getByTestId("group-call-mic").click();
     for (const p of [bia, cleo]) await expect(tile(p, a, "face").getByTestId("group-call-muted")).toBeVisible({ timeout: 15_000 });
@@ -101,6 +133,11 @@ test("three members join a community group's call, see and hear each other, see 
     // Bia shares her screen: Ana and Cleo get the screen track, large.
     await bia.page.getByTestId("group-call-screen").click();
     for (const p of [ana, cleo]) await plays(p, b, "screen");
+    // It fills the whole window, fitted whole: laid out between the name row, the faces and the controls, it had part of it.
+    for (const p of [ana, cleo]) {
+      const { width, height } = p.page.viewportSize()!;
+      await expect.poll(() => stageBox(p)).toBe(`0,0 ${width}x${height} of ${width}x${height} contain`);
+    }
 
     // Cleo leaves: her tile goes from the others' windows.
     await cleo.page.getByTestId("group-call-leave").click();
@@ -489,6 +526,65 @@ test.describe("group call moderation", () => {
         await expect.poll(() => hearing(p), { timeout: 30_000 }).toBe(2);
       }
       await expect(cleo.page.getByTestId("group-call-moderate")).toHaveCount(0);
+
+      testInfo.annotations.push({ type: "run time", description: `${Math.round((Date.now() - started) / 1000)} s` });
+    } catch (error) {
+      await node.attachLogs(testInfo);
+      throw error;
+    } finally {
+      await node.stop();
+    }
+  });
+});
+
+// The header asks the group's node whether its call is on (WISP 602 § Occupancy), at most every 15 s while the group
+// is open and the page shown: Start call while nobody is in it, Join call with how many while someone is.
+test.describe("a group's call button before joining", () => {
+  test("shows Start call while nobody is in the call, Join call with how many once someone starts it, Start call again once they leave", { tag: ["@feature:calls.group", "@feature:calls.group.room"] }, async ({ peer, relay }, testInfo) => {
+    const started = Date.now();
+    const node = new HeadlessBot();
+    try {
+      await node.start(await relay.listen(), "Thursday node");
+      const group = (await node.run("group", "create", "Thursday")).group as string;
+      await node.run("group", "call", group, "--sfu", endpoints.sfu.origin);
+      const link = (await node.run("group", "link", group)).link as string;
+
+      const [ana, bia] = await Promise.all(["Ana", "Bia"].map((name) => peer(name)));
+      for (const p of [ana, bia]) await routeSfu(p);
+      await servesThisCheckout(ana.page);
+      await Promise.all([ana, bia].map((p) => joinGroup(p, link)));
+      type Shown = { id: string; members: { key: string; me: boolean }[] };
+      const shown = async () => (await node.run("group", "show", group)) as unknown as Shown;
+      await expect.poll(async () => (await shown()).members.length, { timeout: 180_000, intervals: [2_000] }).toBe(3);
+      const { id, members } = await shown();
+      const roster = await fetch(`${endpoints.sfu.token}/test/roster/${id}`, { method: "PUT", body: JSON.stringify(Object.fromEntries(members.filter((m) => !m.me).map((m) => [m.key, "Member"]))) });
+      expect(roster.status).toBe(204);
+      // Asked before the node knew them, each got a 403 and asks again in 15 s: opened again, each asks now.
+      for (const p of [ana, bia]) {
+        await p.page.reload();
+        await expect(p.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 120_000 });
+      }
+
+      // Nobody in the call: both see Start call, a plain phone.
+      for (const p of [ana, bia]) {
+        const button = p.page.getByTestId("group-call-join");
+        await expect(button).toHaveAttribute("data-call", "off", { timeout: 60_000 });
+        await expect(button).toHaveAccessibleName("Start call");
+      }
+
+      // Ana starts it: Bia, not in it, sees Join call, saying one is in the call (never who).
+      await ana.page.getByTestId("group-call-join").click();
+      await expect(ana.page.getByTestId("group-call")).toBeVisible({ timeout: 30_000 });
+      await expect(ana.page.getByTestId("group-call-join")).toHaveAttribute("data-call", "joined");
+      const join = bia.page.getByTestId("group-call-join");
+      await expect(join).toHaveAttribute("data-call", "on", { timeout: 45_000 });
+      await expect(join).toHaveAccessibleName("Join call");
+      await expect(join).toHaveAccessibleDescription("1 in the call");
+
+      // Ana leaves: Bia's button goes back to Start call (LiveKit may hold a closed connection a while).
+      await ana.page.getByTestId("group-call-leave").click();
+      await expect(join).toHaveAttribute("data-call", "off", { timeout: 90_000 });
+      await expect(join).toHaveAccessibleName("Start call");
 
       testInfo.annotations.push({ type: "run time", description: `${Math.round((Date.now() - started) / 1000)} s` });
     } catch (error) {

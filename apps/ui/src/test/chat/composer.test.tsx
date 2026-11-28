@@ -888,36 +888,32 @@ describe("the composer counts a message's bytes", () => {
     expect(onSend).toHaveBeenCalledWith("👻".repeat(4_096));
   });
 
-  it("off the live link, the DHT's count turns amber where the packet stops carrying a text, not only past 256 B", () => {
-    // Its envelope takes about 8 of the 256 bytes once sealed: a 252 B text read "252 / 256 B" in muted ink, then the
-    // DHT refused it (or kept it for live) as one past 256 B.
-    composer({ softBytes: 256 });
+  it("off the live link, the DHT's count is on the text as its packet carries it, escaped", () => {
+    // A new line takes two bytes there: 245 B with four of them is 249 in the packet, past the about 248 it carries.
+    composer({ softBytes: 248, softTitle: "Past what the DHT carries" });
     fireEvent.change(field(), { target: { value: "x".repeat(248) } });
     expect(screen.getByTestId("dht-byte-count")).toHaveClass("text-text-muted");
     expect(screen.getByTestId("dht-byte-count")).not.toHaveAttribute("title");
-    fireEvent.change(field(), { target: { value: "x".repeat(252) } });
-    expect(screen.getByTestId("dht-byte-count")).toHaveTextContent("252 / 256 B");
+    fireEvent.change(field(), { target: { value: `${"x".repeat(60)}\n`.repeat(4) + "x" } });
+    expect(screen.getByTestId("dht-byte-count")).toHaveTextContent("249 / 248 B");
     expect(screen.getByTestId("dht-byte-count")).toHaveClass("text-warn-ink");
-    expect(screen.getByTestId("dht-byte-count")).toHaveAttribute("title", "About 248 bytes fit the DHT once sealed: shorten it to send it there");
+    expect(screen.getByTestId("dht-byte-count")).toHaveAttribute("title", "Past what the DHT carries");
   });
 
   it("the count's warning reaches the field and is said once as it changes, not only as a mouse tooltip", () => {
     // Its sentence was a `title` on a span no keyboard reaches: a screen reader typing on heard nothing as the count
-    // turned amber at about 248 B, nor past 256 B, where the text silently waits for live.
-    composer({ softBytes: 256 });
+    // turned amber past the about 248 B the DHT packet carries, where the text silently waits for live.
+    composer({ softBytes: 248 });
     const live = () => screen.getByTestId("composer-count-said");
     fireEvent.change(field(), { target: { value: "x".repeat(240) } });
     expect(field()).not.toHaveAccessibleDescription();
     expect(live()).toHaveTextContent("");
     fireEvent.change(field(), { target: { value: "x".repeat(252) } });
-    expect(field()).toHaveAccessibleDescription("About 248 bytes fit the DHT once sealed: shorten it to send it there");
-    expect(live()).toHaveTextContent("About 248 bytes fit the DHT once sealed: shorten it to send it there");
-    fireEvent.change(field(), { target: { value: "x".repeat(300) } });
-    expect(field()).toHaveAccessibleDescription("Over the 256 bytes the DHT carries: it is sent when you are live");
-    expect(live()).toHaveTextContent("Over the 256 bytes the DHT carries: it is sent when you are live");
+    expect(field()).toHaveAccessibleDescription("Over the 248 bytes the DHT carries: it is sent when you are live");
+    expect(live()).toHaveTextContent("Over the 248 bytes the DHT carries: it is sent when you are live");
     // Each keystroke within a state says nothing new.
     live().textContent = "";
-    fireEvent.change(field(), { target: { value: "x".repeat(301) } });
+    fireEvent.change(field(), { target: { value: "x".repeat(300) } });
     expect(live()).toHaveTextContent("");
     fireEvent.change(field(), { target: { value: "x".repeat(10) } });
     expect(field()).not.toHaveAccessibleDescription();

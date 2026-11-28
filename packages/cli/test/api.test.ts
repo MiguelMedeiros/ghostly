@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AWAITING_PEER_MS, OwnInviteError, type PairingProgress } from "@ghostly/core";
+import { AWAITING_PEER_MS, createIdentity, OwnInviteError, type PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import { chatOrGroup, findChatOrGroup, findOwnNamedChat } from "../src/apiKit";
@@ -706,15 +706,44 @@ describe("chats", () => {
       [{ kind: "dancing" }, "kind must be one of typing, recording, thinking"],
       // Empty (an unset variable in a script) is no kind: never read as plain typing.
       [{ kind: "" }, "kind must be one of typing, recording, thinking"],
-      [{ status: "x".repeat(41) }, "status: at most 40 characters"],
-      [{ status: "see https://x.example" }, "status: plain text, with no link or markup"],
-      [{ status: "<b>hi</b>" }, "status: plain text, with no link or markup"],
-      [{ status: "\u202E\u200B" }, "status: plain text, with no link or markup"],
+      [{ status: "x".repeat(41) }, "status is up to 40 characters, not 41 characters"],
+      [{ status: "see https://x.example" }, "status is plain text: no link or markup"],
+      [{ status: "<b>hi</b>" }, "status is plain text: no link or markup"],
+      // Nothing that shows: it was refused as "no link or markup", which it holds neither of.
+      [{ status: "\u202E\u200B" }, "status needs a character that shows"],
       [{ stop: true, kind: "thinking" }, "kind and status go with a start, not with stop"],
       [{ stop: true, status: "done" }, "kind and status go with a start, not with stop"],
     ] as const) await expect(callApi(ctx, "chat.typing", { chat: "Alice", ...params }), message).rejects.toMatchObject({ code: "bad_request", message });
     expect(node.setTyping).not.toHaveBeenCalled();
     expect(await callApi(ctx, "chat.typing", { chat: "Alice", status: "x".repeat(40) })).toMatchObject({ status: "x".repeat(40) });
+  });
+
+  // Blank once trimmed was refused as "plain text, with no link or markup" (exit 1), while "" was no status at all.
+  it("typing takes a blank status as no status, as an empty one, with a start or a stop", async () => {
+    const { ctx, node } = fake();
+    for (const status of ["   ", "\t \n", ""]) {
+      const answer = await callApi(ctx, "chat.typing", { chat: "Alice", status });
+      expect(answer, JSON.stringify(status)).toEqual({ chat: "chat-one", typing: true, kind: "typing", live: false, sendTyping: true });
+      expect(node.setTyping).toHaveBeenLastCalledWith({ linkId: "chat-one", typing: true });
+      expect(await callApi(ctx, "chat.typing", { chat: "Alice", stop: true, status })).toMatchObject({ typing: false });
+    }
+  });
+
+  // A group's one-shot --for whose edges never opened answered `typing: true` and an `until` to come, with no note.
+  it("a one-shot group typing --for with no edge open in time says it is off and reached nobody", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ctx, node } = fake();
+      Object.assign(ctx, { mode: "one-shot" });
+      const state = node.getState();
+      const mesh = { ...group, id: "m1", name: "Mesh", profile: "mesh", status: "active", members: group.members.map((m) => ({ ...m, online: false })) } as unknown as GroupView;
+      node.getState = () => ({ ...state, groups: [mesh] });
+      const typing = callApi(ctx, "group.typing", { group: "Mesh", for: 60 });
+      await vi.advanceTimersByTimeAsync(15_100);
+      const answer = await typing;
+      expect(answer).toMatchObject({ group: "m1", typing: false, reached: 0, note: expect.stringMatching(/reached nobody.*ghostly daemon --detach/) });
+      expect(answer).not.toHaveProperty("until");
+    } finally { vi.useRealTimers(); }
   });
 
   // A one-shot `send` to a chat whose invite nobody took sat its whole 30 s and failed `timeout` (exit 4, which a bot
@@ -1360,6 +1389,25 @@ describe("the engine passthrough", () => {
     expect(await call("lnurlResolve", { text: "a@b.c" })).toMatchObject({ code: "engine", message: "fetch failed" });
   });
 
+  it("refuses setContactBlocked given a word for blocked or what is not a contact's key, before the engine", async () => {
+    const { ctx, node } = fake();
+    const setContactBlocked = vi.fn(async () => {});
+    Object.assign(node, { setContactBlocked });
+    const call = (params: unknown) => callApi(ctx, "engine.call", { method: "setContactBlocked", params }).then(() => null, asCliError);
+    const takes = (why: string) => ({ code: "bad_request", message: `setContactBlocked takes ${ENGINE_PARAMS.setContactBlocked}: ${why} (ghostly engine --list --verbose)` });
+    const key = createIdentity().pubKeyZ32;
+    for (const blocked of ["false", "yes", 1, null]) expect(await call({ peerPubKeyZ32: key, blocked }), String(blocked)).toMatchObject(takes("blocked must be true or false"));
+    for (const peerPubKeyZ32 of ["__proto__", "z".repeat(2_000_000), key.slice(0, 51), `${key.slice(0, 51)}b`, 5]) {
+      const refused = await call({ peerPubKeyZ32, blocked: true });
+      expect(refused, String(peerPubKeyZ32).slice(0, 60)).toMatchObject(takes("peerPubKeyZ32 must be a contact's key"));
+      // A long word is not said back.
+      expect(refused!.message.length).toBeLessThan(200);
+    }
+    expect(setContactBlocked).not.toHaveBeenCalled();
+    expect(await call({ peerPubKeyZ32: key, blocked: false })).toBeNull();
+    expect(setContactBlocked).toHaveBeenCalledWith({ peerPubKeyZ32: key, blocked: false });
+  });
+
   it("runs send's secret guard on the calls that send a text: a seed, a key or ecash goes only with force", async () => {
     const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
     const { ctx, node } = fake([msg("m_seed", 5, { text: seed }), msg("m_hi", 6, { text: "hi" })]);
@@ -1625,10 +1673,21 @@ describe("settings", () => {
     for (const [relays, said] of refusals) {
       await expect(callApi(ctx, "settings.set", { relays })).rejects.toMatchObject({ code: "bad_request", message: said });
     }
+    // A usable one next to a bad one: the engine kept the usable one and dropped the rest unsaid (exit 0), while
+    // irohRelays and the app's Settings refuse the list. A blank entry is no relay, as a blank line in the app.
+    await expect(callApi(ctx, "settings.set", { relays: ["https://relay.example.org", "garbage"] })).rejects.toMatchObject({ code: "bad_request", message: "relays: not a relay address: garbage" });
     expect(node.updateSettings).not.toHaveBeenCalled();
-    // A usable one next to them is the engine's to keep (it drops the rest), as before.
-    await callApi(ctx, "settings.set", { relays: ["https://relay.example.org", "ftp://x"] });
-    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { relays: ["https://relay.example.org", "ftp://x"] } });
+    await callApi(ctx, "settings.set", { relays: ["https://relay.example.org", " "] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { relays: ["https://relay.example.org", " "] } });
+  });
+
+  it("count an Iroh relay given twice once, and say more than the engine keeps as a wrong value", async () => {
+    // Six were `engine` (exit 1), and a relay given twice counted twice toward the five.
+    const { ctx, node } = fake();
+    await callApi(ctx, "settings.set", { irohRelays: ["https://a.example", "https://b.example", "https://a.example"] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { irohRelays: ["https://a.example", "https://b.example"] } });
+    node.updateSettings.mockRejectedValueOnce(new Error("Use at most five Iroh relays"));
+    await expect(callApi(ctx, "settings.set", { irohRelays: ["1", "2", "3", "4", "5", "6"].map((n) => `https://${n}.example`) })).rejects.toMatchObject({ code: "bad_request", message: "irohRelays: use at most five Iroh relays" });
   });
 
   it("take TCP and TLS TURN servers for the apps, and say the CLI does not use them", async () => {

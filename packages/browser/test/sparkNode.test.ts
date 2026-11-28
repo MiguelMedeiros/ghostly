@@ -5,7 +5,8 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { GhostlyNode } from "../src/engine/node";
 import { STORES, transact } from "../src/shared/idb";
 import { cashuMint } from "../src/engine/paymentAdapters/providers/cashuMint";
-import { breezDescriptor, breezDatabaseName } from "../src/engine/paymentAdapters/providers/breez";
+import { breezDatabaseName } from "../src/engine/paymentAdapters/providers/breez";
+import { breezDescriptor } from "../src/engine/paymentAdapters/providers/breezProvider";
 import { FakeBreezNetwork } from "./helpers/fakeBreez";
 // covers: wallet.spark.lightning
 

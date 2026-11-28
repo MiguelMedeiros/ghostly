@@ -88,6 +88,20 @@ describe("the app's WebView page on a device Playwright closed", () => {
     expect(phone.device).toBe(fresh.device);
   });
 
+  it("takes the device again when the listed WebView's page never comes (asked of a closed device)", async () => {
+    const view = { pkg: () => PKG, pid: () => PID, page: () => new Promise<Page>(() => {}) };
+    const hung = { closed: false };
+    const stale = { serial: () => "emulator-5554", webViews: () => [view], close: async () => void (hung.closed = true) } as unknown as AndroidDevice;
+    const fresh = device("emulator-5554", realPage);
+    const phone = { device: stale };
+    const found = webViewPage(phone, PID, async () => [fresh.device]);
+    const settled = found.then(() => "page", () => "failed");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await Promise.race([settled, "still waiting"])).toBe("page");
+    expect(hung.closed).toBe(true);
+    expect(phone.device).toBe(fresh.device);
+  });
+
   it("does not take the device again for a WebView listed a few seconds after the start", async () => {
     const late = device("emulator-5554", realPage);
     let listed = false;

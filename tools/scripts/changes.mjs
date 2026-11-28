@@ -13,8 +13,8 @@
  *
  * `section` names a "### " heading of "## Unreleased" (Security, For users, Fixed or For developers, written so), and
  * after " / " a **bold** group under it. A group that does not exist yet is added at the end of its heading, and a
- * heading in its place in that order. The body is one or more Markdown list items (no line of it a heading or an HTML
- * comment), added at the end of that section, in the files' name order. Only a <slug>.md file right in the folder is an
+ * heading in its place in that order. The body is one or more Markdown list items (no line of it a heading, an HTML
+ * comment, a rule or text outside every item), added at the end of that section, in the files' name order. Only a <slug>.md file right in the folder is an
  * entry: the check and the bump refuse another name there (b.MD, x.markdown, none) or a folder, which no bump reads.
  *
  * An optional `release: <major>.<minor>` holds an entry for that release: a bump to an older version (a 1.1.x patch
@@ -103,8 +103,9 @@ function groupSpelling(group) {
 export function parseFragment(name, saved, version) {
   const problems = [];
   // Read as written whatever the editor saved: Git for Windows checks files out with CRLF, and some editors start a
-  // file with a byte order mark. Either one made every fragment "start with" the front matter it starts with.
-  const text = saved.replace(/^\uFEFF/, "").replaceAll("\r\n", "\n");
+  // file with a byte order mark. Either one made every fragment "start with" the front matter it starts with. A lone
+  // CR ends a line for Markdown too: kept, "\r\r## 9.9.8" was one line here and a release heading in the notes.
+  const text = saved.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return { problems: [`${name}: starts with a front matter block (---, section: ..., ---)`] };
   const fields = {};
@@ -130,10 +131,16 @@ export function parseFragment(name, saved, version) {
   if (group && groupSpelling(group) !== group) problems.push(`${name}: the group is written "${groupSpelling(group)}", not "${group}"`);
   const body = match[2].trim();
   if (!body) problems.push(`${name}: no text after the front matter`);
-  else if (!body.startsWith("- ")) problems.push(`${name}: the text is one or more list items ("- ...")`);
+  else if (!/^- \S/.test(body)) problems.push(`${name}: the text is one or more list items ("- ...")`);
   // The bump copies every line: "## 9.9.9" would be a release of its own, and "<!--" would stay in "## Unreleased" as its note.
+  // A line of only - or = (a heading's underline, a rule) or one outside every item (such as "**Calls**", a second
+  // group the bump would file there) breaks the list too.
   for (const line of body.split("\n").slice(1)) {
     if (/^\s*(#|<!--)/.test(line)) problems.push(`${name}: the line "${line}" would be a heading or a note in the changelog: write it as a list item ("- ...")`);
+    else if (/^\s*[-=][-=\s]*$/.test(line)) problems.push(`${name}: the line "${line}" would be a heading or a rule in the changelog: write it as a list item ("- ...")`);
+    // In an item is "- " and its text, two spaces or a tab: one space (or a no-break space) ends the item after a blank
+    // line, and so does a line of only a no-break space (only spaces and tabs make a line blank).
+    else if (/[^ \t]/.test(line) && !/^(- \S| {2}|\t)/.test(line)) problems.push(`${name}: the line "${line}" is not in a list item: start it with "- ", or indent it under its item`);
   }
   if (/[–—]/.test(text)) problems.push(`${name}: no em or en dashes`);
   const release = fields.release === undefined ? undefined : fields.release.trim();

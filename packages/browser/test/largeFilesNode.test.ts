@@ -361,6 +361,43 @@ it("sends a file to a contact with files/3, and cancels one on both sides", asyn
   await vi.waitFor(() => expect(t.records.get("in:send-0002")).toMatchObject({ state: "cancelled", error: "Cancelled by the sender" }));
 }, 60_000);
 
+it("a file sent to a contact I blocked goes whole; the contact's own offer is still left unanswered", async () => {
+  const t = await setup();
+  await t.node().setContactBlocked({ peerPubKeyZ32: t.node().getState().links.find((l) => l.id === t.id)!.peerPubKeyZ32!, blocked: true });
+  // The contact's answers to it (taken, bytes confirmed, checked) reach this side: it stayed "transferring" for good.
+  const sent = await put(t, "send-0009", 2000);
+  await vi.waitFor(() => expect(t.node().getState().transfers[sent.id]).toMatchObject({ state: "done", direction: "out", transferred: 2000 }), { timeout: 20_000 });
+  await vi.waitFor(() => expect(t.records.get("in:send-0009")?.state).toBe("done"));
+  // The contact's file is neither taken nor declined, and nothing of it is written.
+  t.offer("theirs-001", 2000);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(t.records.get("out:theirs-001")?.state).toBe("offered");
+  expect(await t.incoming("theirs-001")).toBeNull();
+  expect((await fileStore.listForLink(t.id)).filter((f) => f.direction === "in")).toEqual([]);
+}, 60_000);
+
+it("a file arriving from a contact I block is asked for no more: its bytes are not pulled here to be dropped", async () => {
+  const idleMs = FILE_LIMITS.idleMs;
+  // A quiet spell of a second, not 30: the receiver's nudge (`pf-accept` from where it stands) comes after one.
+  Object.assign(FILE_LIMITS, { idleMs: 1_000 });
+  cleanup.push(async () => { Object.assign(FILE_LIMITS, { idleMs }); });
+  const t = await setup();
+  let hold = false;
+  const send = t.contact.sendFilesFrame.bind(t.contact);
+  t.contact.sendFilesFrame = (frame) => (hold && frame.t === "pf-data" ? true : send(frame));
+  t.offer("theirs-002", 10 * 1024 * 1024);
+  await vi.waitFor(async () => expect((await t.incoming("theirs-002"))?.transfer?.transferred ?? 0).toBeGreaterThan(1024 * 1024), { timeout: 20_000 });
+  hold = true;
+  await t.node().setContactBlocked({ peerPubKeyZ32: t.node().getState().links.find((l) => l.id === t.id)!.peerPubKeyZ32!, blocked: true });
+  const asked: unknown[] = [];
+  const handle = t.files.handle.bind(t.files);
+  t.files.handle = (frame) => { if (frame.t === "pf-accept" && frame.id === "theirs-002") asked.push(frame.offset); return handle(frame); };
+  hold = false;
+  // Asked for again, the contact sent its bytes every quiet spell, and this side dropped each one (`onFilesFrame`).
+  await new Promise((resolve) => setTimeout(resolve, 3_500));
+  expect(asked).toEqual([]);
+}, 60_000);
+
 it("deleting the chat while files move ends them on the contact's side too, before its session stops", async () => {
   const t = await setup();
   // Both transfers stop midway and stay under way: the contact's bytes and its acknowledgements go no further.

@@ -1,6 +1,13 @@
 {
   "about": "Informazioni",
   "appearance": "Aspetto",
+  "blocked": {
+    "hint": "Blocca un contatto dal menu della sua chat: niente di ciò che invia ti raggiunge, su nessuno dei tuoi dispositivi.",
+    "none": "Nessun contatto bloccato",
+    "title": "Contatti bloccati",
+    "unblock": "Sblocca",
+    "unblockLabel": "Sblocca {{name}}"
+  },
   "changePassword": "Cambia password",
   "chatListDensities": {
     "comfortable": "Comodo",
@@ -156,6 +163,7 @@
   "searchEmpty": "Nessuna impostazione trovata",
   "searchWords": {
     "account": "account",
+    "blocked": "bloccare, bloccato, sbloccare, contatto, ignorare",
     "camera": "video, webcam",
     "chatList": "compatto, comodo, righe",
     "clearData": "reimposta, cancella, svuota",

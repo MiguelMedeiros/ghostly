@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LocalTrackPublication, Participant, RemoteTrackPublication, Room, Track, TrackPublication } from "livekit-client";
 import { callRtcConfig } from "@ghostly/core";
-import { screenShareErrorMessage } from "@ghostly/react";
+import { captureScreen, screenShareErrorMessage } from "@ghostly/react";
 import { preferredDevice, trackDevice } from "../lib/mediaDevices";
 import type { GroupCallParticipant, GroupCallState } from "../components/GroupCallView";
 
@@ -66,6 +66,11 @@ export interface GroupCall extends GroupCallState {
   error: GroupCallError | null;
   /** The status is "left" because the group's admin took you out of the room (WISP 602 § Moderation), not by your own Leave. */
   removedByAdmin: boolean;
+  /**
+   * The status is "left" because a participant with your key came into the room from elsewhere: the same profile on
+   * another device (one that took over while this one had not read it yet) or another window. LiveKit keeps one per key.
+   */
+  joinedElsewhere: boolean;
   /** Your microphone's capture, muted or not; null before it was first turned on. Never played: the device checks read it. */
   micTrack: MediaStreamTrack | null;
   toggleMic: () => Promise<void>;
@@ -146,6 +151,8 @@ const PROTO_SOURCE = { mic: 2, camera: 1, screen: 3 } as const;
 
 /** LiveKit's `DisconnectReason.PARTICIPANT_REMOVED`: the node took this device out of the room (`RemoveParticipant`). */
 const PARTICIPANT_REMOVED = 4;
+/** LiveKit's `DisconnectReason.DUPLICATE_IDENTITY`: another participant joined the room under this device's identity. */
+const DUPLICATE_IDENTITY = 2;
 
 /**
  * What the group's admin took away from someone in this call (WISP 602 § Moderation): a source left out of their
@@ -179,6 +186,8 @@ interface Session {
   sealedStill: () => boolean;
   ended: boolean;
   screen: MediaStreamTrack | null;
+  /** The shared screen's sound (a tab's or the system's), when the browser gave one: it goes and stops with the screen. */
+  screenAudio: MediaStreamTrack | null;
   screenEnded: (() => void) | null;
   screenAsking: boolean;
   refresh: () => void;
@@ -208,12 +217,13 @@ function personOf(p: Participant, lk: LivekitModule, local: boolean, sealed: boo
     mic: p.isMicrophoneEnabled,
     camera: p.isCameraEnabled,
     screen: p.isScreenShareEnabled,
+    screenSound: p.isScreenShareEnabled && !!p.getTrackPublication(Source.ScreenShareAudio),
     speaking: p.isSpeaking,
     byAdmin: heldOf(p),
-    // Your own voice is never handed out: nothing can play it back to you.
+    // Your own voice, and your own screen's sound, are never handed out: nothing plays them back to you.
     tracks: local
       ? { camera: track(Source.Camera), screen: track(Source.ScreenShare) }
-      : { audio: track(Source.Microphone), camera: track(Source.Camera), screen: track(Source.ScreenShare) },
+      : { audio: track(Source.Microphone), camera: track(Source.Camera), screen: track(Source.ScreenShare), screenAudio: track(Source.ScreenShareAudio) },
   };
 }
 
@@ -244,19 +254,23 @@ async function switchInput(room: Room, source: Track.Source, deviceId: string | 
   }
 }
 
-/** Takes the shared screen down and stops it; safe to call twice. */
+/** Takes the shared screen and its sound down and stops them; safe to call twice. */
 async function stopScreen(session: Session): Promise<void> {
   const track = session.screen;
   if (!track) return;
+  const sound = session.screenAudio;
   session.screen = null;
+  session.screenAudio = null;
   if (session.screenEnded) track.removeEventListener("ended", session.screenEnded);
   session.screenEnded = null;
-  try {
-    await session.room?.localParticipant.unpublishTrack(track, true);
-  } catch {
-    // already gone from the room (it ended the share itself, or the room is closed)
+  for (const t of sound ? [track, sound] : [track]) {
+    try {
+      await session.room?.localParticipant.unpublishTrack(t, true);
+    } catch {
+      // already gone from the room (it ended the share itself, or the room is closed)
+    }
+    t.stop();
   }
-  track.stop();
 }
 
 /**
@@ -342,6 +356,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
   const [status, setStatus] = useState<GroupCallStatus>("idle");
   const [error, setError] = useState<GroupCallError | null>(null);
   const [removedByAdmin, setRemovedByAdmin] = useState(false);
+  const [joinedElsewhere, setJoinedElsewhere] = useState(false);
   const session = useRef<Session | null>(null);
   // Read at the join: a new array for the same pass is not a new call.
   const ice = useRef(iceServers);
@@ -379,12 +394,13 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     carry.current = null;
     const pass = (again.current && latest.current?.()) || { url, token, iceServers: ice.current };
     again.current = false;
-    const s: Session = { relayed: relay.current, ended: false, screen: null, screenEnded: null, screenAsking: false, refresh: () => {}, sealedStill: () => true };
+    const s: Session = { relayed: relay.current, ended: false, screen: null, screenAudio: null, screenEnded: null, screenAsking: false, refresh: () => {}, sealedStill: () => true };
     session.current = s;
     setState(EMPTY);
     setStatus("connecting");
     setError(null);
     setRemovedByAdmin(false);
+    setJoinedElsewhere(false);
 
     void (async () => {
       try {
@@ -468,6 +484,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
           void endSession(s);
           if (!live) return;
           setRemovedByAdmin(reason === PARTICIPANT_REMOVED);
+          setJoinedElsewhere(reason === DUPLICATE_IDENTITY);
           setStatus("left");
         });
         const connectOptions = { ...(rtcConfig && { rtcConfig }), ...(encryption && { autoSubscribe: false }) };
@@ -588,7 +605,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     const asked = Date.now();
     let stream: MediaStream;
     try {
-      stream = await media.getDisplayMedia({ video: true, audio: false });
+      stream = await captureScreen((options) => media.getDisplayMedia(options));
     } catch (cause) {
       s.screenAsking = false;
       // null: the person closed the picker, nothing to say
@@ -598,18 +615,32 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     }
     s.screenAsking = false;
     const [track, ...rest] = stream.getVideoTracks();
-    for (const other of [...rest, ...stream.getAudioTracks()]) other.stop();
-    if (!track) return;
-    if (s.ended) {
-      track.stop();
+    const [sound, ...more] = stream.getAudioTracks();
+    for (const other of [...rest, ...more]) other.stop();
+    if (!track || s.ended) {
+      track?.stop();
+      sound?.stop();
       return;
     }
     s.screen = track;
+    s.screenAudio = sound ?? null;
     // The browser's own "Stop sharing" bar ends the track: take it out of the room as the button would.
     s.screenEnded = () => void stopScreen(s).then(s.refresh);
     track.addEventListener("ended", s.screenEnded);
     try {
       await s.room.localParticipant.publishTrack(track, { source: s.lk.Track.Source.ScreenShare });
+      // Stopped while it went out: LiveKit had nothing to take down then (it waits only for a LocalTrack's publish).
+      if (s.screen !== track) await s.room.localParticipant.unpublishTrack(track, true).catch(() => {});
+      // Its sound goes as the screen's own (LiveKit's ScreenShareAudio), unless the share ended meanwhile; as a
+      // sound, not a voice (no DTX cutting its quiet passages, no RED). A sound the room will not take leaves the
+      // picture shared, without its sound.
+      if (sound && s.screenAudio === sound) {
+        await s.room.localParticipant.publishTrack(sound, { source: s.lk.Track.Source.ScreenShareAudio, dtx: false, red: false }).catch(() => {
+          if (s.screenAudio === sound) s.screenAudio = null;
+          sound.stop();
+        });
+        if (s.screenAudio !== sound) await s.room.localParticipant.unpublishTrack(sound, true).catch(() => {});
+      }
       // Not over a seal check's reason: a screen that went out unsealed left the call (`sealedStill`).
       if (!s.ended) setError(null);
     } catch (cause) {
@@ -638,5 +669,5 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     setStatus("left");
   }, []);
 
-  return { ...state, status, error, removedByAdmin, toggleMic, toggleCamera, toggleScreen, switchMicrophone, switchCamera, leave };
+  return { ...state, status, error, removedByAdmin, joinedElsewhere, toggleMic, toggleCamera, toggleScreen, switchMicrophone, switchCamera, leave };
 }

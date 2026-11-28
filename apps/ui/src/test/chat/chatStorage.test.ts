@@ -237,6 +237,70 @@ describe("a long chat read back after a message came", () => {
 });
 
 // covers: chat.paired.storage
+describe("a long open chat read back after one of its rows changed", () => {
+  /*
+   * The open chat reads its list through the page's one cache after every save. A stored copy written again (a delivery
+   * mark, or the chat list's note of a reaction) was parsed into new objects for all of its rows, so the chat's walks
+   * (lib/chatRows) saw every row from that one to the end as changed: a reaction on an old message read the whole history.
+   */
+
+  const NOW = 1_800_000_000_000;
+  const N = 3_000;
+  const storage = () => import("../../lib/storage");
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.resetModules();
+  });
+
+  /** A paired chat of N messages the engine keeps, stored and read back as the open chat does. */
+  async function openChat() {
+    const lib = await storage();
+    const history: ChatMessage[] = Array.from({ length: N }, (_, i) => ({ id: `peer_${i}`, text: `message ${i}`, sender: "peer", timestamp: NOW + i }));
+    lib.setEngineMessages("chat", new Set(history.map((m) => m.id)));
+    lib.saveSession({ id: "chat", profile: "paired-chat/1", mySeedB64: "seed", peerPubKeyB64: "p".repeat(52), encKeyB64: "enc", messages: history, createdAt: NOW });
+    return { ...lib, shown: lib.loadShownSession("chat")! };
+  }
+
+  /**
+   * The shown session with row `at` changed as the mirror changes one (platform/sync): a new object in a copy, saved, the
+   * chat forgotten, and read back.
+   */
+  async function change(at: number, row: (m: ChatMessage) => ChatMessage, note?: Partial<ChatSession>) {
+    const { saveSession, forgetShownSession, loadShownSession, sharedRows, sharedTail, shown } = { ...(await openChat()), ...(await import("../../lib/chatRows")) };
+    const messages = shown.messages.slice();
+    messages[at] = row(messages[at]!);
+    saveSession({ ...shown, ...note, messages });
+    forgetShownSession("chat");
+    const after = loadShownSession("chat")!;
+    return { before: shown.messages, after: after.messages, same: sharedRows(shown.messages, after.messages), tail: sharedTail(shown.messages, after.messages) };
+  }
+
+  it("keeps every other row's object after a reaction on an old message and the chat list's note of it", async () => {
+    const { before, after, same, tail } = await change(5, (m) => ({ ...m, reactions: { peer: { e: "👍", n: 1, at: NOW } } }),{ lastSyncAt: NOW + N });
+    expect(after).toHaveLength(N);
+    expect(after[5]!.reactions).toBeDefined();
+    expect(same).toBe(5);
+    expect(tail).toBe(N - 6);
+    expect(after[N - 1]).toBe(before[N - 1]);
+  });
+
+  it("keeps every other row's object after a delivery mark on a recent message", async () => {
+    const { after, same, tail } = await change(N - 3, (m) => ({ ...m, delivery: "delivered" }));
+    expect(after[N - 3]!.delivery).toBe("delivered");
+    expect(same).toBe(N - 3);
+    expect(tail).toBe(2);
+  });
+
+  it("hands out a new object for a stored row changed in place", async () => {
+    const { before, after, tail } = await change(N - 3, (m) => Object.assign(m, { delivery: "delivered" as const }));
+    expect(after[N - 3]!.delivery).toBe("delivered");
+    expect(after[N - 3]).not.toBe(before[N - 3]);
+    expect(tail).toBe(2);
+  });
+});
+
+// covers: chat.paired.storage
 describe("a long chat whose last rows are heavy", () => {
   /*
    * A paired chat's stored copy kept its last `STORED_MESSAGES` rows whole, though the engine keeps them: a feed's link

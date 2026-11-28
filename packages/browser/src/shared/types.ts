@@ -900,9 +900,10 @@ export interface WalletInstanceView {
   receive?: boolean;
   /**
    * At home on another device (WISP 06 § Wallets that stay home): that device's name ("" when this device does not know
-   * it), and when its coins expire (Ark, Bark). It is never opened here, and takes no payment here.
+   * it), its signing key (what Remove <device> matches it by), and when its coins expire (Ark, Bark). It is never
+   * opened here, and takes no payment here.
    */
-  home?: { device: string; expiresAt?: number };
+  home?: { device: string; key?: string; expiresAt?: number };
 }
 
 /**
@@ -1570,6 +1571,13 @@ export interface Settings {
    */
   wakeMutedGroups?: string[];
   /**
+   * Contacts blocked here, by their key (`StoredLink.peerPubKeyZ32`): what their 1:1 chats bring (messages, files,
+   * reactions, pins, edits, call offers) is dropped with nothing shown, and they are told not to wake this app, as for a
+   * muted chat. Their chats are kept. In the profile's settings, so it moves with the profile to the person's other
+   * devices (WISP 06). Only through `setContactBlocked`.
+   */
+  blockedContacts?: string[];
+  /**
    * Groups whose links this device put on one transport (WISP 902 § Transports), by group id; a group not here is on
    * Automatic. This device's own: nothing of it goes to the members but each edge's `_tr`. Only through `setGroupTransport`.
    */
@@ -1890,6 +1898,8 @@ export interface LinkView {
   wakeToken?: string;
   /** Paired 1:1 chats: the contact was told not to wake this side while the chat is muted (`setWakeMuted`). */
   wakeMuted?: boolean;
+  /** 1:1 chats: its contact is blocked here (`setContactBlocked`); nothing it sends is kept or rings. */
+  blocked?: true;
   /** Paired 1:1 chats: the contact shared how to wake its closed app, so a message sent while it is away wakes it. */
   peerWakes?: boolean;
   /** While `peerTyping`: what the contact is doing when it is not plain typing (recording a voice note, thinking). */

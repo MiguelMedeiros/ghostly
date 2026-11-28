@@ -77,18 +77,23 @@ test("with the keys alone: skip the list, open a chat and a group from it, answe
   await expect(ring).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(ring).toBeVisible();
-  // Tab goes round its buttons and never behind it: Decline, Accept, then Delete chat under them, and Decline again.
+  // Tab goes round its buttons and never behind it: Decline, Accept, then Block contact and Delete chat under them,
+  // and Decline again.
   await page.keyboard.press("Tab");
   await expect(ring.getByRole("button", { name: "Decline" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(ring.getByRole("button", { name: "Accept audio call" })).toBeFocused();
   await page.keyboard.press("Tab");
+  await expect(ring.getByRole("button", { name: "Block contact" })).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(ring.getByRole("button", { name: "Delete chat" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(ring.getByRole("button", { name: "Decline" })).toBeFocused();
-  // Shift+Tab goes back round: Delete chat, then Accept, which answers.
+  // Shift+Tab goes back round: Delete chat, Block contact, then Accept, which answers.
   await page.keyboard.press("Shift+Tab");
   await expect(ring.getByRole("button", { name: "Delete chat" })).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(ring.getByRole("button", { name: "Block contact" })).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(ring.getByRole("button", { name: "Accept audio call" })).toBeFocused();
   await page.keyboard.press("Enter");
