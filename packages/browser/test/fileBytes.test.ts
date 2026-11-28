@@ -102,6 +102,38 @@ describe("files in IndexedDB pieces (no file system)", () => {
     expect(await bytes.blob("chatB-in-3", "")).toBeNull();
   });
 
+  it("keeps a 0-byte file appended or staged so size, blob and digest find it after close", async () => {
+    const bytes = new IdbFileBytes();
+    const emptyDigest = await blobDigest(new Blob([]));
+
+    await bytes.append("chat-in-empty", 0, new Uint8Array(0));
+    await bytes.close("chat-in-empty");
+    expect(await bytes.size("chat-in-empty")).toBe(0);
+    expect(await bytes.digest("chat-in-empty")).toBe(emptyDigest);
+    expect(await bytes.read("chat-in-empty", 0, 16)).toEqual(new Uint8Array(0));
+    const appendedBlob = await bytes.blob("chat-in-empty", "text/plain");
+    expect(appendedBlob?.size).toBe(0);
+    expect(appendedBlob?.type).toBe("text/plain");
+    // Survives restart (fresh instance reads IndexedDB).
+    const afterRestart = new IdbFileBytes();
+    expect(await afterRestart.size("chat-in-empty")).toBe(0);
+    expect((await afterRestart.blob("chat-in-empty", "text/plain"))?.size).toBe(0);
+    await afterRestart.remove("chat-in-empty");
+    expect(await afterRestart.size("chat-in-empty")).toBeNull();
+
+    expect(await bytes.stage("chat-out-empty", new Blob([]))).toBe(emptyDigest);
+    expect(await bytes.size("chat-out-empty")).toBe(0);
+    expect((await bytes.blob("chat-out-empty", "text/plain"))?.size).toBe(0);
+
+    // Writing real bytes after an initial empty append still lands at offset 0.
+    await bytes.append("chat-in-grow", 0, new Uint8Array(0));
+    await bytes.flush("chat-in-grow");
+    await bytes.append("chat-in-grow", 0, pattern(0, 12));
+    await bytes.close("chat-in-grow");
+    expect(await bytes.size("chat-in-grow")).toBe(12);
+    expectBytes(await bytes.read("chat-in-grow", 0, 12), pattern(0, 12));
+  });
+
   it("ids are plain names", () => {
     for (const id of ["../x", "a/b", "", "a.b", "x".repeat(201)]) expect(() => checkFileId(id)).toThrow("Invalid file id");
     expect(checkFileId("abc-in-XYZ_1")).toBe("abc-in-XYZ_1");
