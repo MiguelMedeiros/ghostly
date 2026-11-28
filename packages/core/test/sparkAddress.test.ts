@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { bech32m } from "@scure/base";
-import { SPARK_PROVIDER, isSparkAddress, sparkAddressKind, sparkInvoiceDetails, sparkNetworkOf } from "../src/sparkAddress";
+import { SPARK_PROVIDER, isSparkAddress, sparkAddressKind, sparkInvoiceDetails } from "../src/sparkAddress";
 import { validatePaymentTarget } from "../src/paymentIntent";
 import { decodeControl } from "../src/frames";
 
@@ -26,13 +26,11 @@ describe("Spark addresses", () => {
     expect(mainnet.startsWith("spark1")).toBe(true);
     expect(sparkAddressKind(mainnet, "bitcoin")).toBe("address");
     expect(sparkAddressKind(mainnet, "regtest")).toBeUndefined();
-    expect(sparkNetworkOf(mainnet)).toBe("bitcoin");
-    expect(sparkNetworkOf(INVOICE)).toBe("regtest");
-    expect(sparkNetworkOf("bcrt1qexample")).toBeUndefined();
+    expect(sparkAddressKind("bcrt1qexample", "bitcoin") ?? sparkAddressKind("bcrt1qexample", "regtest")).toBeUndefined();
   });
 
   it("refuses Spark's other networks, old prefixes, upper case, a broken checksum and other payloads", () => {
-    for (const hrp of ["sparkt", "sparks", "sparkl", "sprt", "sp"]) expect(sparkNetworkOf(as(hrp, ADDRESS))).toBeUndefined();
+    for (const hrp of ["sparkt", "sparks", "sparkl", "sprt", "sp"]) for (const network of ["bitcoin", "regtest"] as const) expect(sparkAddressKind(as(hrp, ADDRESS), network)).toBeUndefined();
     expect(isSparkAddress(ADDRESS.toUpperCase(), "regtest")).toBe(false);
     expect(isSparkAddress(`${ADDRESS.slice(0, -1)}${ADDRESS.endsWith("q") ? "p" : "q"}`, "regtest")).toBe(false);
     const key = payload(ADDRESS);

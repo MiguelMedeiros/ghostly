@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { toBase64Url, utf8Encode } from '@ghostly/core';
 import { JwksCache, JWKS_MAX_BYTES, REFETCH_INTERVAL_MS } from '../src/proofs/oidc/jwks';
-import { OIDC_PROVIDERS, audiences, issuerFor, oidcProvider, oidcProviders, testProvider, type OidcProvider } from '../src/proofs/oidc/providers';
+import { OIDC_PROVIDERS, audiences, issuerFor, oidcProviders, testProvider, type OidcProvider } from '../src/proofs/oidc/providers';
 import { verifyIdToken, MAX_ID_TOKEN_LENGTH } from '../src/proofs/oidc/verify';
 import { forgeToken, jwksServer, nonceFor, signToken, testKey, type TestKey } from './helpers/oidcIssuer';
 // covers: proofs.oidc, proofs.oidc.nonce
@@ -243,7 +243,7 @@ describe('OIDC providers', () => {
     expect(oidcProviders('https://oidc.ghostly.test').map(p => p.id)).toContain('test');
     expect(() => testProvider('http://127.0.0.1:45210')).toThrow(/\.test host/);
     expect(() => testProvider('https://accounts.google.com')).toThrow(/\.test host/);
-    expect(oidcProvider('test', undefined)).toBeUndefined();
+    expect(oidcProviders(undefined).some(p => p.id === 'test')).toBe(false);
     for (const p of oidcProviders(undefined)) {
       expect(p.algs).toEqual(['RS256']);
       expect(p.jwksUri).toMatch(/^https:\/\//);

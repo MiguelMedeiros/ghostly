@@ -9,7 +9,7 @@ import { parseArgs } from "../src/args";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { pairs } from "../src/commands/shared";
 import { asCliError } from "../src/errors";
-import { invoiceNetwork, paymentJson } from "../src/wallets";
+import { paymentJson } from "../src/wallets";
 import { chatViewOf } from "./support/chatView";
 // covers: headless.wallets, headless.payments, headless.engine-passthrough
 
@@ -483,12 +483,6 @@ describe("wallets", () => {
 });
 
 describe("real money", () => {
-  it("an invoice's network comes from its prefix", () => {
-    expect(invoiceNetwork("lnbc10u1pxyz")).toBe("mainnet");
-    expect(invoiceNetwork("lightning:LNTBS1pxyz")).toBe("testnet");
-    expect(invoiceNetwork("lnbcrt500n1pxyz")).toBe("testnet");
-    expect(invoiceNetwork("hello")).toBeNull();
-  });
 
   it("a received Fedimint payment says its network and fedimint as its method", () => {
     const received = { id: "p", linkId: "l", kind: "payment", direction: "in", amount: 1_200, unit: "sat", state: "settled", createdAt: 1, federation: "f" } as const;

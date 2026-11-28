@@ -70,9 +70,6 @@ export function enrollDigits(transcriptHash: string, inviterKey: Uint8Array, joi
   return String(bits % 1_000_000).padStart(6, "0");
 }
 
-/** "482913" as people read it: "482 913". */
-export const formatEnrollDigits = (digits: string): string => `${digits.slice(0, 3)} ${digits.slice(3)}`;
-
 /** What a hello says of the device that joins. */
 export interface EnrollHello {
   key: Uint8Array;

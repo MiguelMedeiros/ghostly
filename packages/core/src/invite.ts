@@ -82,11 +82,6 @@ export function inviteLink(code: string, origin = INVITE_LINK_ORIGIN): string {
   return `${trimEndOf(origin, "/")}/#${code}`;
 }
 
-/** What goes in a QR code: upper case, so the code fits the alphanumeric mode. Older codes stay as they are. */
-export function inviteQrText(code: string): string {
-  return /^ghostly1/i.test(code) ? code.toUpperCase() : code;
-}
-
 /**
  * The QR segments of an invite's link, in capitals: `HTTPS://GHOSTLY.TOOLS/`
  * and the code in alphanumeric mode, the `#` between them in byte mode (QR

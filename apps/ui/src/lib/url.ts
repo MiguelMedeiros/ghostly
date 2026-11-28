@@ -89,12 +89,6 @@ export function readInvite(input: string): InviteInput {
   return reading.ok ? { ok: true, keys: keysOf(reading.params) } : { ok: false, reason: reading.reason };
 }
 
-/** The keys of an invite, or null when it is refused (`readInvite` says why). */
-export function parseInvite(input: string): SessionKeys | null {
-  const reading = readInvite(input);
-  return reading.ok ? reading.keys : null;
-}
-
 /**
  * What joining these keys would do in this profile: `own` when the invite is one this profile made (its
  * chat is `sessionId`: sharing it is the contact's way in, not ours), `joined` when this profile already
@@ -124,16 +118,6 @@ export const INVITE_REFUSAL_MESSAGE = {
   damaged: "join.damaged",
   device: "join.device",
 } as const satisfies Record<InviteRefusal, string>;
-
-/** A link for the other person: opening it joins the chat, and the app takes the keys out of the address at once. */
-export function buildInviteUrl(
-  origin: string,
-  seedB: string,
-  pubKeyA: string,
-  encKey: string,
-): string {
-  return `${origin}/#/chat/${seedB}/${pubKeyA}/${encKey}`;
-}
 
 /**
  * The chat a `/chat/…` address points at, or null when the address is not a

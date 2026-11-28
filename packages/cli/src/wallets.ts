@@ -180,18 +180,6 @@ export function paymentJson(p: PaymentView) {
   };
 }
 
-/**
- * A Lightning invoice's network by its prefix (BOLT 11), for a hint only: test mints issue `lnbc` invoices too, so
- * the paying wallet's network is always named by the caller.
- */
-export function invoiceNetwork(invoice: string): WalletNetwork | null {
-  const lower = invoice.trim().toLowerCase().replace(/^lightning:/, "");
-  if (!lower.startsWith("ln")) return null;
-  if (/^lnbcrt/.test(lower)) return "testnet";
-  if (/^lnbc\d|^lnbc1/.test(lower)) return "mainnet";
-  return /^ln(tb|tbs|sb)/.test(lower) ? "testnet" : null;
-}
-
 const isInvoice = (text: string) => /^(lightning:)?ln(bc|tb|tbs|sb|bcrt)[0-9a-z]+$/i.test(text.trim());
 const isLnurl = (text: string) => /^(lightning:)?lnurl[0-9a-z]+$/i.test(text.trim()) || /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(text.trim());
 

@@ -2,8 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fc from "fast-check";
 import {
   buildSdpFromSignal,
-  compressSdp,
-  decompressSdp,
   CALL_SIGNAL_FUTURE_MS,
   answersOffer,
   callSignalHeardAt,
@@ -214,12 +212,6 @@ describe("rebuilding an SDP", () => {
   it("never throws on arbitrary input", () => {
     fc.assert(fc.property(fc.string({ maxLength: 300 }), text => { parseCallSignal(text, NOW); }), { numRuns: 200 });
     fc.assert(fc.property(fc.jsonValue(), value => { parseCallSignal(JSON.stringify(value), NOW); }), { numRuns: 200 });
-  });
-
-  it("round-trips an SDP through its compressed form", () => {
-    fc.assert(fc.property(fc.string({ unit: fc.integer({ min: 0x20, max: 0x7e }).map(n => String.fromCharCode(n)), maxLength: 200 }), sdp => {
-      expect(decompressSdp(compressSdp(sdp))).toBe(sdp);
-    }), { numRuns: 100 });
   });
 });
 

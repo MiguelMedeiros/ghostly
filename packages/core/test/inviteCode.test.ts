@@ -4,7 +4,7 @@ import { bech32, bech32m } from "@scure/base";
 import { toBase64Url, toZ32 } from "../src/bytes";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import {
-  createChatInvite, decodeInviteCode, encodeGhostlyInvite, encodeInviteCode, inviteLink, inviteQrSegments, inviteQrText, readInviteCode,
+  createChatInvite, decodeInviteCode, encodeGhostlyInvite, encodeInviteCode, inviteLink, inviteQrSegments, readInviteCode,
   INVITE_MAX_LENGTH, type LinkParams,
 } from "../src/invite";
 
@@ -59,10 +59,7 @@ describe("ghostly1 invite codes (WISP 801)", () => {
   it("shares the link on ghostly.tools and puts the code in capitals for the QR's alphanumeric mode", () => {
     expect(inviteLink(VECTOR)).toBe(`https://ghostly.tools/#${VECTOR}`);
     expect(inviteLink(VECTOR, "https://app.ghostly.tools/")).toBe(`https://app.ghostly.tools/#${VECTOR}`);
-    const qr = inviteQrText(VECTOR);
-    expect(qr).toBe(VECTOR.toUpperCase());
-    expect(qr).toMatch(/^[0-9A-Z]+$/);
-    expect(inviteQrText(`pair1/${"a".repeat(43)}`)).toBe(`pair1/${"a".repeat(43)}`);
+    expect(VECTOR.toUpperCase()).toMatch(/^[0-9A-Z]+$/);
     const segments = inviteQrSegments(VECTOR);
     expect(segments).toEqual(["HTTPS://GHOSTLY.TOOLS/", "#", VECTOR.toUpperCase()]);
     // What a scanner hands back, the segments joined, reads as the invite.
@@ -78,7 +75,7 @@ describe("ghostly1 invite codes (WISP 801)", () => {
       const code = encodeInviteCode(params);
       expect(code).toHaveLength(220);
       expect(decodeInviteCode(code)).toEqual(params);
-      expect(decodeInviteCode(inviteQrText(code))).toEqual(params);
+      expect(decodeInviteCode(code.toUpperCase())).toEqual(params);
     }), { numRuns: 100 });
     fc.assert(fc.property(fc.string({ maxLength: 300 }), input => { readInviteCode(input); readInviteCode(`ghostly1${input}`); }), { numRuns: 300 });
   });
@@ -200,7 +197,7 @@ describe("Ghostly 0.4 refuses the new code (WISP 801, checked against v0.4.0)", 
 
   it("the bare code, the QR text and both links are invalid there", () => {
     const { inviteCode } = createChatInvite();
-    for (const input of [inviteCode, inviteQrText(inviteCode), inviteLink(inviteCode), inviteLink(inviteCode, "https://app.ghostly.tools"), VECTOR]) {
+    for (const input of [inviteCode, inviteCode.toUpperCase(), inviteLink(inviteCode), inviteLink(inviteCode, "https://app.ghostly.tools"), VECTOR]) {
       expect(decodeV040(input), input.slice(0, 30)).toBeNull();
       expect(parseInviteV040(input), input.slice(0, 30)).toBeNull();
     }
