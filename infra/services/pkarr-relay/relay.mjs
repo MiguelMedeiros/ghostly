@@ -17,6 +17,10 @@ export const TIMESTAMP_LENGTH = 8
 export const RELAY_PAYLOAD_MIN_BYTES = SIGNATURE_LENGTH + TIMESTAMP_LENGTH + MIN_DNS_PACKET_BYTES
 /** Largest valid Pkarr relay payload: 64B signature + 8B timestamp + 1000B DNS packet (1072 bytes). */
 export const RELAY_PAYLOAD_MAX_BYTES = SIGNATURE_LENGTH + TIMESTAMP_LENGTH + MAX_DNS_PACKET_BYTES
+/** Batch GET response envelope budget matching @ghostly/core (`4096 + 2048 * keyCount`). */
+export const BATCH_RESPONSE_OVERHEAD_BYTES = 4096
+export const BATCH_PER_KEY_MAX_BYTES = 2048
+export const batchResponseMaxBytes = keyCount => BATCH_RESPONSE_OVERHEAD_BYTES + Math.max(1, keyCount) * BATCH_PER_KEY_MAX_BYTES
 /** How far ahead of wall-clock time a packet timestamp may be before a current-time packet may replace it. */
 export const PKARR_FUTURE_SKEW_MS = 10 * 60_000
 /** Minimum byte charge per HTTP request or WS frame in the per-IP byte bucket so tiny-frame floods cannot bypass it. */
@@ -1174,25 +1178,34 @@ export function startRelay ({
     }
 
     statsCounters.batchGets++
-    const results = Object.create(null)
+    const packets = Object.create(null)
+    let resolvedCount = 0
+    let errorCount = 0
+    let circuitOpenCount = 0
     await Promise.all(keys.map(async key => {
       const r = await resolveKey(key, { networkOnly })
       if (r.status === 'ok') {
-        results[key] = {
-          status: 'ok',
-          packet: r.payload.toString('base64'),
-          seq: r.seq.toString(),
-          cached: r.cached,
-        }
+        resolvedCount++
+        packets[key] = r.payload.toString('base64')
       } else if (r.status === 'not_found') {
-        results[key] = { status: 'not_found' }
+        resolvedCount++
+        packets[key] = null
       } else if (r.status === 'circuit_open') {
-        results[key] = { status: 'error', error: 'upstream_circuit_open' }
+        errorCount++
+        circuitOpenCount++
+        packets[key] = null
       } else {
-        results[key] = { status: 'error', error: 'upstream_unavailable' }
+        errorCount++
+        packets[key] = null
       }
     }))
-    return answerJson(200, { results })
+    if (resolvedCount === 0 && errorCount > 0) {
+      if (circuitOpenCount === errorCount) {
+        return answerJson(503, { error: 'Upstream relay circuit open' })
+      }
+      return answerJson(502, { error: 'Upstream relay unavailable' })
+    }
+    return answerJson(200, { packets })
   }
 
   async function handleBatchPut (req, res, ip, answerJson, refuse) {

@@ -77,21 +77,16 @@ Resolves 1 to `maxBatchKeys` (default 64) canonical 52-character z-base32 public
   ```
   (`policy` is optional; set `"NetworkOnly"` to bypass the local cache.)
 - `GET /batch?keys=<z32-key-1>,<z32-key-2>` (optional `&policy=NetworkOnly`).
-- Response (`200 application/json`):
+- Response (`200 application/json`, bounded by `4096 + 2048 * keyCount` bytes):
   ```json
   {
-    "results": {
-      "<z32-key-1>": {
-        "status": "ok",
-        "packet": "<base64 raw Pkarr bytes>",
-        "seq": "1732800000000000",
-        "cached": true
-      },
-      "<z32-key-2>": { "status": "not_found" },
-      "<z32-key-3>": { "status": "error", "error": "upstream_unavailable" }
+    "packets": {
+      "<z32-key-1>": "<standard base64 raw Pkarr bytes>",
+      "<z32-key-2>": null
     }
   }
   ```
+  Missing keys (or individual corrupt upstream packets that fail signature verification) are returned as `null`. If every requested key fails due to upstream outage or open circuit breakers, the endpoint returns `502` or `503`.
 
 ### Batch PUT: `PUT /batch`
 

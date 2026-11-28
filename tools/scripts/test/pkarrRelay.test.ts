@@ -6,6 +6,7 @@ import WebSocket from "ws";
 import { createIdentity } from "../../../packages/core/src/identity";
 import { createRelayPayload, parseRelayPayload } from "../../../packages/core/src/pkarr";
 import {
+  batchResponseMaxBytes,
   comparePacketSeq,
   decodeZ32PublicKey,
   DEFAULT_LIMITS,
@@ -301,29 +302,42 @@ describe("Pkarr relay HTTP, batch, push, and limits (infra/services/pkarr-relay)
     expect((await fetch(`${base}/${idCached.pubKeyZ32}`, { method: "PUT", body: pCached.payload })).status).toBe(204);
 
     // POST /batch with duplicate key + cache hit + upstream hit + miss
+    const reqKeys = [idCached.pubKeyZ32, idCached.pubKeyZ32, idUpstream.pubKeyZ32, idMissing.pubKeyZ32];
     const res = await fetch(`${base}/batch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        keys: [idCached.pubKeyZ32, idCached.pubKeyZ32, idUpstream.pubKeyZ32, idMissing.pubKeyZ32],
-      }),
+      body: JSON.stringify({ keys: reqKeys }),
     });
     expect(res.status).toBe(200);
-    const { results } = await res.json();
-    expect(results[idCached.pubKeyZ32]).toMatchObject({ status: "ok", cached: true, seq: pCached.seq.toString() });
-    expect(results[idUpstream.pubKeyZ32]).toMatchObject({ status: "ok", cached: false, seq: pUpstream.seq.toString() });
-    expect(results[idMissing.pubKeyZ32]).toEqual({ status: "not_found" });
+    const rawBody = Buffer.from(await res.arrayBuffer());
+    expect(rawBody.byteLength).toBeLessThanOrEqual(batchResponseMaxBytes(3));
+    const { packets } = JSON.parse(rawBody.toString("utf8")) as { packets: Record<string, string | null> };
+    expect(packets[idCached.pubKeyZ32]).toBe(pCached.payload.toString("base64"));
+    expect(packets[idUpstream.pubKeyZ32]).toBe(pUpstream.payload.toString("base64"));
+    expect(packets[idMissing.pubKeyZ32]).toBeNull();
+    expect(relay.stats().cacheHits).toBe(1);
 
-    // Verify returned base64 bytes pass @ghostly/core parseRelayPayload verbatim
-    const decoded = Buffer.from(results[idUpstream.pubKeyZ32].packet, "base64");
+    // Verify returned standard base64 bytes pass @ghostly/core parseRelayPayload verbatim
+    const decoded = Buffer.from(packets[idUpstream.pubKeyZ32]!, "base64");
     expect(parseRelayPayload(idUpstream.pubKeyZ32, decoded).records[0].value).toBe("upstream");
 
-    // GET /batch?keys=... returns now-cached idUpstream and refuses tampered upstream packet
+    // GET /batch?keys=... serves cached idUpstream and refuses tampered upstream packet (returned as null, never cached)
+    const upstreamGetsBefore = upstream.stats.gets;
     const res2 = await fetch(`${base}/batch?keys=${idUpstream.pubKeyZ32},${idTampered.pubKeyZ32}`);
     expect(res2.status).toBe(200);
-    const body2 = await res2.json();
-    expect(body2.results[idUpstream.pubKeyZ32].cached).toBe(true);
-    expect(body2.results[idTampered.pubKeyZ32]).toEqual({ status: "error", error: "upstream_unavailable" });
+    const body2 = await res2.json() as { packets: Record<string, string | null> };
+    expect(body2.packets[idUpstream.pubKeyZ32]).toBe(pUpstream.payload.toString("base64"));
+    expect(body2.packets[idTampered.pubKeyZ32]).toBeNull();
+    // Only idTampered hit upstream; idUpstream was served from cache
+    expect(upstream.stats.gets).toBe(upstreamGetsBefore + 1);
+
+    // Batch where every key fails upstream (corrupted packet only) returns 502 instead of false 200 all-null
+    const allErr = await fetch(`${base}/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ keys: [idTampered.pubKeyZ32] }),
+    });
+    expect(allErr.status).toBe(502);
 
     // Enforces maxBatchKeys and invalid key validation
     const tooMany = await fetch(`${base}/batch`, {
