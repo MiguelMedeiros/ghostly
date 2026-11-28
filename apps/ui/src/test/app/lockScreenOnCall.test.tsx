@@ -39,6 +39,10 @@ describe("locked during a call", () => {
     expect(name).toHaveTextContent("Casper");
     // In its own direction: "Casper!" in the Arabic app read "!Casper".
     expect(name.querySelector("bdi")).toHaveTextContent("Casper");
+    // A long Latin name keeps its start in the Arabic app (as the ringing card's name), and the card keeps its margins
+    // on a phone: a long name no longer widens it to the screen's edges.
+    expect(name).toHaveAttribute("dir", "auto");
+    expect(panel().closest(".max-w-sm")).toHaveClass("min-w-0");
     expect(screen.getByTestId("lock-on-call-time")).toHaveTextContent("01:05");
     expect(panel()).toHaveTextContent(/^On a call with \u2068Casper\u2069CCasper01:05MuteEnd call$/);
     expect(screen.getByRole("group", { name: "On a call with \u2068Casper\u2069" })).toBe(panel());

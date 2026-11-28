@@ -227,7 +227,7 @@ export function LockScreen() {
       {/* Centred in what the keyboard leaves (`--app-height`), not in the whole screen: on a phone the field and
           Unlock sat under the keyboard. */}
       <div className="flex items-center justify-center overflow-y-auto" data-app-height style={{ height: "var(--app-height, 100%)" }}>
-      <div className="w-full max-w-sm mx-4 py-4">
+      <div className="w-full min-w-0 max-w-sm mx-4 py-4">
         {call ? (
           <RingingCard call={call} cardRef={cardRef} profile={profile} />
         ) : onCall ? (
@@ -522,7 +522,7 @@ function OnCallCard({ call, labelId, profile }: { call: CallUnderLock; labelId: 
             : <PeerAvatar peerPubKey={call.peerPubKey} label={call.name} named={call.named} photo={call.photo} testId="lock-on-call-avatar" />}
         </div>
         <div className="min-w-0 max-w-full">
-          <p data-testid="lock-on-call-name" className="text-text-primary text-lg font-medium truncate"><bdi>{call.name}</bdi></p>
+          <p data-testid="lock-on-call-name" dir="auto" className="text-text-primary text-lg font-medium truncate"><bdi>{call.name}</bdi></p>
           <p data-testid="lock-on-call-time" data-state={call.state} className="text-text-muted text-sm tabular-nums">{time}</p>
         </div>
         <div className="flex items-start justify-center gap-10 max-md:gap-6 pt-2">
