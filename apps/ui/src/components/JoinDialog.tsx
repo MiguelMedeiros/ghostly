@@ -1,6 +1,9 @@
 import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import { decodeCommunityLink, decodeGroupEntryLink, readDeviceInvite } from "@ghostly/core";
+import { mediaProblem } from "@ghostly/react";
+import { mediaDeniedOnAndroid } from "../desktop/androidMediaDenied";
+import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { enrollErrorKey, failureKey, offerDeviceLink } from "../lib/devices";
 import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
 import { showJoinNotice } from "../lib/joinNotice";
@@ -62,6 +65,15 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     if (qrReaderFailures() < 2) return said(t("join.qrReaderNotLoaded"));
     const problem = said(t("join.qrReaderReload"));
     setReloadProblem(problem);
+    return problem;
+  };
+  // The camera refused in the Android app: once Android stops asking, only its settings for Ghostly allow it again.
+  const [settingsProblem, setSettingsProblem] = useState<Problem | null>(null);
+  const cameraFailed = (cause: unknown): Problem => {
+    if (cause instanceof QrReaderNotLoaded) return readerFailed();
+    if (!mediaDeniedOnAndroid() || mediaProblem(cause) !== "denied") return said(t(onDevice ? "devices.join.cameraUnavailable" : "join.cameraUnavailable"));
+    const problem = said(t("composer.cameraBlocked"));
+    setSettingsProblem(problem);
     return problem;
   };
   const backdrop = useBackdropDismiss(close);
@@ -182,7 +194,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     } catch (cause) {
       if (current !== generation.current) return;
       stop();
-      setError(cause instanceof QrReaderNotLoaded ? readerFailed() : { tone: "error", title: t(onDevice ? "devices.join.cameraUnavailable" : "join.cameraUnavailable") }); setManual(true);
+      setError(cameraFailed(cause)); setManual(true);
     } finally { decode.close(); }
   };
   // `weighed`: a picture the app read from the clipboard, already checked there (`platformPastedImage`).
@@ -287,6 +299,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     {error && <div id={errorId}><Notice problem={error} className="mt-3 text-sm" /></div>}
     {/* A chat's Join comes back open, Scan focused (`#/scan`, the "Scan invite" shortcut); a device's code where it was. */}
     {error && error === reloadProblem && <ReloadButton testId="join-reload" to={onDevice ? undefined : "#/scan"} className={`${button} mt-3 w-full border border-border aria-disabled:opacity-60 aria-disabled:cursor-not-allowed`} noteClassName="mt-2 text-center text-sm text-text-secondary" />}
+    {error && error === settingsProblem && <button type="button" data-testid="join-camera-settings" onClick={() => void openAppSettings()} className={`${button} mt-3 w-full border border-border`}>{t("settings.noticesOpenSettings")}</button>}
     {own && <div data-testid="join-own-invite" className="mt-3 rounded-lg border border-border bg-input-bg p-3">
       <p role="alert" className="text-sm text-text-primary">{t("join.own")}</p>
       <button type="button" data-testid="join-open-chat" onClick={() => { joined.current = true; stop(); (onOpenChat ?? onClose)(own); }} className={`${button} mt-3 w-full bg-accent text-panel-header forced-colors:border forced-colors:border-[color:ButtonText]`}>{t("join.openChat")}</button>
