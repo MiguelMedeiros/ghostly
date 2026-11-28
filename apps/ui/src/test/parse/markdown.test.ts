@@ -245,6 +245,15 @@ describe("[text](url) links", () => {
     expect(labelMisleads(`paypal${String.fromCodePoint(code as number)}.com`, "https://evil.example/")).toBe(true);
   });
 
+  it.each([
+    ...Array.from({ length: 0x20 }, (_, code) => code).filter((code) => code !== 0x09 && code !== 0x0a),
+    ...Array.from({ length: 0x21 }, (_, i) => 0x7f + i),
+  ].map((code) => [code.toString(16), code]))("treats the control character U+%s, which draws as nothing, as hidden", (_, code) => {
+    const label = `paypal${String.fromCodePoint(code as number)}.com`;
+    expect(labelMisleads(label, "https://evil.example/login")).toBe(true);
+    expect(link(`[${label}](https://evil.example/login)`)).toMatchObject({ data: { showUrl: true } });
+  });
+
   it("shows the address when a character that draws as nothing splits the text's host", () => {
     expect(link("[paypal\u034f.com](https://evil.example/)")).toMatchObject({ data: { showUrl: true } });
   });

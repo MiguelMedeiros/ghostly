@@ -88,6 +88,12 @@ const EMOJI =
   /[#*0-9]️?⃣|\u{1f3f4}[\u{e0020}-\u{e007e}]+\u{e007f}|\p{Extended_Pictographic}(?:[︎️]|\p{Emoji_Modifier})?(?:‍\p{Extended_Pictographic}(?:[︎️]|\p{Emoji_Modifier})?)*/gu;
 
 /**
+ * A control character other than a tab, which draws as a space: browsers draw NUL, CR, DEL and the C1 controls as
+ * nothing ("paypal\0.com"). A label holds no line break.
+ */
+const CONTROL = /(?!\t)\p{Cc}/u;
+
+/**
  * Whether a link's text would make a reader think it goes somewhere else: it names a host that is not the link's (nor
  * one the link's host sits under), or it holds an invisible or direction character, which can turn "moc.lapyap"
  * into "paypal.com" on screen. The text is read as a browser would read a host ("ghostly。tools" and "ｇｈｏｓｔｌｙ.tools"
@@ -100,7 +106,7 @@ export function labelMisleads(label: string, url: string): boolean {
   label = label.normalize("NFD");
   const target = hostOf(url);
   if (!target) return true;
-  if (new RegExp(INVISIBLE.source, "u").test(label.replace(EMOJI, ""))) return true;
+  if (CONTROL.test(label) || new RegExp(INVISIBLE.source, "u").test(label.replace(EMOJI, ""))) return true;
   const text = readDots(readDots(label).replace(SPACE_BY_DOT, "").normalize("NFKC"));
   for (const found of text.matchAll(ADDRESS)) {
     const written = found[0];
