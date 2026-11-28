@@ -334,18 +334,23 @@ describe("Join call in a group's header", () => {
   // A dropped link mid-call: LiveKit lost its path to the node and was getting it back, and the lock screen showed the
   // group's call connected, its time running, as if everyone could still hear you. A 1:1 call says Reconnecting there.
   it("on the lock screen, says Reconnecting while the room gets its path to the node back, and connected again after", async () => {
-    const LockCard = () => <p data-testid="lock-card">{useCallsUnderLock()[0]?.state ?? "none"}</p>;
+    const LockCard = () => { const c = useCallsUnderLock()[0]; return <p data-testid="lock-card" data-at={c?.startedAt ?? ""}>{c?.state ?? "none"}</p>; };
     answerPass(() => pass());
     const group = community();
     fakeEngine.update({ groups: [group] });
     const { user } = renderApp(<><GroupCallButton group={group} loadLivekit={loadLivekit} /><LockCard /></>);
     await user.click(screen.getByTestId("group-call-join"));
     await waitFor(() => expect(screen.getByTestId("lock-card")).toHaveTextContent("connected"));
+    // The time goes on from when the call first connected, not from 00:00 after each drop.
+    const at = screen.getByTestId("lock-card").dataset.at;
+    expect(at).toMatch(/^\d+$/);
     for (const lost of ["Reconnecting", "SignalReconnecting"]) {
+      await new Promise((r) => setTimeout(r, 5));
       act(() => FakeRoom.rooms[0].say(lost));
       expect(screen.getByTestId("lock-card")).toHaveTextContent(/^reconnecting$/);
       act(() => FakeRoom.rooms[0].say("Reconnected"));
       expect(screen.getByTestId("lock-card")).toHaveTextContent(/^connected$/);
+      expect(screen.getByTestId("lock-card").dataset.at).toBe(at);
     }
     // LiveKit gave up: the call is over, nothing is left on the lock screen.
     act(() => FakeRoom.rooms[0].say("Reconnecting"));
