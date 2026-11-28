@@ -416,8 +416,9 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   const held = local.byAdmin;
   const anyHeld = !!held && (held.mic || held.camera || held.screen);
   const heldLook = "aria-disabled:opacity-50 aria-disabled:cursor-not-allowed";
-  // Over a shared screen filling the window the buttons sit on the picture: white at 10% vanished over a bright one.
-  const overPicture = !!presenter && !mini;
+  // Over a shared screen the buttons sit on the picture, in the whole window and in the small one (which shows it too):
+  // white at 10% vanished over a bright one.
+  const overPicture = !!presenter;
   const plainLook = overPicture ? "bg-black/70 text-white hover:bg-black/80" : "bg-white/10 text-white hover:bg-white/20";
   const screenLabel = held?.screen ? t("calls.group.offByAdmin") : local.screen ? t("calls.stopSharing") : t("calls.shareScreen");
   return createPortal(

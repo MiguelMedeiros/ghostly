@@ -170,6 +170,18 @@ describe("a shared screen", () => {
     }
   });
 
+  // The small window, and the call pinned beside the chat, show the same shared screen under the same buttons.
+  it.each([[false, "small window"], [true, "pinned beside the chat"]])("draws them on a black backing in the small window too (pinned %s: %s)", (pinned) => {
+    if (!pinned) localStorage.setItem("ghostly_group_call_mini", "1");
+    const call = state(0, { local: person("me", { camera: true, tracks: { camera: video() } }), participants: [person("ana", { screen: true, tracks: { screen: video() } })] });
+    view(call, { devices: devicesWith(null), pinned });
+    expect(screen.getByTestId("group-call")).toHaveAttribute("data-mini", "true");
+    for (const id of ["group-call-minimize", "group-call-mic", "group-call-camera", "call-devices", "group-call-screen"]) {
+      expect(screen.getByTestId(id)).toHaveClass("bg-black/70", "text-white", "hover:bg-black/80");
+      expect(screen.getByTestId(id)).not.toHaveClass("bg-white/10");
+    }
+  });
+
   it("plays a screen's sound beside its sharer's voice, and says on your own screen when it went without its sound", () => {
     const sound = new FakeTrack("audio") as unknown as MediaStreamTrack;
     const { rerenderWith } = view(state(0, {
