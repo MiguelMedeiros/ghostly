@@ -980,6 +980,7 @@
     "apps/ui/src/lib/amount.ts": ["app.i18n","wallet.*","payments.*","chats.list.rows"],
     "apps/ui/src/lib/appBadge.ts": ["app.attention.badge"],
     "apps/ui/src/lib/appCommands.ts": ["desktop.window"],
+    "apps/ui/src/lib/appMenu.ts": ["desktop.window","app.i18n"],
     "apps/ui/src/lib/apps/**": ["apps.web-sandbox"],
     "apps/ui/src/lib/apps/builtIns.ts": ["apps.engine.built-in","apps.built-in"],
     "apps/ui/src/lib/apps/desktopOpener.ts": ["apps.desktop-sandbox"],

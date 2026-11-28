@@ -124,6 +124,26 @@ pub async fn publish_records(
     records::publish(&state.pkarr, &keypair, &records).await
 }
 
+/// The Mac menu bar's titles in the app's language, from the page (`apps/ui/src/lib/appMenu.ts`): the menu is built
+/// in English before any page runs (`app_window::menu`), and the page says its titles again in its own language at
+/// its start and when the language changes. Only known keys with a title a menu can show are taken
+/// (`app_window::retitle`). A Mac only: Linux and Windows have no menu bar, and a phone no menu.
+#[tauri::command]
+pub fn set_menu_titles<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    titles: std::collections::HashMap<String, String>,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::app_window::retitle(&app, &titles).map_err(|error| error.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, titles);
+        Ok(())
+    }
+}
+
 /// Settings, Network: the Pkarr relays written to, whether reads may use them too ("Also use Pkarr relays"), and
 /// whether the DHT is reached directly at all (`dht_direct`: false with Hide my IP from contacts, reads and writes
 /// then keep to the relays; absent leaves it as it is).

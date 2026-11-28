@@ -127,6 +127,7 @@ const COMMANDS: &[&str] = &[
     "resolve_messages",
     "resolve_records",
     "service_respond",
+    "set_menu_titles",
     "set_pkarr_relays",
     "share_text",
     "system_bars",

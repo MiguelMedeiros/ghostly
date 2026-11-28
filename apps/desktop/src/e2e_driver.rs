@@ -13,6 +13,9 @@
 //!
 //! `GET /window` answers with what the system shows of the Ghostly window: whether it is visible, its title bar's
 //! appearance, and the badge on the Dock icon.
+//!
+//! `GET /menu` answers with the menu bar's titles as they stand, each submenu's with its items'
+//! (`app_window::shown_titles`): a test sees the language the menu is in.
 
 #[cfg(all(feature = "e2e-driver", not(debug_assertions)))]
 compile_error!(
@@ -177,6 +180,11 @@ fn answer<R: Runtime>(app: &AppHandle<R>, request: &Request) -> (u16, String) {
             crate::app_window::show_main(app);
             (200, "true".into())
         }
+        // The menu bar's titles as they stand: `[[submenu, [item, …]], …]`.
+        ("GET", "/menu") => (
+            200,
+            serde_json::to_string(&crate::app_window::shown_titles(app)).unwrap_or_default(),
+        ),
         ("POST", "/menu") => {
             let id: String = match serde_json::from_slice(&request.body) {
                 Ok(id) => id,
