@@ -25,6 +25,8 @@
   "endsCurrent": "Rispondere chiude la chiamata in corso",
   "group": {
     "byAdminInfo": "L'admin del gruppo te l'ha disattivato in questa chiamata. Potrai riattivarlo quando lo permetterà.",
+    "elsewhere": "Sei in questa chiamata su un altro dispositivo",
+    "elsewhereInfo": "Questo profilo è entrato nella chiamata da un altro dispositivo o da un'altra finestra, quindi questo ne è uscito. Riprova per riportare qui la chiamata.",
     "endAndJoin": "Chiudi ed entra",
     "endOtherBody": "Entrare nella chiamata del gruppo chiude la chiamata in corso.",
     "endOtherTitle": "Chiudere la chiamata?",
