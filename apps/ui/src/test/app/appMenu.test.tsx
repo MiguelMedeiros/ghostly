@@ -70,4 +70,22 @@ describe("the menu bar's titles", () => {
     await act(async () => { choose("en"); await Promise.resolve(); });
     expect(sink).toHaveBeenCalledTimes(2);
   });
+
+  // ghostly-agents#9177 (flake on ghostly#9116, a race the spec header documents): a relaunch starts with the
+  // profile's language already persisted, never chosen at runtime, so this never runs `choose`: the mount effect
+  // (apps/ui/src/contexts/I18nContext.tsx `useEffect(() => applyAppMenu(t), [t])`) is the ONLY call the page ever
+  // makes for the rest of the session. `renderApp`'s `language` option sets `localStorage` before mounting, exactly
+  // like a relaunch's persisted settings; `loadLocale` is pre-awaited first, as `apps/ui/src/main.tsx` `boot()`
+  // always does before its first render. Guards this never regresses into firing only on a later CHANGE of
+  // language (which a relaunch, already in its final language from the first render, would never trigger).
+  it("sends the persisted language's titles once at a cold start, with no runtime language change", async () => {
+    await loadLocale("pt");
+    const sink = vi.fn<(titles: AppMenuTitles) => void>();
+    setAppMenuSink(sink);
+
+    renderApp(<div />, { language: "pt" });
+
+    expect(sink).toHaveBeenCalledTimes(1);
+    expect(sink.mock.calls[0][0]).toMatchObject({ file: "Arquivo", settings: "Ajustes…", quit: "Encerrar Ghostly" });
+  });
 });

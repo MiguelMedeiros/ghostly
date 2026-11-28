@@ -111,17 +111,37 @@ const TITLES: &[(&str, usize, Option<usize>)] = &[
     ("help", 5, None),
 ];
 
+/// The latest titles the page gave (`retitle`), kept so a menu built AFTER that call (the page's start races the
+/// window still being created on a relaunch: `app.menu()` answers `None` a moment longer than the page waits for)
+/// starts retitled too, instead of losing the page's only, un-retried call for the rest of the session (`menu`
+/// below applies this once it builds). A relaunch is a fresh process, so a stale value from an earlier run never
+/// lingers into this one.
+#[cfg(target_os = "macos")]
+static PENDING_TITLES: std::sync::Mutex<Option<std::collections::HashMap<String, String>>> =
+    std::sync::Mutex::new(None);
+
 /// Gives the menu the page's titles (`commands::set_menu_titles`): only the keys of `TITLES` with a title `menu_title`
-/// takes; anything else is left as it is.
+/// takes; anything else is left as it is. Kept (`PENDING_TITLES`) even where the menu is not installed yet, for
+/// `menu` to pick up once it is.
 #[cfg(target_os = "macos")]
 pub fn retitle<R: Runtime>(
     app: &AppHandle<R>,
     titles: &std::collections::HashMap<String, String>,
 ) -> tauri::Result<()> {
-    use tauri::menu::MenuItemKind;
+    *PENDING_TITLES.lock().unwrap() = Some(titles.clone());
     let Some(menu) = app.menu() else {
         return Ok(());
     };
+    apply_titles(&menu, titles)
+}
+
+/// `retitle`'s loop, over an already-built menu (the page's call, or `menu` applying what it kept waiting).
+#[cfg(target_os = "macos")]
+fn apply_titles<R: Runtime>(
+    menu: &tauri::menu::Menu<R>,
+    titles: &std::collections::HashMap<String, String>,
+) -> tauri::Result<()> {
+    use tauri::menu::MenuItemKind;
     let submenus = menu.items()?;
     for (key, at, item) in TITLES {
         let Some(title) = titles.get(*key).and_then(|title| menu_title(title)) else {
@@ -254,6 +274,16 @@ pub fn menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R
             &Submenu::with_id_and_items(app, HELP_SUBMENU_ID, "Help", true, &[])?,
         ],
     )
+    // The page's call can race this (a relaunch: `retitle` runs while the window, and this menu, are still being
+    // built, `app.menu()` answering `None` for it): apply whatever `retitle` kept waiting, so the menu starts
+    // retitled instead of needing a second, later call that never comes (the page itself fires only once, unless the
+    // language changes again).
+    .and_then(|menu| {
+        if let Some(titles) = PENDING_TITLES.lock().unwrap().clone() {
+            apply_titles(&menu, &titles)?;
+        }
+        Ok(menu)
+    })
 }
 
 #[cfg(test)]
@@ -337,6 +367,48 @@ mod tests {
                 .filter(|(key, _, _)| *key == "closeWindow")
                 .count(),
             2
+        );
+    }
+
+    /// `PENDING_TITLES` is one static for the whole test binary (as the real app's menu is one per process): this
+    /// lock is held for as long as a test touches it, so running in parallel with other tests in this module
+    /// (cargo test's default) never has one racing another's `PENDING_TITLES` write.
+    #[cfg(target_os = "macos")]
+    static PENDING_TITLES_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// ghostly-agents#9177: a relaunch (`keepData`) starts with the profile's language already known, so the page
+    /// calls `set_menu_titles` once, very early — possibly before `app_window::menu` (the builder's `.menu()`
+    /// callback, called once during `Builder::build`) has run, same as this test's fresh app, which never calls
+    /// `.menu(...)` at all and so never gets a real menu installed (`mock_builder` keeps `app.menu()` `None`,
+    /// `enable_macos_default_menu(false)`). Before the fix, `retitle` on a `None` menu silently returned `Ok(())`
+    /// with nothing kept anywhere: a title the page sent before the menu existed was simply lost, with no later
+    /// call ever coming to resend it (the page's own effect fires once per language, and the language never
+    /// changes again after a relaunch that already starts in it) — the exact shape of the flake
+    /// e2e/desktop-macos/menu-language.spec.ts:77 saw once on CI (menu-language.spec.ts:59's "opened again" step).
+    /// Does NOT build or install a real menu (no `Submenu`/`MenuItem`/AppKit calls): only `PENDING_TITLES`, which
+    /// `menu` reads once it does build one, is observed here, to stay safe without a GUI runloop in `cargo test`.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_title_sent_before_the_menu_exists_is_kept_not_lost() {
+        let _serial = PENDING_TITLES_TEST_LOCK.lock().unwrap();
+        *PENDING_TITLES.lock().unwrap() = None;
+
+        let app = mock_builder()
+            .build(mock_context(noop_assets()))
+            .expect("app");
+        assert!(
+            app.menu().is_none(),
+            "mock_builder installs no menu by default"
+        );
+
+        let mut titles = std::collections::HashMap::new();
+        titles.insert("settings".to_string(), "Ajustes…".to_string());
+        retitle(app.handle(), &titles).expect("Ok: queued for the menu to pick up, not an error");
+
+        assert_eq!(
+            PENDING_TITLES.lock().unwrap().as_ref(),
+            Some(&titles),
+            "a title sent before the menu exists must be kept for it, not dropped on the floor"
         );
     }
 }
