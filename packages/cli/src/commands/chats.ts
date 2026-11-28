@@ -1,7 +1,7 @@
 import { CliError } from "../errors";
 import type { OptionSpec } from "../args";
 import { TRANSPORT_NAMES } from "../words";
-import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, reaction, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, typingWords, usageFields, usageOptions, wait } from "./shared";
+import { type Command, chatLabel, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, reaction, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, typingWords, usageFields, usageOptions, wait } from "./shared";
 
 /** `react` and `pin` in a 1:1 chat: until the contact confirmed it, by default without a daemon (the process leaves). */
 const confirmWait: Record<string, OptionSpec> = {
@@ -77,7 +77,7 @@ export const commands: Record<string, Command> = {
     options: { yes: { type: "boolean", description: "Confirm" }, force: { type: "boolean", description: "Remove it even if a message you deleted for everyone has not reached the contact yet" } },
     params: ({ options }, { chat }) => ({ chat, yes: options.yes === true, force: options.force === true }),
   },
-  "chat rename": { method: "chat.rename", usage: "chat rename <chat> [name...]", summary: "Name a chat on this side (empty: the contact's name)", args: ["chat", "name...?"], params: (_, { chat, name }) => ({ chat, name: name ?? "" }) },
+  "chat rename": { method: "chat.rename", usage: "chat rename <chat> [name...]", summary: "Name a chat on this side (empty: the contact's name)", args: ["chat", "name...?"], params: (_, { chat, name }) => ({ chat, name: chatLabel(name, "<name>") ?? "" }) },
   "chat show": { method: "chat.get", usage: "chat show <chat> [--show-secret]", summary: "One chat and its connection (its pending invite code only with --show-secret)", args: ["chat"], options: showInvite, params: ({ options }, { chat }) => ({ chat, ...secret(options) }) },
   "chat transport": { method: "chat.transport", usage: "chat transport <chat> <auto|dht|webrtc|iroh|hyperdht>", summary: "Choose what carries a chat", args: ["chat", "transport"], words: { transport: Object.keys(TRANSPORT_NAMES) }, params: (_, a) => ({ chat: a.chat, transport: a.transport }) },
   "chat verify": {
@@ -111,12 +111,12 @@ export const commands: Record<string, Command> = {
   "invite create": {
     method: "invite.create", usage: "invite create [--label <name>]", summary: "A new chat's ghostly1 invite and its link",
     options: { label: { type: "string", description: "A name for the chat on this side" } },
-    params: ({ options }) => ({ label: options.label }),
+    params: ({ options }) => ({ label: chatLabel(options.label as string | undefined, "--label") }),
   },
   "invite join": {
     method: "invite.join", usage: "invite join [<invite-or-link> | -] [--label <name>]", summary: "Join a chat from its invite; stdin keeps it out of ps (without a daemon it waits up to 60 s for the inviter)",
     args: ["invite?"], options: { label: { type: "string", description: "A name for the chat on this side" } },
-    params: ({ options }, { invite }) => ({ invite, label: options.label }),
+    params: ({ options }, { invite }) => ({ invite, label: chatLabel(options.label as string | undefined, "--label") }),
   },
   "message delete": {
     method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]] [--purge]",

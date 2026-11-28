@@ -286,6 +286,11 @@ key), which every answer and event carries. What the CLI does when names meet:
 - `group:<ref>` is a group in every command, never a chat: a chat-only command answers it as a group (exit 3,
   `not_found`). `chat rename` and `invite create --label` refuse a name starting with `group:` (exit 1, `bad_request`);
   a chat named so before is named by its id (or its contact's key) and renamed with `ghostly chat rename <id> <name>`.
+- A name with nothing that shows once cleaned as it is stored (spaces only, a zero-width space, only invisible or
+  direction-changing characters) is refused before the profile opens, as a usage error (exit 2) that names the
+  argument or option: the `<name>` of `group create`, `group rename` and `service add`, and `--label` of `invite
+  create|join` and the `<name>` of `chat rename`, where a blank one (spaces, or `""`) stays no label: the name the
+  contact gave itself shows. The socket's methods refuse the same names as `bad_request`.
 - A label you gave a chat wins over an id prefix: a contact can choose how a chat's id begins (yours is made from
   their invite code). A prefix that fits one chat and the name a contact gave another is refused.
 - A whole chat's id (16 characters, as `chat` prints it) is that chat or a label you gave, never a contact's own name
