@@ -414,10 +414,12 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   const roundButton = "w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer";
   // A shared screen lies under the buttons (it fills the window, or the small one): there a button at rest is white on
   // a black chip, as the name row's, and one turned off is white on the danger fill. White on a 10% white tint was
-  // 1.0:1 over a white screen, and the danger red on its own tint 2.0:1.
+  // 1.0:1 over a white screen, and the danger red on its own tint 2.0:1. A red icon on the black chip reads under 2:1
+  // there, so an off one takes Leave's solid fill, with a white ring inside to stay apart from it: in the small window
+  // the two are the same size.
   const overPicture = !!presenter;
   const atRest = overPicture ? "bg-black/70 text-white hover:bg-black/80" : "bg-white/10 text-white hover:bg-white/20";
-  const turnedOff = overPicture ? "bg-danger-fill text-white" : "bg-danger/30 text-danger";
+  const turnedOff = overPicture ? "bg-danger-fill text-white ring-2 ring-inset ring-white" : "bg-danger/30 text-danger";
   // What the admin took from you stays off, its button says so, and the ⓘ beside the controls says until when.
   const held = local.byAdmin;
   const anyHeld = !!held && (held.mic || held.camera || held.screen);
