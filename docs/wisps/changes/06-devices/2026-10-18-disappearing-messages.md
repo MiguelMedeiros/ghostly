@@ -1,0 +1,1 @@
+A design note for disappearing messages, planned for 1.5 and not built: a frozen copy can never sweep, so the releasing device deletes messages under a timer from its copy as the last step of the release, and the handoff carries each message's deadline and first-shown time.
